@@ -1,5 +1,13 @@
 # Autonomous Teacher — M0 验证报告
 
+## 最新状态 — 第二阶段增量（2026-11-13 UTC）
+
+**最新实现 `c155789557e525925435e7f8a8bf573856d80311`：独立235 Python PASS（含89专门E1-02子集，不相加）、8插件PASS、严格构建/独立wheel重建/真实安装CLI与新增结构API脚本PASS。** E1-02离线状态由首轮NOT RUN变为本轮实测PASS；真实模型JSON仍BLOCKED。第三方无KeySDK初始化已尝试但native binding阻塞，只有version/config与失败cleanup等通过；公开预算hooks只是静态可行性，桥未实现。整体仍 **DECISION PENDING / Live BLOCKED**。
+
+新证据：[阶段二manifest](<../artifacts/phase2-integration/manifest.json>) SHA `c512d653f62b6604903890579ea85da48b2fef876f3b087ea96311e7c5c2d94b`；[独立阶段二审计](<REVIEW_PHASE2.md>)及[本轮reviewer原始证据](<../artifacts/reviewer-phase2/manifest.json>)。详见§8。
+
+> **以下§1–7保留首轮d5db491的历史范围、计数和NOT RUN事实，不是把当前新结果倒填到旧执行中。当前增量以本节与§8为准；首轮REVIEW/manifest/原始产物保持原样。**
+
 ## 1. 决策与执行范围
 
 **DECISION PENDING；所有 Live 验收保持 BLOCKED。** 本报告不是 GO、CONDITIONAL GO 或 DSH 技术 NO-GO。已完成并独立复验离线设施；没有执行模型调用，没有注入/读取真实 API Key，没有修改 DSH 上游。
@@ -169,3 +177,46 @@ E3 是正常 API 逻辑隔离；即便将来通过，也不能推导恶意代码
 原始artifact目录被Git忽略，须维护者另行完整保留manifest、输入锁/快照、rootfs/依赖来源、原始日志/产物与摘要；只有文档没有原始证据不算可复现归档。文档入口由foundation后续task9更新，不改变本报告冻结实现结论。
 
 **当前可接受交付：可安装的离线验证设施、真正官方ABI插件的离线证据、Mock配对/持久化/预算组件与有限外部隔离证据。当前不可交付承诺：可安全直接开Live的DSH控制器、DSH选型GO或真实教学效果证明。**
+
+## 8. 第二阶段：E1-02新实现与SDK无Key诊断（独立task13）
+
+### 来源、环境与计数
+
+- 本轮冻结实现 `c155789557e525925435e7f8a8bf573856d80311`，中间E1-02实现为 `c7bfdc1becdc006eb55a7da527c30b3bdd235ace`。二者与首轮 `d5db491...` 分别归档，首轮146+8与当时E1-02 NOT RUN不改写。
+- [新manifest](<../artifacts/phase2-integration/manifest.json>) 自身SHA `c512d653f62b6604903890579ea85da48b2fef876f3b087ea96311e7c5c2d94b`，82项源/输入在工作树/归档/commit一致，20项owner产物摘要一致；审计者独立核验，并保存自己的全新日志/产物。
+- rootfs本轮实际SHA **`25491e45aa3dc54c526db9b9d46d18b31c7840150473e2fdb4d8b882f02fe9c0`**。首次keyless bind自动增加空/probe目录；独立确认其为空且仅排除此目录精确恢复首轮b4ca摘要。不删除/伪造环境，旧摘要不冒充当前实际值。Python/plugin deps与首轮一致。
+- 仍采用无Key禁网nonroot/read-only/cap0/nnp/noexec tmpfs与有界资源的Podman；没有宿主项目执行或生产Gate放行。
+
+| 本轮独立执行 | 结果 | reviewer新证据 |
+|---|---|---|
+| 全unit+integration | **235 PASS、0 skipped、0.88s、exit0**，含OS负向probe | [tests](<../artifacts/reviewer-phase2/tests.stdout.log>) |
+| 专门E1-02 | **89 PASS、0.25s、exit0**；89包含于235，不能与全量相加 | [dedicated](<../artifacts/reviewer-phase2/dedicated_e1_02.stdout.log>) |
+| Ruff / standalone结构probe | All checks passed / 11类无效vector与成功、retry、耗尽断言PASS | [lint](<../artifacts/reviewer-phase2/lint.stdout.log>) / [probe](<../artifacts/reviewer-phase2/probe.stdout.log>) |
+| 插件strict tsc+fixture+official registry | 构建exit0、**8/8 PASS**，不代表模型发起工具调用 | [plugin](<../artifacts/reviewer-phase2/plugin.stdout.log>) |
+| 独立wheel重建 | 容器tmpfs生成，SHA **`89768d4769795a09dbcc9405def464796aec40ee5fc0faac68a756790c2ac8f7`**，与owner新wheel相同 | [build](<../artifacts/reviewer-phase2/build.stdout.log>) |
+| 新wheel真实uv安装 | cwd/work、无source挂载/源码PYTHONPATH；inspect/smoke/paired/report(id+latest)与installed E1Output API/脚本均通过 | [installed](<../artifacts/reviewer-phase2/installed.stdout.log>) / [E1安装证据](<../artifacts/reviewer-phase2/public/e1-02-installed.json>) |
+| 独立补充对抗断言 | strictbool/escaped duplicates/byte-before-parser/safe error/retry/no injection PASS；不是新增pytest计数 | [adversarial](<../artifacts/reviewer-phase2/adversarial.stdout.log>) |
+
+### E1-02当前准确状态
+
+[严格实现](<../src/autoteacher_m0/runtime/structured_output.py>) 与89专门测试不再是只存在的Mock JSON分支：固定skill=`binary_search`，StrictBool拒绝整数1/1.0与字符串，且ready必须true；extra forbid、重复解码键拒绝、仅单个完整JSON、4KiB UTF-8 byte上界、nonstandard constant/坏shape/无效边界拒绝，错误固定INVALID_OUTPUT且不保留输入detail或异常链。独立探针还证明多字节超界在parser前被拒。
+
+本地Mock缺省不retry，只对成功Mock响应的INVALID_OUTPUT允许一次retry；成功不继续、执行/安全/认证/超时错误terminal；fixtures只收tuple字符串，不收任意Runtime/request/record/factory。已独立验证。**此为无模型的结构校验与本地retry，不是SDK/provider重试或付费预算桥。** E1-02 offline PASS-new-increment，获批主渠道真实E1-02仍BLOCKED。
+
+### 第三方SDK无Key生命周期新事实
+
+[task11报告](<SDK_OFFLINE_PROBE.md>) 已完整核读并独立原样重跑probe；[独立raw log](<../artifacts/reviewer-phase2/keyless.stdout.log>) 与[语义摘要](<../artifacts/reviewer-phase2/keyless-semantic.json>) 显示：
+
+- native exe version0.2.2-rc.2/config dump exit0，12项disabled与upload=false合并断言通过；是**该无Key诊断profile的config证据**，不是生产安全registry/实际工具加载PASS。
+- `DeepSeekHarness.start()`确实尝试initialize，但runtime host preparation发生 `No usable native binding found for node-addon-require-builtin-linux-x64-gnu (auto)`，TransportClosedError、runtime1；**初始化BLOCKED**。
+- failed-start _proc清空、线程退出、waitpid无children、幂等close与missing-bin FileNotFoundError负例PASS。正常初始化后graceful shutdown、maxTokens无效握手、实际registry未到达。
+- 外层诊断exit0只表示诊断断言完成；summary仍为 **BLOCKED-initialize-cleanup-PASS**。不能称H1/E1a或真实Session通过。没有run/Session/prompt/model调用，没有改生产Adapter/Gate。
+- attempts压缩为[Object]，根因未区分noexec/EACCES/缺payload/缺依赖/ABI。只读native cache是未验证方向，不以放宽隔离来绕过。
+
+### 预算公开hook增量与仍可离线完成的工程
+
+exact0.2.2-rc.2原始tar/source静态核实 `llm/stream` 确为pre-adapter waterfall，`agent/pre-step`可reject，compaction独立走全局stream。但DeepSeek Files stale-ID retry可在同一stream内再次POST，request-field extension prepare异常只omit而非fail-closed、accept在POST后且吞错。**静态可行性不是已实现的逐计费attempt预算桥**；Python后置notification、RPC/idle timeout也不能替代。
+
+后续仍可在无Key环境推进：独立定位exact native binding blocker并验证不放宽权限的兼容方案；实现显式offline-test-only provider驱动真实SDK/RPC/Session/工具/恢复；实现并确定性测试同scope预算桥的reserve-before-dispatch、拒绝单调性、重试/压缩/Judge/reentry/concurrency/no-usage/crash结算及transport上界。全history/tooloutput text-only闭包尚未实现验证，不能因初始prompt纯文本就认为Files路径已关闭。
+
+新公开Mock仍20×2、synthetic input13,252/output8,532、synthetic$0.030316、API/model调用0，不能把三轮样本或测试重跑相加成真实模型用量。参考 [本轮比较](<../artifacts/reviewer-phase2/public/comparison.md>) 与 [独立审计](<REVIEW_PHASE2.md>)。所有独立授权/可信控制器/真实usage/总watchdog/image runner/私有评估权限/强制Live门槛仍适用，**DECISION PENDING保持不变**。

@@ -1,5 +1,7 @@
 # ADR-001 — DSH Runtime 选型暂缓，保留离线可替换边界
 
+> 第二阶段更新：最新实现`c155789557e525925435e7f8a8bf573856d80311`已独立235 Python（含89专门子集）+8插件及安装CLI回归通过，离线E1-02缺口已补。SDK无Keyinitialize实际尝试仍受native binding阻塞；公开预算hooks仍是静态可行性，桥未实现。**决策继续DECISION PENDING，不解锁Live。** 本文原有下列证据保持首轮d5db491历史，增量见文末与[REVIEW_PHASE2](<REVIEW_PHASE2.md>)。
+
 - 日期：2026-11-13 UTC。
 - 状态：**DECISION PENDING / 待补强制证据**；不是 GO、CONDITIONAL GO 或技术 NO-GO。
 - 规范：[M0 v0.4](<Autonomous_Teacher_M0_v04.md>)；实测报告：[M0_REPORT](<M0_REPORT.md>)；独立审计：[REVIEW](<REVIEW.md>)。
@@ -68,3 +70,15 @@ M0验证的是DSH作为长期运行底座的可行性，不是开发M1教学产�
 5. 在获批primary完整重跑E1–E5必需项，保留原始Trace/账单/失败证据并再次独立审计。只有全部强制项满足才可讨论GO；非关键已验证可补偿限制才可能CONDITIONAL GO；证据充分的不可接受且不可维护修复问题才NO-GO。
 
 没有这些输入，状态保持 **DECISION PENDING**，不得通过修改本ADR或审批Markdown改变执行权限。
+
+## 第二阶段补充 — 不改变选型决策
+
+新冻结实现`c155789557e525925435e7f8a8bf573856d80311`与[新manifest](<../artifacts/phase2-integration/manifest.json>) SHA`c512d653f62b6604903890579ea85da48b2fef876f3b087ea96311e7c5c2d94b`，与首轮d5db491/146+8分开。独立235 Python通过，其中89是专门E1-02子集；插件8、严格构建、独立重建wheel、无源码真安装CLI/API/脚本均通过。StrictBool/fixed skill/extra/duplicate/UTF-8 bytebound/安全错误与最多一次data-only Mock retry已实测，**首轮E1-02 NOT RUN仍是历史，不倒填。**
+
+[第三方SDK报告](<SDK_OFFLINE_PROBE.md>)与独立复跑显示，version/config与失败cleanup/missing-bin负例通过，但initialize因native binding失败BLOCKED，真实registry/正常shutdown/Session仍未到达。outer0不是生命周期通过；生产Adapter和Gate未改变。
+
+公开Cordis pre-adapter `llm/stream` 可作为logical stream预算入口，但Files内部可同stream再POST、field-extension准备异常不fail-closed；预算桥、全history/tooloutput闭包、每attempt上界、外部Live watchdog未实现验证。不能把“Python没有prehook”夸大为无法扩展，也不能把“找到了prehook”夸大成已限制账单。
+
+下一步优先做可离线工程：在相同安全边界定位exact native兼容问题（不擅认noexec根因），验证只读cache等方案；实现显式offline-test-only provider驱动真实SDK/RPC/Session和budget-bridge故障注入。它们即使通过也仍属synthetic，不代替获批primary上的Live强制证据。详见[阶段二审计](<REVIEW_PHASE2.md>)与[当前报告§8](<M0_REPORT.md>)。
+
+rootfs本轮实际摘要25491e45开头，新增空/probe目录的排除证明恢复首轮b4ca；不是当前环境仍与旧整体摘要相同。证据来源与环境演进必须一同保留。本补充不授予人类安全/路由批准，GO/CONDITIONAL GO/NO-GO门槛不变。

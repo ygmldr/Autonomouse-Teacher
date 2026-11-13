@@ -4,12 +4,13 @@
 
 ## 最终文档入口
 
-- [首轮历史 M0 验证报告](<docs/M0_REPORT.md>)：E1–E5矩阵；其冻结版本E1-02专门校验为NOT RUN，不回填后续成果，Live仍BLOCKED。
-- [独立审计](<docs/REVIEW.md>)：来源/产物哈希核对、非实现者独立隔离复验及修复闭环。
+- [当前 M0 验证报告](<docs/M0_REPORT.md>)：顶部与§8为第二阶段增量；§1–7保留首轮E1-02 NOT RUN历史，不回填后续成果，Live仍BLOCKED。
+- [最新第二阶段独立审计](<docs/REVIEW_PHASE2.md>)：235项全量（含89项专门子集）、插件8项、独立重建wheel与真安装CLI/API/脚本均通过；SDK初始化仍BLOCKED。
+- [首轮历史独立审计](<docs/REVIEW.md>)：首轮来源/产物哈希与146项离线回归；原文保持不变。
 - [Runtime 决策记录](<docs/ADR-001-runtime.md>)：DECISION PENDING及重新决策条件，不是安全或路由批准。
 - [故障排查](<docs/TROUBLESHOOTING.md>)：已发生的问题、隔离复验与不可绕过的安全边界。
 
-以上证据对应冻结实现 `d5db491bf3299c14b6af98f5cbe952ce56a1a991`；后续文档归档提交与实现SHA分开，不冒充新的测试基线。独立授权/受限控制器、Live watchdog与真实usage/逐step记账仍待工程；OpenCode Go第三方API接入仅optional UNVERIFIED。
+首轮历史证据对应 `d5db491bf3299c14b6af98f5cbe952ce56a1a991`；当前第二阶段对应冻结实现 `c155789557e525925435e7f8a8bf573856d80311`。文档归档SHA另记，不替代已测试实现SHA；本次仅补文档入口，不改原始manifest以匹配README的新字节。独立授权/受限控制器、Live watchdog与真实usage/逐step记账仍待工程；OpenCode Go第三方API接入仅optional UNVERIFIED。
 
 ## 第二阶段增量（与首轮历史分开）
 
@@ -18,7 +19,7 @@
 - [官方SDK独立无模型探针/预算hook调查](<docs/SDK_OFFLINE_PROBE.md>)：真实initialize被native binding故障阻塞；只有配置/版本和失败清理、missing-binary负向用例通过，外层退出0不是H1通过。公开pre-adapter hook仅静态可行，内部files.retry额外POST等缺口尚未实现解决。
 - [第二阶段安装验收脚本](<scripts/verify_installed_phase2.py>)在无源码挂载的wheel-only容器中扩展原四类CLI检查，另验包内结构化API和[专用脚本](<scripts/e1_json_probe.py>)；只可在既有无Key禁网边界中执行。
 
-第二阶段完整回归以新的冻结SHA与独立phase2 manifest的实际输出计数，不预填全量数目；首轮报告/manifest与task10原始证据保持原样。真实模型JSON、生产Live、P03、DSH恢复和预算桥仍未通过。
+第二阶段[冻结证据](<artifacts/phase2-integration/manifest.json>)与[独立审计](<docs/REVIEW_PHASE2.md>)实测 **235项Python全量通过，含89项E1-02专门子集（不能相加）**；插件8项、严格构建、独立wheel重建与无源码真安装CLI/API/专用脚本通过。SDK实际initialize仍native binding BLOCKED，仅失败cleanup/missing-bin等通过；预算hooks仅静态调查，不是已实现桥。首轮历史章节/manifest与task10原始证据保留。真实模型JSON、生产Live、P03、DSH恢复和预算桥仍未通过。
 
 ## 安全边界
 

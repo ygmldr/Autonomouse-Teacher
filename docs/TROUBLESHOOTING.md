@@ -1,6 +1,6 @@
 # M0 故障排查与安全复验
 
-适用冻结实现：`d5db491bf3299c14b6af98f5cbe952ce56a1a991`。当前 **DECISION PENDING，Live BLOCKED**。事实/命令来源：[Runbook](<M0_RUNBOOK.md>)、[威胁模型](<THREAT_MODEL.md>)、[manifest](<../artifacts/integration/manifest.json>)、[独立审计](<REVIEW.md>)。
+首轮历史适用实现：`d5db491bf3299c14b6af98f5cbe952ce56a1a991`；第二阶段当前实现：`c155789557e525925435e7f8a8bf573856d80311`。当前仍 **DECISION PENDING，Live BLOCKED**。下列原有记录保留首轮范围，新增E1-02/SDK诊断/环境差异见文末第二阶段补充。事实/命令来源：[Runbook](<M0_RUNBOOK.md>)、[威胁模型](<THREAT_MODEL.md>)、[首轮manifest](<../artifacts/integration/manifest.json>)、[首轮审计](<REVIEW.md>)、[阶段二审计](<REVIEW_PHASE2.md>)。
 
 ## 先守边界
 
@@ -61,3 +61,22 @@
 必须另外完成独立授权/受保护可信部署、实际安全profile与禁上传、真实SDK与事件/usage映射、每可计费step的持久预算接线/价格和上下文上界、外部watchdog、候选镜像/私有评估权限部署；再由人类对具体SHA/config/命令/route审核，并亲自注入低额度可撤销Key。当前仓库没有一个“设变量即可开Live”的操作。
 
 之后在获批primary完整重跑必需E1–E5并保留真实费用/失败日志，再重新独立审计和讨论选型。OpenRouter/OpenCode Go仍属未依赖optional；后者第三方API研究本轮未做，UNVERIFIED而非NOT_SUPPORTED，不影响本轮离线收尾。
+
+## 第二阶段补充（c155789，历史不倒填）
+
+[新manifest](<../artifacts/phase2-integration/manifest.json>)与[独立raw evidence](<../artifacts/reviewer-phase2/manifest.json>)对应235 Python（含89专门E1-02）+8插件、严格构建/独立wheel重建/无源码真安装CLI与新API/脚本PASS。235与89不能相加，也不能倒改首轮146及E1-02 NOT RUN。当前离线结构校验已实际PASS，真实模型JSON仍BLOCKED。
+
+| 新症状 | 准确处理 | 禁止误读/绕过 |
+|---|---|---|
+| E1Output的ready=1/1.0/字符串/false失败 | 预期：StrictBool后要求is True；skill固定binary_search，extra拒绝。经validate_e1_json导出固定INVALID_OUTPUT | 改成宽松bool或仅Literal[True]放过1；导出原始Pydantic.errors/detail |
+| 相同/转义后的重复JSON键失败 | 预期：解码后键去重，拒绝last-write-wins | json.loads默认覆盖后声称已验证唯一性 |
+| 字符数没到4096但输出被拒 | 上界是UTF-8 bytes；4096含边界，超界在parser前拒绝；不提取fence/修坏JSON | 只数codepoints、取消cap或把坏输入当空对象 |
+| Mock结构retry终止或无第三次 | 默认0，最多1次；只有成功本地Mock响应的INVALID_OUTPUT可重试，security/transport错误terminal，成功不继续 | 注入任意runtime/factory/production record，或当作provider retry/预算接线已完成 |
+| keyless SDK外层exit0，但initialize字段BLOCKED | 诊断脚本0表示清理断言完成；必须读取summary=BLOCKED-initialize-cleanup-PASS和TransportClosedError/nativebinding错误 | 仅凭脚本0宣称H1/正常shutdown/真实registry PASS |
+| native binding No usable native binding found | exact wheel在当前受限环境启动失败，attempts被压为[Object]，需独立定位EACCES/缺payload/依赖/ABI；read-only cache只是未验证方向 | 擅认noexec根因，放开可写可执行mount、root/privileged、换系统发行或宿主执行 |
+| merged-config disabled/upload=false，但缺实际工具清单 | 配置断言已过，startup在observer加载前失败；actual registry未观察 | 把audit插件源码或config dump当实际registry/生产Live安全PASS |
+| rootfs hash从b4ca变25491 | Podman为task11创建空/probe bind目标；当前实际摘要应25491，独立确认空目录并仅排除它恢复旧b4ca，deps未变 | 删除目录强行匹配历史、直接拿旧整体摘要为新执行背书 |
+| SDK证据清单全是FAILED open/read | 检查相对路径清单的base cwd；本轮reviewer初跑错误保留，按artifacts/sdk-probe基目录重跑全部OK | 把open失败混成checksum mismatch或直接跳过验证 |
+| 找到llm/stream prehook，是否可以接Key | 还不可以；它可拦logical stream，Files retry可同stream再POST。field extension异常仅omit，accept后置且吞错；先实现/离线测budget bridge/全history闭包/transport边界 | 用Python后置notification、idle/RPCtimeout、extension throw冒充逐HTTP fail-closed gate |
+
+当前可继续的无Key工作包括exact native兼容定位、显式offline-test-only provider的真实SDK/RPC/Session/工具/恢复，以及预算桥的reserve-before-dispatch/deny/concurrency/retry/compaction/no-usage/crash断言。这些不是等待真实Key才能做的工作，也未因静态源码调查而自动完成。生产LiveGate/Adapter仍硬关闭；[SDK报告](<SDK_OFFLINE_PROBE.md>)与[REVIEW_PHASE2](<REVIEW_PHASE2.md>)区分实际诊断、静态可行性和未实现工程。
