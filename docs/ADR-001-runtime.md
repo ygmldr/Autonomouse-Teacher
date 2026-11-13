@@ -1,6 +1,8 @@
 # ADR-001 — DSH Runtime 选型暂缓，保留离线可替换边界
 
-> 第二阶段更新：最新实现`c155789557e525925435e7f8a8bf573856d80311`已独立235 Python（含89专门子集）+8插件及安装CLI回归通过，离线E1-02缺口已补。SDK无Keyinitialize实际尝试仍受native binding阻塞；公开预算hooks仍是静态可行性，桥未实现。**决策继续DECISION PENDING，不解锁Live。** 本文原有下列证据保持首轮d5db491历史，增量见文末与[REVIEW_PHASE2](<REVIEW_PHASE2.md>)。
+> **第三阶段当前更新：** 实现`5df4f3bdbecdf0683533ef7f0a176513713436cd`独立241 Python（含89子集）+8插件及镜像安装回归PASS；同原binary+精确只读native cache的无preload SDK启动/registered schemas[]/graceful0子集通过，exact本地OCI的OS命令/candidate metadata target通过。**M0仍DECISION PENDING，Live关闭**；未执行Session/模型/生产Adapter/Runner.run E2E或跨机load。下文前两阶段原状态保持历史，第三阶段增量见文末与[REVIEW_PHASE3](<REVIEW_PHASE3.md>)。
+
+> 第二阶段历史更新：最新实现`c155789557e525925435e7f8a8bf573856d80311`已独立235 Python（含89专门子集）+8插件及安装CLI回归通过，离线E1-02缺口已补。SDK无Keyinitialize实际尝试仍受native binding阻塞；公开预算hooks仍是静态可行性，桥未实现。**决策继续DECISION PENDING，不解锁Live。** 本文原有下列证据保持首轮d5db491历史，增量见文末与[REVIEW_PHASE2](<REVIEW_PHASE2.md>)。
 
 - 日期：2026-11-13 UTC。
 - 状态：**DECISION PENDING / 待补强制证据**；不是 GO、CONDITIONAL GO 或技术 NO-GO。
@@ -82,3 +84,15 @@ M0验证的是DSH作为长期运行底座的可行性，不是开发M1教学产�
 下一步优先做可离线工程：在相同安全边界定位exact native兼容问题（不擅认noexec根因），验证只读cache等方案；实现显式offline-test-only provider驱动真实SDK/RPC/Session和budget-bridge故障注入。它们即使通过也仍属synthetic，不代替获批primary上的Live强制证据。详见[阶段二审计](<REVIEW_PHASE2.md>)与[当前报告§8](<M0_REPORT.md>)。
 
 rootfs本轮实际摘要25491e45开头，新增空/probe目录的排除证明恢复首轮b4ca；不是当前环境仍与旧整体摘要相同。证据来源与环境演进必须一同保留。本补充不授予人类安全/路由批准，GO/CONDITIONAL GO/NO-GO门槛不变。
+
+## 第三阶段补充 — 新子集证据成立，决策不变
+
+新实现`5df4f3bdbecdf0683533ef7f0a176513713436cd`与[phase3 manifest](<../artifacts/phase3-integration/manifest.json>) SHA`f4021242729f03ffe8ed86bb783d88192515e03f80ea7185b08d4c910d03df60`单列：非实现者独立241 Python（含89专门子集）、Node8、Ruff、相同89768 wheel重建与无源码真安装CLI/API脚本通过，source生产实现和Gate/Adapter/Runner未改。[REVIEW_PHASE3](<REVIEW_PHASE3.md>)给出全部新raw与精确覆盖。
+
+原1cc executable的SEA四成员与官方loader/native0.1.9 bytes/size/SHA逐项相等后，原loader公开cache配置使用RO40c34匹配payload。无preload、无可写可执行mount、scratch noexec不变下实际initialize-ready/registered schemas[]/graceful0/无效握手cleanup通过。**接受这项keyless startup子集证据，不接受完整H1/生产Adapter/Session/模型/Live通过的外推。** 旧默认无cache配置仍BLOCKED，历史不改写；registry定义列表不是per-agent resolved ToolSet。
+
+本地OCI exact manifest62d/config56db与raw layeraed独立核验；真实候选OS命令与Dockerfile candidate元数据target及无压缩archive bytes通过。**不把command执行当ContainerRunner.run() E2E，不把save/hash当load/跨机qualified pin roundtrip，也不把candidate五条metadata当python-test/plugin-test依赖stage通过。** 共享rootfs25491、独立clonee680、raw layer、image manifest/config分别记录，不因tag或目录名相似合并身份。
+
+公开预算hooks仍是静态可行性：logical stream未必等于HTTP计费attempt，Files retry与field-extension异常omit边界仍在。下一步可离线实现显式offline-test-only provider驱动真实SDK/RPC/Session/工具/恢复、预算桥的预留/拒绝/结算故障注入、受控controller lifecycle及独立OCI接收端验证，不必等真实Key。独立授权/可信凭据部署、真实usage/费用/总watchdog、private评估权限和主渠道完整Live验收仍未完成。
+
+故继续 **DECISION PENDING**；GO/CONDITIONAL GO的强制门槛、禁止Agent自批和既定默认路由不变。新keyless配置不是安全批准或自动放行项。

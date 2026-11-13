@@ -1,6 +1,6 @@
 # M0 故障排查与安全复验
 
-首轮历史适用实现：`d5db491bf3299c14b6af98f5cbe952ce56a1a991`；第二阶段当前实现：`c155789557e525925435e7f8a8bf573856d80311`。当前仍 **DECISION PENDING，Live BLOCKED**。下列原有记录保留首轮范围，新增E1-02/SDK诊断/环境差异见文末第二阶段补充。事实/命令来源：[Runbook](<M0_RUNBOOK.md>)、[威胁模型](<THREAT_MODEL.md>)、[首轮manifest](<../artifacts/integration/manifest.json>)、[首轮审计](<REVIEW.md>)、[阶段二审计](<REVIEW_PHASE2.md>)。
+首轮历史实现：`d5db491bf3299c14b6af98f5cbe952ce56a1a991`；第二阶段历史实现：`c155789557e525925435e7f8a8bf573856d80311`；**第三阶段当前实现：`5df4f3bdbecdf0683533ef7f0a176513713436cd`**。整体仍 **DECISION PENDING，Live BLOCKED**。下文按轮次保留故障事实；新ROnative cache成功配置/localOCI结果与不可外推项见第三阶段补充，不将早期失败改写为从未发生。来源：[Runbook](<M0_RUNBOOK.md>)、[威胁模型](<THREAT_MODEL.md>)、[首轮manifest](<../artifacts/integration/manifest.json>)、[首轮审计](<REVIEW.md>)、[阶段二审计](<REVIEW_PHASE2.md>)、[阶段三审计](<REVIEW_PHASE3.md>)。
 
 ## 先守边界
 
@@ -80,3 +80,23 @@
 | 找到llm/stream prehook，是否可以接Key | 还不可以；它可拦logical stream，Files retry可同stream再POST。field extension异常仅omit，accept后置且吞错；先实现/离线测budget bridge/全history闭包/transport边界 | 用Python后置notification、idle/RPCtimeout、extension throw冒充逐HTTP fail-closed gate |
 
 当前可继续的无Key工作包括exact native兼容定位、显式offline-test-only provider的真实SDK/RPC/Session/工具/恢复，以及预算桥的reserve-before-dispatch/deny/concurrency/retry/compaction/no-usage/crash断言。这些不是等待真实Key才能做的工作，也未因静态源码调查而自动完成。生产LiveGate/Adapter仍硬关闭；[SDK报告](<SDK_OFFLINE_PROBE.md>)与[REVIEW_PHASE2](<REVIEW_PHASE2.md>)区分实际诊断、静态可行性和未实现工程。
+
+## 第三阶段补充（5df4f3b；限定成功配置，不倒填早期失败）
+
+[新manifest](<../artifacts/phase3-integration/manifest.json>)与[独立审计](<REVIEW_PHASE3.md>)：exactimage全量241 PASS（包含89专门子集）、Node8/严格构建/Ruff/wheel/安装CLI PASS。新ROcache配置的第三方SDK启动子集和localOCI OS/candidate metadata target已真实通过，不能再笼统称全部未测；完整H1/Session/模型/Runner.run E2E/跨机load仍未覆盖。
+
+| 新症状或疑问 | 证据约束下的处理 | 禁止混淆 |
+|---|---|---|
+| 原default cache仍No usable native binding | 早期失败保留；新无cachecontrol也失败。task15 formatter展开了具体临时cache路径failed-to-map-segment与独立fallback缺失，新ROcache控制验证该配置兼容 | 把旧BLOCKED擦成PASS，或泛称所有ABI/权限问题都是同一根因 |
+| 准备RO native cache | 先用同1cc SEA binary的public资产核4成员与official0.1.9 bytes/size/SHA相等，再用原loader公开NARB_NATIVE_CACHE_DIR；native必须40c34、295392 bytes、0444与只读mount，保留原integrity校验 | 下载任意同名native、换系统DSH、patch dlopen/模块解析/原hash检查、放开可写可执行mount |
+| matcher在普通Node失败 | matcher需要同锁定SEA executable内public SEA assets，执行exe --version即可；这次只读proof的preload与最终startup分开 | 用rootfs Node22或另一发行读取资产替代exact原binary |
+| 最终probe拒绝NODE_OPTIONS | 正确：无preload控制只允许白名单env，probe自身加入NARB cache配置，scratch noexec不变 | 带诊断preload却把成功称“无preload” |
+| 看到outer0是否startup成功 | 必须同时核initialize PASS/子进程ready、实际SDK_PROBE_TOOL_REGISTRY[] marker、graceful0、线程/child cleanup、真实JsonRpcError无效握手和missing-bin负例 | 仅看退出码或将registered schemas[]当另profile/Session的resolved ToolSet |
+| 本地镜像可以在registry拒绝时使用吗 | 已验证来自显式公开runtime子集的localOCI；执行使用qualified name@**manifest**62d、pull never，config ID56db另记 | 用tag/config ID冒manifest、重新尝试被拒registry/proxy或扩大mount |
+| sharedrootfs/clone/layer哈希不同 | 共享Node/Python树25491、Python-only clone当前树e680、原raw tar/layeraed各是不同对象；空mountpoint元数据不改变已导入image | 仅凭同目录名/同Python版本断言hash一致，删目录强配旧摘要 |
+| 无压缩save保留manifest62d | 本轮独立核index/manifest/config/layer bytes与执行pin一致；但receiving engine尚未load | 宣称已跨机复原原RepoDigest/媒体编码/元数据/行为；普通gzip导出base的新manifest也不能代替pin |
+| candidate Dockerfile target成功 | 只执行5条metadata指令，所有FROM参数用本地pinned base，未跑uv/npm依赖stage | 当成python-test/plugin-test targets都可离线构建 |
+| image OS probe成功 | 手工literal已审engine argv，唯一public ro input，无source/socket/Key，outerlimit后独立ps为空 | 当成ContainerRunner.run()真实subprocess/timeout/cleanup E2E；为补测试host跑未审controller或挂socket |
+| stage.sha256只有dash | 是完整归一化tar stdin流摘要；按记录tar算法重算整树c063，不按普通文件清单-c | 把误用stdin产生的FAILED当源文件损坏，或加exclude隐藏差异 |
+
+本轮的有限实际命令与原始结果在[reviewer-phase3](<../artifacts/reviewer-phase3/manifest.json>)，[native诊断](<SDK_NATIVE_DIAGNOSTIC.md>)和[localOCI报告](<LOCAL_OCI_VALIDATION.md>)保留来源、历史失败与NOT RUN边界。仍可离线继续真实SDK/RPC的显式测试provider/Session/工具/恢复、pre-stream预算桥/transport上界、受控独立controller生命周期、依赖targets与OCI接收端roundtrip。不得因startup或image命令通过便注入Key；P03/可信部署/生产Adapter/真实usage与总watchdog/强制Live依旧未完成。

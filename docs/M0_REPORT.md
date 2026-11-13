@@ -1,12 +1,18 @@
 # Autonomous Teacher — M0 验证报告
 
-## 最新状态 — 第二阶段增量（2026-11-13 UTC）
+## 最新状态 — 第三阶段独立审计（2026-11-13 UTC）
+
+**当前冻结实现 `5df4f3bdbecdf0683533ef7f0a176513713436cd`：独立241 Python PASS（含89专门子集，不相加）、插件8 PASS、Ruff/wheel/无源码真实安装CLI与E1 API脚本PASS。** 同原1cc SDK binary配精确RO40c34 native cache，无preload且scratch noexec不变，已实际initialize-ready、观察registered schemas[]、graceful0及负握手cleanup。exact本地OCI manifest62d/config56db的独立OS命令与candidate元数据target实测通过。**这些是限定新增子集，不是完整H1/Session/模型/Runner.run生命周期或跨机load验证；整体仍DECISION PENDING / Live BLOCKED。**
+
+来源：[第三阶段manifest](<../artifacts/phase3-integration/manifest.json>) SHA `f4021242729f03ffe8ed86bb783d88192515e03f80ea7185b08d4c910d03df60`；[独立REVIEW_PHASE3](<REVIEW_PHASE3.md>)；[reviewer新raw](<../artifacts/reviewer-phase3/manifest.json>)。当前状态详见§9。首轮d5/146、phase2 c155/235及旧无cacheSDK BLOCKED均保留为真实历史，不倒填。
+
+## 第二阶段状态历史（2026-11-13 UTC）
 
 **最新实现 `c155789557e525925435e7f8a8bf573856d80311`：独立235 Python PASS（含89专门E1-02子集，不相加）、8插件PASS、严格构建/独立wheel重建/真实安装CLI与新增结构API脚本PASS。** E1-02离线状态由首轮NOT RUN变为本轮实测PASS；真实模型JSON仍BLOCKED。第三方无KeySDK初始化已尝试但native binding阻塞，只有version/config与失败cleanup等通过；公开预算hooks只是静态可行性，桥未实现。整体仍 **DECISION PENDING / Live BLOCKED**。
 
 新证据：[阶段二manifest](<../artifacts/phase2-integration/manifest.json>) SHA `c512d653f62b6604903890579ea85da48b2fef876f3b087ea96311e7c5c2d94b`；[独立阶段二审计](<REVIEW_PHASE2.md>)及[本轮reviewer原始证据](<../artifacts/reviewer-phase2/manifest.json>)。详见§8。
 
-> **以下§1–7保留首轮d5db491的历史范围、计数和NOT RUN事实，不是把当前新结果倒填到旧执行中。当前增量以本节与§8为准；首轮REVIEW/manifest/原始产物保持原样。**
+> **以下§1–7保留首轮d5db491的历史范围、计数和NOT RUN事实；§8保留第二阶段c155789历史。最新第三阶段状态见§9，不把新结果倒填到旧执行中；首轮/phase2 REVIEW、manifest与原始产物保持原样。**
 
 ## 1. 决策与执行范围
 
@@ -220,3 +226,42 @@ exact0.2.2-rc.2原始tar/source静态核实 `llm/stream` 确为pre-adapter water
 后续仍可在无Key环境推进：独立定位exact native binding blocker并验证不放宽权限的兼容方案；实现显式offline-test-only provider驱动真实SDK/RPC/Session/工具/恢复；实现并确定性测试同scope预算桥的reserve-before-dispatch、拒绝单调性、重试/压缩/Judge/reentry/concurrency/no-usage/crash结算及transport上界。全history/tooloutput text-only闭包尚未实现验证，不能因初始prompt纯文本就认为Files路径已关闭。
 
 新公开Mock仍20×2、synthetic input13,252/output8,532、synthetic$0.030316、API/model调用0，不能把三轮样本或测试重跑相加成真实模型用量。参考 [本轮比较](<../artifacts/reviewer-phase2/public/comparison.md>) 与 [独立审计](<REVIEW_PHASE2.md>)。所有独立授权/可信控制器/真实usage/总watchdog/image runner/私有评估权限/强制Live门槛仍适用，**DECISION PENDING保持不变**。
+
+## 9. 第三阶段 — 精确native只读cache与本地OCI独立验收
+
+### 新基线与实际覆盖
+
+本轮实现 **`5df4f3bdbecdf0683533ef7f0a176513713436cd`**；[manifest](<../artifacts/phase3-integration/manifest.json>) SHA `f4021242729f03ffe8ed86bb783d88192515e03f80ea7185b08d4c910d03df60`。84项源/输入三方逐文件匹配，31项owner产物摘要匹配；Runner/Gate/Adapter与模型代码未变，Git范围内仅6个local-pin测试、Dockerfile状态注释和文档增量。首轮及phase2历史不倒填。
+
+| 独立实际执行 | 结果 | 新raw |
+|---|---|---|
+| exact OCI image中全量Python | **241 passed in1.67s，0 skipped，exit0** | [tests](<../artifacts/reviewer-phase3/tests.stdout.log>) |
+| 专门E1-02 | **89 passed in0.26s**，包含在241中，不相加 | [dedicated](<../artifacts/reviewer-phase3/dedicated_e1_02.stdout.log>) |
+| Ruff/结构脚本/Node插件 | lint和E1 probe断言通过；共享Node rootfs严格构建+官方registry **8/8 PASS** | [lint](<../artifacts/reviewer-phase3/lint.stdout.log>) / [plugin](<../artifacts/reviewer-phase3/plugin.stdout.log>) |
+| wheel/真实安装 | exactimage中tmpfs重建wheel仍SHA **89768d4769795a09dbcc9405def464796aec40ee5fc0faac68a756790c2ac8f7**；无源码挂载、cwd/work的真uv安装后四类CLI、report双selector、E1包API/脚本全过 | [build](<../artifacts/reviewer-phase3/build.stdout.log>) / [installed](<../artifacts/reviewer-phase3/installed.stdout.log>) |
+| SDK exact四成员与新ROcache启动 | 独立SEA匹配4equal+summaryPASS；最终无preload实际ready、registered schemas[]、graceful0、负握手/缺binary清理PASS | [exact proof](<../artifacts/reviewer-phase3/native_proof.stderr.log>) / [SDK语义](<../artifacts/reviewer-phase3/sdk_native-semantic.json>) |
+| 旧无cache差分control | initialize仍BLOCKED/cleanupPASS，历史未改写 | [control](<../artifacts/reviewer-phase3/sdk_unseeded_control.stdout.log>) |
+| exactimage OS负向命令 | 手工审核后literal engine CLI exit0，独立ps查询0/空 | [image OS](<../artifacts/reviewer-phase3/image_os_negative.stdout.log>) |
+| candidate元数据target/OCI save | 本地candidate五条指令重建同manifest/config；另独立无压缩save核manifest/config/layer字节 | [candidate build](<../artifacts/reviewer-phase3/candidate_metadata_build.stdout.log>) / [OCI check](<../artifacts/reviewer-phase3/oci-content-check.log>) |
+
+共享rootfs仍 **25491e45aa3dc54c526db9b9d46d18b31c7840150473e2fdb4d8b882f02fe9c0**、Python deps仍e077、Node deps仍026a；独立Python-only clone当前树为 **e680bbe32f75253b87bd5123c0327272d1c46d80d166125f5fdee04e54579d7f**。二者与原导入raw tar/OCI layer **aed8d7ef3f3c7fbabb601ed99d5e705e39dc1f779c8486f1865e340dfba94641**是不同对象，不能混称同一rootfs身份。native stage整树归一化SHA c063c129475eb14267de957e3cc9eec30f425fe1b44d004a1a977d1b5e665ef3。详情见[阶段三审计](<REVIEW_PHASE3.md>)及[reviewer manifest](<../artifacts/reviewer-phase3/manifest.json>)。
+
+### 新通过的SDK启动子集与仍未通过的H1/E1/E3
+
+仍使用原exe **1cc41d5a8745a5b9d47c8604e44f23eb8af2d8ca02b2afa0be101d5f71be6ea4** / SDK/runtime wheels0.2.2rc2，未换系统DSH。独立在该SEA exe中执行只读matcher，确认loader实现、loader metadata、native metadata与native payload四个成员与官方0.1.9包逐byte一致；native为295392 bytes、SHA **40c34d27d8339e246a8f7415a06152935496cdc06555ea8fce0e052011acc70f**。这不是仅版本相等或整个binary Git build commit已知。
+
+使用原loader公开 `NARB_NATIVE_CACHE_DIR=/probe/native-cache` 指向匹配、0444、只读挂载的payload；保留原hash/ABI校验，无dlopen/模块解析patch，无可写可执行mount。最终成功probe没有NODE_OPTIONS/preload，实际mountinfo保留/tmp与/work noexec。SDK初始化握手ready和真实registered-definition observer的schemas[]已显式断言，正常close原runtime exit0，线程/子进程清理及maxTokens0 JsonRpcError负例通过。早期无cache失败日志不改写；新差分control也仍失败。task15详细mapping-error诊断与本轮exact-cache成功是具体配置增量，不泛推所有ABI/权限问题。
+
+**因此SDK keyless startup/registered-definition/close子集从受阻变为新配置实测PASS；完整H1/E1a、真实模型、Session创建/恢复、per-agent resolved ToolSet、生产Adapter与有凭据部署仍未执行/批准。** schemas[]不证明另一个profile或实际Session的工具权限；sdk-minimal底层danger-full-access标签也未被本次诊断提升为可信。见[SDK_NATIVE_DIAGNOSTIC](<SDK_NATIVE_DIAGNOSTIC.md>)。
+
+### 本地OCI关闭的缺口与NOT RUN边界
+
+真实执行qualified manifest为 **localhost/autoteacher-local-oci@sha256:62d3569ec38e27ed16fa3147515c1c78d993bb7df831cc1fe29811f3fe64667b**，config ID为56db1e2ad5ab29d3f39304d4fc9d0584d90e6bb90ffb657f31f3c5b77f9a7715；不是浮动tag或config ID冒充manifest。base另为64c125.../c83e44...，普通gzip导出base又是不同manifest，不拿来替代执行pin。
+
+独立先读inspect/全部argv/public input与fixture，再literal执行唯一name的无Key候选OS命令：pull never、netnone、非root65534、ro/cap0/nnp、pids32/mem256MiB/CPU1、nofile64/IPCnone、两个16MiB noexec tmpfs、唯一public只读mount、outer20s/engine10s；假Key/跨home/假private标签/controller源不可读、socket不可见、写入/网络受阻与实际cgroup断言通过，独立ps0/空。Dockerfile candidate target只有五条元数据指令，本地pinned base离线build同identity。
+
+- **ContainerRunner.run()实际subprocess/timeout/cleanup E2E仍NOT RUN**；手工engine命令/command DATA不代替controller生命周期，不能为补测host跑未审项目或给候选socket。
+- **offline load/另一engine或跨机原qualified pin往返仍NOT RUN**；独立save/hash只证归档字节同当前manifest，接收端RepoDigest关联/重编码/元数据/行为另需验证。
+- Dockerfile python-test/plugin-test依赖stages仍NOT RUN；本次Node build使用共享rootfs，不是依赖target通过。本次image OS负向probe不代替全部资源攻击/恢复矩阵。
+
+当前还可无Key推进offline-test-only provider下真实SDK/RPC/Session/工具/恢复与预算桥故障注入、受控独立平面下Runner lifecycle、离线依赖target与OCI接收端roundtrip。公开prehook/Files retry/extension omission调查仍是静态结论，未因native ready或image OS通过而实现每billable attempt预算/usage/watchdog。P03独立授权、可信凭据部署、private eval权限与全部强制Live门槛仍缺；**DECISION PENDING保持不变，不是只差Key或批准。**
