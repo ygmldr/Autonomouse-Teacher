@@ -1,0 +1,54 @@
+{
+  "kind": "dependency-acquisition-not-runtime-validation",
+  "source": "https://registry.npmjs.org",
+  "host_project_execution": false,
+  "lifecycle_execution": false,
+  "model_calls": 0,
+  "real_credentials_read": false,
+  "commands": [
+    {
+      "cwd": "plugins/skill-lookup",
+      "argv": "npm install --package-lock-only --ignore-scripts --no-audit --no-fund --registry=https://registry.npmjs.org --cache /tmp/autoteacher-plugin-npm-cache",
+      "exit_code": 0,
+      "stdout": "up to date in 9s"
+    },
+    {
+      "cwd": "plugins/skill-lookup",
+      "argv": "npm ci --ignore-scripts --no-audit --no-fund --registry=https://registry.npmjs.org --cache /tmp/autoteacher-plugin-npm-cache",
+      "exit_code": 0,
+      "stdout": "added 26 packages in 2s"
+    },
+    {
+      "cwd": "plugins/skill-lookup",
+      "argv": "npm install --ignore-scripts --no-audit --no-fund --registry=https://registry.npmjs.org --cache /tmp/autoteacher-plugin-npm-cache",
+      "reason": "explicit official dsh-attachment 0.2.1-rc.2 declaration dependency after genuine strict compilation failure",
+      "exit_code": 0,
+      "stdout": "added 1 package in 2s"
+    }
+  ],
+  "versions": {
+    "node": "22.23.2",
+    "npm": "10.9.8",
+    "pnpm_detected_not_used": "12.14.0",
+    "dsh": "0.2.1-rc.2",
+    "cordis": "4.0.5",
+    "dsh_tools": "0.2.1-rc.2",
+    "typescript": "5.9.3",
+    "node_types": "22.19.0",
+    "upstream_git_commit": null,
+    "upstream_git_commit_reason": "installed npm distribution; official npm metadata publishes no gitHead"
+  },
+  "sha256": {
+    "initial-package-lock-before-explicit-attachment": "fae2c2ab1d30e1021b221e6f00604a042fb101f0e922ac2f80360066e15eca3d",
+    "final-package-lock.json": "8ed939c93d14fecf838a35e0122717b931f5bdb7d55af7023a5cb1ef3d3e1c73",
+    "../../fixtures/skills.json": "6988fc43029688fbe60fa401e7fe460a59441717afc88c7664958299b1835300",
+    "node_modules/@deepseek-ai/dsh-tools/lib/index.js": "1e53932e7c4213ea24a7d87f06960b7a7702cb21f8a5741c97242b4a470a442a",
+    "node_modules/@deepseek-ai/cordis/lib/index.js": "6a9394c0877ff45218818c6e815edd038f8057e1a1deb390a8d43ec81c57691e"
+  },
+  "installed_upstream_module_hashes_match_downloaded_dependencies": true,
+  "notes": [
+    "An initial metadata-only attempt inherited a configured npm mirror; final lock was regenerated explicitly against the official npm registry before ci.",
+    "No hand-authored ABI stubs or replacements are installed.",
+    "Passing acquisition proves neither type compatibility nor runtime behavior."
+  ]
+}

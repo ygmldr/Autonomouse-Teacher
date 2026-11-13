@@ -13,7 +13,7 @@
 - Python **3.11.x**；[项目定义](<pyproject.toml>) 拒绝其他 minor，依赖与哈希见 [锁文件](<uv.lock>)，显式官方 PyPI。
 - SDK `0.2.2rc2` + 同版本 runtime-bin；本机已有 npm DSH `0.2.1-rc.2` 是**另一发行版本**，不冒充 wheel Runtime。
 - SDK 官方源码/元数据已静态核对，安装依赖不等于 H1 验证通过。
-- 基础隔离回归 **34 tests PASS**、scoped Ruff PASS、Mock 3 smoke/Live拒绝断言 PASS、foundation wheel 构建 PASS。都仅在无凭据受限 Podman/CPython3.11.15 内执行。
+- 基础34测试通过；集成预检 **146 tests PASS、全量Ruff PASS、插件严格构建+真实官方注册表8/8 PASS**。完整wheel已在无源码挂载、`cwd=/work`、无源码PYTHONPATH的隔离容器内实际安装，四个CLI命令及包内20例资源验证通过。均为无凭据受限Podman/CPython3.11.15执行；最终冻结回归另见Runbook与原始manifest。
 - 完整证据、版本与已知阻塞见 [Runbook](<docs/M0_RUNBOOK.md>)。由 security 成员提供的隔离操作步骤须先审核再执行。
 
 以下命令**仅在已验证的无凭据隔离环境内**使用；并非宿主操作指令：
@@ -25,12 +25,13 @@ uv run pytest tests/unit -q
 uv run pytest tests/integration -q
 uv run python -m autoteacher_m0.cli inspect-runtime
 uv run python -m autoteacher_m0.cli smoke --mock
-# paired/report 在后续依赖集成任务接入；本阶段显式 BLOCKED
 uv run python -m autoteacher_m0.cli paired --mock
 uv run python -m autoteacher_m0.cli report --experiment latest
 ```
 
-离线测试与 `smoke --mock` 的 PASS 只证明项目 Mock/包装逻辑。**不代表 E1 SDK smoke、E2 真工具、E3 DSH 恢复、Live 配对或完整 E5 PASS。** 实际运行结果另行记录，不把命令存在当成测试通过。
+`paired --mock` 生成20例×两策略的JSON/SQLite/比较报告（12开发+8公开模拟保留，非隐藏集）；`report`读取已有产物而不重跑。只打包公开fixture到wheel的package data。`--budget-usd`为未来获批Live控制器预留参数，不能解锁Live；Mock使用标记为synthetic的固定价目与预算守卫，API账单为零但synthetic费用单列。
+
+离线测试与 `smoke --mock` 的 PASS 只证明项目 Mock/包装逻辑。**不代表 E1 SDK smoke、E2模型真实工具调用、E3 DSH恢复、Live配对或完整E5 PASS。** 插件原生schema不支持非空字符串：空白ID由项目语义校验拒绝，不能冒称原生schema验收通过。插件测试针对DSH0.2.1-rc.2 ABI，尚未在SDK-wheel0.2.2rc2 Runtime装载验证。镜像型candidate runner仍受无镜像/registry权限阻塞；实际OS证据来自独立本地rootfs容器。
 
 ## 公共接口
 

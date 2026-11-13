@@ -1,0 +1,79 @@
+{
+  "date_utc": "2026-11-13",
+  "scope": "genuine-official-sdk-offline-plugin-build-and-registry-tests",
+  "build": "PASS",
+  "tests_passed": 8,
+  "tests_failed": 0,
+  "exit_code": 0,
+  "raw_log": "offline-complete-deps.log",
+  "host_generated_code_execution": false,
+  "model_calls": 0,
+  "real_credentials_read": false,
+  "upstream_modified": false,
+  "abi_stubs": false,
+  "runtime": {
+    "dsh": "0.2.1-rc.2",
+    "cordis": "4.0.5",
+    "dsh_tools": "0.2.1-rc.2",
+    "node": "22.23.2",
+    "typescript": "5.9.3",
+    "skipLibCheck": false
+  },
+  "isolation": {
+    "engine": "Podman 4.9.3 --rootfs (public local runtime; no pulled image)",
+    "network": "none",
+    "http_proxy": false,
+    "environment_reset": true,
+    "observed_environment_names": ["HOME", "HOSTNAME", "PATH"],
+    "uid": 65534,
+    "root_filesystem_read_only": true,
+    "input_mount_read_only": true,
+    "capabilities": "ALL dropped",
+    "no_new_privileges": true,
+    "memory_max_bytes_observed": 1073741824,
+    "pids_max_observed": 32,
+    "cpu_max_observed": "100000 100000",
+    "node_compiler_max_old_space_mib": 768,
+    "container_timeout_seconds": 75,
+    "outer_timeout_seconds": 90,
+    "host_write_mounts": [],
+    "writable_container_tmpfs": ["/work (128MiB)", "/tmp (32MiB)"],
+    "notes": "Bounded compiler environment; does not change the candidate runner <=512MiB policy or establish E5 acceptance."
+  },
+  "commands_inside_container": [
+    {"argv": ["/usr/bin/node", "--max-old-space-size=768", "node_modules/typescript/bin/tsc", "-p", "tsconfig.json"], "exit_code": 0},
+    {"argv": ["/usr/bin/node", "scripts/copy-fixture.mjs"], "exit_code": 0},
+    {"argv": ["/usr/bin/node", "--test", "test/plugin.test.mjs"], "exit_code": 0}
+  ],
+  "test_cases": [
+    {"id": "E2-01", "status": "PASS", "assertion": "real Cordis injection, official registry schema and prompt visibility, exact SkillInfo and rendered JSON, tools/result observer"},
+    {"id": "E2-02", "status": "PASS", "assertion": "explicit canonical not-found for arbitrary nonempty unknown IDs including traversal-looking strings"},
+    {"id": "E2-03a", "status": "PASS", "assertion": "official schema rejects missing/wrong-type IDs and normalizes INVALID_ARGS"},
+    {"id": "E2-03b", "status": "PASS-project-layer-only", "assertion": "blank strings pass native wire schema but are rejected by project semantic validator with official ToolArgsError"},
+    {"id": "E2-04a", "status": "PASS", "assertion": "three official fiber restarts with identical results and no duplicate registration"},
+    {"id": "E2-04b", "status": "PASS", "assertion": "two fresh OS processes initialize genuine official registries and return identical fixture"},
+    {"id": "E2-05", "status": "PASS", "assertion": "unload removes get/schema/prompt visibility; dispatch returns UNKNOWN_TOOL; remount registers once"},
+    {"id": "fixture", "status": "PASS", "assertion": "canonical/built digest match; 0444 mode; immutable results; unchanged bytes and snapshot"}
+  ],
+  "history": [
+    {"raw_log": "offline-first.log", "exit_code": 1, "status": "FAIL", "reason": "512MiB container gave Node ~256MiB heap; strict TypeScript compilation exhausted V8 heap; tests not reached"},
+    {"raw_log": "offline-bounded-retry.log", "exit_code": 2, "status": "FAIL", "reason": "official dsh-llm published declarations require dsh-attachment but manifest lists it only in devDependencies; strict tsc TS2307; tests not reached"},
+    {"raw_log": "offline-complete-deps.log", "exit_code": 0, "status": "PASS", "resolution": "explicit official dsh-attachment 0.2.1-rc.2 devDependency; bounded compiler environment; no upstream/stub/skipLibCheck workaround"}
+  ],
+  "sha256": {
+    "src/index.ts": "a618fb029faf7606b64549d6f0ea82259af1a2c5fb2dce27119b7d1b22115346",
+    "package.json": "bea0c71e7484c96ea923e520f3b9276eab0d68753f741122535a6a725d7a26d9",
+    "package-lock.json": "8ed939c93d14fecf838a35e0122717b931f5bdb7d55af7023a5cb1ef3d3e1c73",
+    "test/plugin.test.mjs": "018db8e33653cff9164c37440555b23331b79a1d09a101f504d30f9f28572804",
+    "sandbox/orchestrate.mjs": "f48934cfdd999ea1701bc3062d87cf9227e5a6d616822406b98cb836a410c8ab",
+    "offline-complete-deps.log": "4781b912958559125f44fc0280656e885d6d91d8c77052d8838181dd8dc76b9d",
+    "built/lib/index.js": "521bc0f1126d895de84ebe61fd58c978a5bcae9b4c334f1fd417faee88483b0b",
+    "built/lib/index.d.ts": "4831b65d75146d3bf6e598f5261f2b8eb66d7f335159c62feb9e370914e4150e",
+    "built/lib/skills.json": "6988fc43029688fbe60fa401e7fe460a59441717afc88c7664958299b1835300"
+  },
+  "remaining": [
+    {"status": "UNSUPPORTED-native-schema", "item": "E2-03 native wire nonempty-string constraint; official SDK subset lacks minLength/pattern; maintainer must review acceptance difference"},
+    {"status": "NOT_TESTED", "item": "profile CLI installation/removal and full DSH Runtime restart; offline tests prove registry/fiber/process lifecycle only"},
+    {"status": "BLOCKED", "item": "E1b/E2 Live actual model-originated tool calls: human security approval and live execution not granted"}
+  ]
+}

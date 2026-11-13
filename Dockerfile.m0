@@ -1,0 +1,43 @@
+# Offline test environment only: never inject secrets or COPY the repository.
+# All base arguments MUST be externally verified name@sha256:<digest> references.
+# This file has NOT been built here: registry access is permission-blocked.
+# Use a minimal context containing ONLY these lock/config files; no .env/home.
+ARG PYTHON_IMAGE
+ARG UV_IMAGE
+ARG NODE_IMAGE
+FROM ${UV_IMAGE} AS uv-tool
+FROM ${PYTHON_IMAGE} AS python-test
+COPY --from=uv-tool /uv /usr/local/bin/uv
+ENV UV_PROJECT_ENVIRONMENT=/opt/venv UV_PYTHON_DOWNLOADS=never UV_NO_CACHE=1
+WORKDIR /opt/dependencies
+COPY pyproject.toml uv.lock ./
+# Official dependency tooling only. No project install, sdist build, or test execution.
+RUN uv sync --frozen --no-install-project --no-build --python /usr/local/bin/python3 \
+    && mkdir -p /project /work && chmod 755 /project /work
+ENV PATH=/opt/venv/bin:/usr/local/bin:/usr/bin:/bin \
+    PYTHONPATH=/project/src PYTHONDONTWRITEBYTECODE=1 HOME=/work
+USER 65534:65534
+WORKDIR /project
+ENTRYPOINT ["/opt/venv/bin/python"]
+CMD ["-B", "-m", "pytest", "-p", "no:cacheprovider", "tests/unit", "-q"]
+
+FROM ${NODE_IMAGE} AS plugin-test
+WORKDIR /opt/plugin-dependencies
+COPY plugins/skill-lookup/package.json plugins/skill-lookup/package-lock.json ./
+# Scripts (including generated project lifecycle hooks) may not run during install.
+RUN npm ci --ignore-scripts --no-audit --no-fund \
+    && mkdir -p /project /work && chmod 755 /project /work
+ENV HOME=/work
+USER 65534:65534
+WORKDIR /work
+ENTRYPOINT ["node"]
+# Pass an explicit public build/test orchestration module mounted read-only at /project.
+
+FROM ${PYTHON_IMAGE} AS candidate
+ENV HOME=/work PYTHONDONTWRITEBYTECODE=1
+USER 65534:65534
+WORKDIR /work
+ENTRYPOINT ["python3", "-I", "-B", "/input/exercise.py"]
+# Security controls belong in the external launcher, not image metadata:
+# no network, read-only root, cap-drop ALL, no-new-privileges, user 65534,
+# memory/swap/CPU/PID/time/output limits, no socket/host home/private mounts.

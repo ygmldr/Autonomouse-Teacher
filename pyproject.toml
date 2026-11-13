@@ -29,6 +29,9 @@ at-m0 = "autoteacher_m0.cli:main"
 [tool.hatch.build.targets.wheel]
 packages = ["src/autoteacher_m0"]
 
+[tool.hatch.build.targets.wheel.force-include]
+"fixtures/teacher_cases.jsonl" = "autoteacher_m0/data/teacher_cases.jsonl"
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]

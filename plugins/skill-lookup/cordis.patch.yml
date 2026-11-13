@@ -1,0 +1,4 @@
+# Bundle layer only; this does NOT make sdk-minimal a safe live profile.
+- insert:
+    - id: autoteacher-skill-lookup
+      name: autoteacher-skill-lookup

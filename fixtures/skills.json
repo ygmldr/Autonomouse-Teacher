@@ -1,0 +1,26 @@
+{
+  "source_version": "m0-skills-v1",
+  "skills": [
+    {
+      "id": "binary_search",
+      "title": "Binary Search",
+      "prerequisites": ["ordered_search_space", "monotonicity", "loop_invariants"],
+      "objectives": ["Identify a monotone predicate", "Maintain a valid search interval", "Explain termination and boundary choices"],
+      "source_version": "m0-skills-v1"
+    },
+    {
+      "id": "monotonicity",
+      "title": "Monotonicity of a Feasibility Predicate",
+      "prerequisites": ["boolean_predicates"],
+      "objectives": ["State the domain of a predicate", "Justify that truth changes at most once", "Construct a counterexample to an unjustified binary search"],
+      "source_version": "m0-skills-v1"
+    },
+    {
+      "id": "loop_invariants",
+      "title": "Loop Invariants",
+      "prerequisites": ["boolean_predicates"],
+      "objectives": ["State initialization, preservation and termination arguments", "Check inclusive and exclusive bounds"],
+      "source_version": "m0-skills-v1"
+    }
+  ]
+}

@@ -66,7 +66,7 @@ uv pip install --python 3.11 --target artifacts/foundation/deps --only-binary :a
 - 事件信封 `{type,sequence,data}`；SDK 原始事件先规范化/脱敏。Mock `metadata.mode='mock'`，usage 为 synthetic；仅 Mock 无账单费用可为 0。
 - [ArtifactStore](<../src/autoteacher_m0/storage/artifacts.py>) `save/load`；`sanitize(value,*,sentinels=())`；[RunStore](<../src/autoteacher_m0/storage/schema.py>) SQLite `save/load/close`。文件名/索引拒绝敏感标识，文本过滤已知密钥模式；无法保证检测任意未知秘密，凭据必须从进程环境排除。
 
-CLI 基础交付为 `inspect-runtime` 和 `smoke --mock`；`--live` 所有命令返回 exit 3，且先于任何文件创建/SDK初始化。`paired` / `report` 在 task-1 显式 BLOCKED，由后续依赖 task-5 对接 `experiments.cli.run_paired(*,artifact_dir:Path)->Path` 与 `render_report(*,artifact_dir:Path,experiment:str)->Path`。不提前等待跨模块完成或越权编辑。
+CLI当前已完成task-5跨模块接入：`inspect-runtime`只读包元数据/LiveGate诊断；`smoke --mock`使用基础Mock及synthetic BudgetGuard记账；`paired --mock`对接 `experiments.cli.run_paired(*,artifact_dir:Path)->Path` 生成20×2公开Mock，`report`对接 `render_report(*,artifact_dir:Path,experiment:str)->Path` 只读已有JSON再生报告。`--live`先于文件创建/SDK初始化经LiveGate返回exit3，即便将来gate错误返回仍硬关闭。`--budget-usd`只为未来已批准Live控制器保留，不授予权限；Mock使用固定synthetic预算，不把此参数冒称实际账单约束。
 
 ## 5. 离线执行与结果表
 
@@ -96,7 +96,27 @@ python -m autoteacher_m0.cli smoke --live  # 预期 exit 3 + SECURITY_BLOCKED，
 
 安全成员早期探测 Docker/Podman 不存在；官方 apt 安装 Podman4.9.3 后 pull 受代理 socket permission denied 阻塞，未绕过。随后 security 用仅复制公开系统 runtime 的本地 rootfs 验证 OS 限制，并复制可信 CPython3.11.15 提供测试环境，未复制真实 `/etc`/home/凭据。本任务实际使用：`--network none --http-proxy=false --unsetenv-all --read-only --read-only-tmpfs=false --cap-drop ALL --security-opt no-new-privileges --user 65534:65534 --pids-limit 32 --memory 512m --memory-swap 512m --cpus 1`；仅 `/tmp`32m与`/work`64m可写tmpfs，noexec/nosuid/nodev；Podman内部timeout60s/外部timeout75s。只读mount是显式复制的 foundation公开stage 与hash-pinned第三方deps；构建另只允许一个空产物目录可写。独立容器名 `at-m0-foundation-tests`、`-lint`、`-cli`、`-build`。具体rootfs安全证据由 [威胁模型](<THREAT_MODEL.md>) 独立记录。该环境不授予可信代码身份或 Live 权限；最终跨模块回归另属 task-5。
 
-## 6. 恢复 Live 验证的条件
+## 6. Task-5 全模块集成与冻结复验
+
+全模块owner均明确停写并授权仅显式源码/测试/公开fixture/锁/允许证据/doc清单进入Git。集成者不代改其他owner模块。已完成预检：
+
+| 验证 | 真实预检结果 | 原始证据 |
+|---|---|---|
+| 全部unit+integration（含外部OS probe与4个system tests） | **146 PASS，0.54s，exit0** | [日志](<../artifacts/integration/preflight-tests.log>) |
+| 全快照Ruff | All checks passed，exit0 | [日志](<../artifacts/integration/preflight-lint.log>) |
+| 真实插件严格tsc/只读fixture构建/官方Cordis registry | 三条command exit0，8/8 PASS | [日志](<../artifacts/integration/preflight-plugin.log>) |
+| 完整Python wheel | hatchling exit0；含公开20例package data | [日志](<../artifacts/integration/preflight-build.log>) |
+| 真正wheel安装+安装后entrypoint检查 | uv --no-index/--no-deps实际安装成功；origin=/work/site；inspect/smoke/paired/report latest与ID全部exit0；20cases/40独立runs | [日志](<../artifacts/integration/preflight-installed-retry.log>) |
+
+安装测试容器**不挂source checkout**，cwd=/work，启动PYTHONPATH仅/deps；安装后的子进程PYTHONPATH仅/work/site:/deps。使用真实uv安装而不是直接从zip/source import，验证console entrypoint与包内public fixture。第一轮验证脚本曾错误将rootfs空的/project/src mountpoint当作源码存在，预检exit1保留于 [失败日志](<../artifacts/integration/preflight-installed.log>)；仅修正本任务verifier为检查实际.py/包不存在，重跑成功，未放宽无源码挂载约束。
+
+最终验证必须在**冻结实现提交以后**重跑。实现SHA、Git归档的显式公开源清单/逐文件SHA、整体清单SHA、固定锁/工具/rootfs哈希、完整容器argv、开始/结束UTC、每条退出码与日志、安装后20×2 JSON/SQLite/Markdown产物哈希将记录于外部gitignored integration manifest。容器不挂.git、不继承宿主完整环境；原单模块产物git_sha=UNRECORDED保持原样，新manifest仅关联此次新生成证据，不补造历史来源。最终汇总由独立reviewer依据该manifest审计撰写。
+
+验证脚本为 [verify_installed](<../scripts/verify_installed.py>)；外部只解码四个固定白名单public artifact payload并核验长度/SHA，不在宿主执行生成代码。构建只对一个空独立wheel产物目录开放写mount；测试与安装结果通过stdout取回。Python容器memory512MiB/pids32/cpu1，compiler容器memory1GiB与Node heap768MiB仅为构建需求，不提高candidate runner安全策略。OS probe额外挂security固定public probe input（仅已知宿主假路径，无哨兵内容），不挂真实凭据/私有集。
+
+关键边界：插件ABI固定DSH0.2.1-rc.2，SDK-wheel0.2.2rc2尚未装载插件/验证实际Profile；空白ID只被项目语义验证拒绝，原生schema不支持minLength，E2-03严格验收仍需人类判断。image-based ContainerRunner与Dockerfile构建仍因无镜像/registry权限BLOCKED；真实OS负向测试仅证明已记录local-rootfs配置，不推导其镜像实现已通过。持久BudgetLedger可用不等于SDK隐藏steps均受逐请求约束。Live、人类独立授权P03、真实SDK/Session仍BLOCKED，总体DECISION PENDING。
+
+## 7. 恢复 Live 验证的条件
 
 1. 完成离线隔离回归；固定源码 Git SHA、全部依赖、插件与配置哈希；审核实际工具清单与上传设置。
 2. 实现外部独立授权/受限控制器、账单 worst-case reservation/每步约束、外部 kill watchdog、真实事件 usage/错误分类、隔离日志。

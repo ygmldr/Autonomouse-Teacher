@@ -1,0 +1,5 @@
+ISOLATED_COMMAND ["/usr/bin/node","--max-old-space-size=768","node_modules/typescript/bin/tsc","-p","tsconfig.json"]
+node_modules/@deepseek-ai/dsh-llm/lib/types/content.d.ts(5,101): error TS2307: Cannot find module '@deepseek-ai/dsh-attachment' or its corresponding type declarations.
+node_modules/@deepseek-ai/dsh-llm/lib/types/index.d.ts(15,80): error TS2307: Cannot find module '@deepseek-ai/dsh-attachment' or its corresponding type declarations.
+node_modules/@deepseek-ai/dsh-llm/lib/types/types.d.ts(7,60): error TS2307: Cannot find module '@deepseek-ai/dsh-attachment' or its corresponding type declarations.
+ISOLATED_EXIT 2 SIGNAL none
