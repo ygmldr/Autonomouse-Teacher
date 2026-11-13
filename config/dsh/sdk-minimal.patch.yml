@@ -1,0 +1,5 @@
+# Privacy defense ONLY. This does not disable Shell or establish a sandbox.
+# Verify the actual merged wheel-runtime profile before any future approval.
+- id: session-log-deepseek
+  config:
+    enabled: false

@@ -1,0 +1,15 @@
+# Informational frozen selection, not an authorization switch.
+requested_model: DeepSeek V4.1 Flash
+primary_route:
+  route_id: deepseek-official
+  provider: deepseek-official
+  model: deepseek-flash
+  approval: PENDING_INDEPENDENT_HUMAN_REVIEW
+optional_routes:
+  - route_id: openrouter
+    provider: openrouter
+    model: deepseek/deepseek-v4.1-flash
+    status: NOT_TESTED
+    enabled: false
+automatic_fallback: false
+actual_alias_mapping: UNVERIFIED_LIVE
