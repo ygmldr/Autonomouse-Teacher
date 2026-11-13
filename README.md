@@ -2,6 +2,15 @@
 
 依据 [v0.4 任务书](<docs/Autonomous_Teacher_M0_v04.md>) 的离线优先技术验证设施，不是教学产品。当前总体 **DECISION PENDING**；没有真实模型调用，也没有人类安全/路由批准。
 
+## 最终文档入口
+
+- [M0 验证报告](<docs/M0_REPORT.md>)：E1–E5矩阵、真实覆盖与阻塞；E1-02专门JSON/Pydantic校验为NOT RUN，Live仍BLOCKED。
+- [独立审计](<docs/REVIEW.md>)：来源/产物哈希核对、非实现者独立隔离复验及修复闭环。
+- [Runtime 决策记录](<docs/ADR-001-runtime.md>)：DECISION PENDING及重新决策条件，不是安全或路由批准。
+- [故障排查](<docs/TROUBLESHOOTING.md>)：已发生的问题、隔离复验与不可绕过的安全边界。
+
+以上证据对应冻结实现 `d5db491bf3299c14b6af98f5cbe952ce56a1a991`；后续文档归档提交与实现SHA分开，不冒充新的测试基线。独立授权/受限控制器、Live watchdog与真实usage/逐step记账仍待工程；OpenCode Go第三方API接入仅optional UNVERIFIED。
+
 ## 安全边界
 
 **所有本仓库生成代码仍未受信任。禁止在有凭据的宿主直接运行、import 或 pytest。** 即使是 Mock、lint 或以下 CLI，也只在无凭据独立隔离容器执行。绝不挂载真实 `.env`、个人 home、私有评估源、DSH home 或 Docker socket；不要将仓库根目录整棵挂载给候选。`.gitignore` 不是访问控制。
