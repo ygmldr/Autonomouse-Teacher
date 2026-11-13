@@ -130,7 +130,21 @@ python -m autoteacher_m0.cli smoke --live  # 预期 exit 3 + SECURITY_BLOCKED，
 
 Task12流程：新集成提交冻结后Git archive显式公开源，重新跑全量pytest/Ruff、既有插件严格构建+registry、完整wheel真实安装四类CLI，并在无source mount/cwdwork/仅site+deps PYTHONPATH下验证新包API与独立脚本。新增 [phase2 verifier](<../scripts/verify_installed_phase2.py>)复用原verifier而不改原字节；输出新增一份固定白名单E1-02包验收JSON。测试计数取自实际日志，不预填，也不把task10的89与115相加；SDK初始化调查只作为单独独立有限证据引用，不由此宣称H1/模型或生产Adapter成功。新的独立manifest记录冻结SHA、实际argv/UTC/exit/源与产物hash、当前rootfs/deps及空目录差异证明；旧两轮manifest与原始日志完全保留。之后由task13独立审计/报告增量。
 
-## 8. 恢复 Live 验证的条件
+## 8. 第三阶段：精确原生只读缓存与本地OCI有限验收
+
+前述首轮/第二阶段历史与其manifest不变；最新两个独立交付为 [SDK原生诊断](<SDK_NATIVE_DIAGNOSTIC.md>) 与 [本地OCI验证](<LOCAL_OCI_VALIDATION.md>)。第三阶段另冻新实现SHA和独立phase3 manifest，所有生成代码仍仅无Key禁网隔离执行，生产Gate/Adapter/默认官方模型路由保持原样。
+
+SDK仍是锁定0.2.2rc2 wheel与原二进制SHA `1cc41d5a8745a5b9d47c8604e44f23eb8af2d8ca02b2afa0be101d5f71be6ea4`，没有用系统/其他发行替代。新证据把旧attempts展开为具体noexec临时缓存路径mapping失败；随后从同exe的公开SEA asset读取并与官方0.1.9 loader/native/package metadata四成员逐字节匹配。精确payload SHA `40c34d27d8339e246a8f7415a06152935496cdc06555ea8fce0e052011acc70f`，只读0444，官方 `NARB_NATIVE_CACHE_DIR=/probe/native-cache` 且原loader完整性验证保持。最终无NODE_OPTIONS/preload配置实际ready、真实registered-tool schemas=[]、正常close runtime0、maxTokens0握手拒绝/清理、missingbin负例通过；不调用Session/run/模型。只对应独立受限新配置，不回填旧默认配置失败，不签发完整H1/E1/Session/模型/生产Adapter成功，也不批准Live。
+
+本地OCI从仅公开Python3.11.15与白名单动态库/合成passwd的独立子树导入，**不挂/不改共享rootfs/deps**。执行candidate pin为 `localhost/autoteacher-local-oci@sha256:62d3569ec38e27ed16fa3147515c1c78d993bb7df831cc1fe29811f3fe64667b`，config/content ID为 `56db1e2ad5ab29d3f39304d4fc9d0584d90e6bb90ffb657f31f3c5b77f9a7715`；离线base manifest为 `64c125c83fa76c2f92c9f004aceea2ff4d7aac07f80297668ab7fe0c550110b0`。浮动tag只可供构建发现identity，执行必须严格manifest pin/--pull=never。新增六项测试仅证明既有严格local name@digest与原策略相同、拒tag/configID/坏digest/参数注入，Runner实现不改。
+
+现有 [Dockerfile](<../Dockerfile.m0>) 的candidate target仅5条元数据指令，三FROM参数均明确本地base digest、skip-unused-stages/pullnever/networknone/timestamp0，已有限离线构建；python-test与plugin-test依赖stages没有执行，不能算通过。已有command()在容器内只导出argv DATA后由worker/Lead独立审核、人工调用可信engine，精确image-OS探针exit0且独立ps确认空；**真实ContainerRunner.run的宿主controller进程/timeout/cleanup端到端仍NOT RUN**，不能由mock cleanup或手工image命令冒充。
+
+无压缩OCI save的manifest/config/layer字节hash与执行身份吻合；普通gzip export会产生不同有效manifest，不能混同。**offline load / 跨机器原repository@digest roundtrip NOT RUN**。保存内容相同不证明接收engine会恢复同RepoDigest关联/元数据/执行语义；未来需独立目标、实际loaded身份与重新审过的执行pin，不能拿稳定config ID推导原manifest可迁移。
+
+Task17将从新SHA公开stage实际重跑完整pytest（89为子集，计数以日志为准）、Ruff、真实插件、完整wheel/无源码安装CLI及E1包API/脚本；Python路径可使用上述精确local candidate镜像，Node仍使用既有只读公开Node rootfs，两者分别记录。可在原精确只读配置重放有限SDK ready/close探针与已审image OS/metadata-only build，仍不扩展到Session/provider/模型或真实Runner.run。shared rootfs实际25491e45与deps e07729要实测，独立image/subset/OCI对象身份单列，不混用；所有原始logs、argv、UTC/exit、锁/输入源/产物hash关联独立phase3 manifest。旧history与原始证据不覆盖，之后由task18独立复核。P03/可信控制器/预算桥/真实usage/Live watchdog与完整强制Live门槛仍未完成，总体DECISION PENDING。
+
+## 9. 恢复 Live 验证的条件
 
 1. 完成离线隔离回归；固定源码 Git SHA、全部依赖、插件与配置哈希；审核实际工具清单与上传设置。
 2. 实现外部独立授权/受限控制器、账单 worst-case reservation/每步约束、外部 kill watchdog、真实事件 usage/错误分类、隔离日志。

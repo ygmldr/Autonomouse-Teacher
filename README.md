@@ -21,6 +21,13 @@
 
 第二阶段[冻结证据](<artifacts/phase2-integration/manifest.json>)与[独立审计](<docs/REVIEW_PHASE2.md>)实测 **235项Python全量通过，含89项E1-02专门子集（不能相加）**；插件8项、严格构建、独立wheel重建与无源码真安装CLI/API/专用脚本通过。SDK实际initialize仍native binding BLOCKED，仅失败cleanup/missing-bin等通过；预算hooks仅静态调查，不是已实现桥。首轮历史章节/manifest与task10原始证据保留。真实模型JSON、生产Live、P03、DSH恢复和预算桥仍未通过。
 
+## 第三阶段增量（待本阶段独立复核）
+
+- [精确只读原生缓存诊断](<docs/SDK_NATIVE_DIAGNOSTIC.md>)：相同锁定wheel/原`1cc41d…`二进制，官方SEA四成员逐字节匹配，精确`40c34d…`原生payload经只读`NARB_NATIVE_CACHE_DIR`、无preload，实现独立无KeySDK ready、实际registered schemas `[]`、graceful exit0及错误清理。**只对应这套新配置的有限子集**；旧默认未预置缓存的失败历史不改，H1/Session/模型/生产Adapter与Live仍未验收。
+- [本地离线OCI验证](<docs/LOCAL_OCI_VALIDATION.md>)：既有Runner严格`name@sha256`和安全参数未变；精确`62d356…`镜像下已审command-DATA的OS负向探针与candidate元数据target离线构建有证据。**未执行真实ContainerRunner.run生命周期；python-test/plugin-test依赖target未验；offline load/跨机原pin恢复NOT RUN。** 无压缩archive manifest/config字节与执行身份相同，不等于已完成迁移重放。
+
+本阶段使用独立冻结SHA与新phase3证据重新集成回归；owner局部测试数不预填为集成结果，89项结构化用例仍为全量子集。SDK新配置成功不改生产Gate/模型路由，也不把静态预算hook提升为已实现桥；旧d5/c7/c155证据保留。
+
 ## 安全边界
 
 **所有本仓库生成代码仍未受信任。禁止在有凭据的宿主直接运行、import 或 pytest。** 即使是 Mock、lint 或以下 CLI，也只在无凭据独立隔离容器执行。绝不挂载真实 `.env`、个人 home、私有评估源、DSH home 或 Docker socket；不要将仓库根目录整棵挂载给候选。`.gitignore` 不是访问控制。
@@ -50,7 +57,7 @@ uv run python -m autoteacher_m0.cli report --experiment latest
 
 `paired --mock` 生成20例×两策略的JSON/SQLite/比较报告（12开发+8公开模拟保留，非隐藏集）；`report`读取已有产物而不重跑。只打包公开fixture到wheel的package data。`--budget-usd`为未来获批Live控制器预留参数，不能解锁Live；Mock使用标记为synthetic的固定价目与预算守卫，API账单为零但synthetic费用单列。
 
-离线测试与 `smoke --mock` 的 PASS 只证明项目 Mock/包装逻辑。**不代表 E1 SDK smoke、E2模型真实工具调用、E3 DSH恢复、Live配对或完整E5 PASS。** 插件原生schema不支持非空字符串：空白ID由项目语义校验拒绝，不能冒称原生schema验收通过。插件测试针对DSH0.2.1-rc.2 ABI，尚未在SDK-wheel0.2.2rc2 Runtime装载验证。镜像型candidate runner仍受无镜像/registry权限阻塞；实际OS证据来自独立本地rootfs容器。
+离线测试与 `smoke --mock` 的 PASS 只证明项目 Mock/包装逻辑。**不代表 E1 SDK smoke、E2模型真实工具调用、E3 DSH恢复、Live配对或完整E5 PASS。** 插件原生schema不支持非空字符串：空白ID由项目语义校验拒绝，不能冒称原生schema验收通过。插件测试针对DSH0.2.1-rc.2 ABI，尚未在SDK-wheel0.2.2rc2 Runtime装载验证。原registry权限拒绝不变，但本地离线pinned OCI已补有限image-OS/candidate-target证据；真实Runner.run端到端、依赖targets与archive跨机恢复仍未验证，不能由rootfs或image-command结果外推。
 
 ## 公共接口
 

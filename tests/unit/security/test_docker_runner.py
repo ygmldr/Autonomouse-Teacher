@@ -10,6 +10,26 @@ from autoteacher_m0.security.docker_runner import ContainerRunner, SandboxLimits
 from autoteacher_m0.security.gates import SecurityBlocked
 
 IMAGE = 'docker.io/library/python@sha256:' + 'a' * 64
+LOCAL_IMAGE = 'localhost/autoteacher-local-oci@sha256:' + 'b' * 64
+
+
+def test_local_manifest_digest_uses_unchanged_candidate_boundary(tmp_path):
+    local = ContainerRunner(image=LOCAL_IMAGE, engine='podman').command(
+        stage=tmp_path, name='at-m0-local-manifest-test')
+    existing = ContainerRunner(image=IMAGE, engine='podman').command(
+        stage=tmp_path, name='at-m0-local-manifest-test')
+    assert local[-4] == LOCAL_IMAGE
+    # Only the content-addressed image reference differs; not a flag/timeout/mount.
+    assert local[:-4] == existing[:-4]
+    assert local[-3:] == existing[-3:]
+
+
+@pytest.mark.parametrize('image', ['localhost/autoteacher-local-oci:rootfs',
+    'localhost/autoteacher-local-oci', 'sha256:' + 'b' * 64,
+    'localhost/x@sha256:' + 'B' * 64, 'localhost/x@sha256:' + 'b' * 64 + '--network=host'])
+def test_local_tag_or_raw_config_id_is_not_a_manifest_pin(image):
+    with pytest.raises(ValueError):
+        ContainerRunner(image=image, engine='podman')
 
 
 def test_container_policy_has_no_host_env_or_privilege_inheritance(tmp_path):

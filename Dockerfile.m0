@@ -1,6 +1,8 @@
 # Offline test environment only: never inject secrets or COPY the repository.
 # All base arguments MUST be externally verified name@sha256:<digest> references.
-# This file has NOT been built here: registry access is permission-blocked.
+# Candidate target validated offline from a pinned local public-runtime OCI image;
+# python-test/plugin-test dependency stages are NOT validated (registry blocked).
+# See docs/LOCAL_OCI_VALIDATION.md; no Live authorization is implied.
 # Use a minimal context containing ONLY these lock/config files; no .env/home.
 ARG PYTHON_IMAGE
 ARG UV_IMAGE
