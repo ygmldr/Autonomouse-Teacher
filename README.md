@@ -4,12 +4,21 @@
 
 ## 最终文档入口
 
-- [M0 验证报告](<docs/M0_REPORT.md>)：E1–E5矩阵、真实覆盖与阻塞；E1-02专门JSON/Pydantic校验为NOT RUN，Live仍BLOCKED。
+- [首轮历史 M0 验证报告](<docs/M0_REPORT.md>)：E1–E5矩阵；其冻结版本E1-02专门校验为NOT RUN，不回填后续成果，Live仍BLOCKED。
 - [独立审计](<docs/REVIEW.md>)：来源/产物哈希核对、非实现者独立隔离复验及修复闭环。
 - [Runtime 决策记录](<docs/ADR-001-runtime.md>)：DECISION PENDING及重新决策条件，不是安全或路由批准。
 - [故障排查](<docs/TROUBLESHOOTING.md>)：已发生的问题、隔离复验与不可绕过的安全边界。
 
 以上证据对应冻结实现 `d5db491bf3299c14b6af98f5cbe952ce56a1a991`；后续文档归档提交与实现SHA分开，不冒充新的测试基线。独立授权/受限控制器、Live watchdog与真实usage/逐step记账仍待工程；OpenCode Go第三方API接入仅optional UNVERIFIED。
+
+## 第二阶段增量（与首轮历史分开）
+
+- [专门JSON/Pydantic接口](<src/autoteacher_m0/runtime/structured_output.py>)：严格校验E1-02精确字段/类型、拒绝额外字段；只接受固定内部Mock与响应fixture数据，结构错误至多一次重试，不能注入生产Runtime或解锁Live。
+- task10冻结 `c7bfdc1becdc006eb55a7da527c30b3bdd235ace` 已在无Key隔离中验证 **89项专门用例、115项runtime回归（包含89项，不能相加）**；[独立增量证据](<artifacts/e1-json/manifest.json>)保留新SHA、实际环境与原始输出。
+- [官方SDK独立无模型探针/预算hook调查](<docs/SDK_OFFLINE_PROBE.md>)：真实initialize被native binding故障阻塞；只有配置/版本和失败清理、missing-binary负向用例通过，外层退出0不是H1通过。公开pre-adapter hook仅静态可行，内部files.retry额外POST等缺口尚未实现解决。
+- [第二阶段安装验收脚本](<scripts/verify_installed_phase2.py>)在无源码挂载的wheel-only容器中扩展原四类CLI检查，另验包内结构化API和[专用脚本](<scripts/e1_json_probe.py>)；只可在既有无Key禁网边界中执行。
+
+第二阶段完整回归以新的冻结SHA与独立phase2 manifest的实际输出计数，不预填全量数目；首轮报告/manifest与task10原始证据保持原样。真实模型JSON、生产Live、P03、DSH恢复和预算桥仍未通过。
 
 ## 安全边界
 

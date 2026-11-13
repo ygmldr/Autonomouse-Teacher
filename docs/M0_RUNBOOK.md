@@ -116,7 +116,21 @@ python -m autoteacher_m0.cli smoke --live  # 预期 exit 3 + SECURITY_BLOCKED，
 
 关键边界：插件ABI固定DSH0.2.1-rc.2，SDK-wheel0.2.2rc2尚未装载插件/验证实际Profile；空白ID只被项目语义验证拒绝，原生schema不支持minLength，E2-03严格验收仍需人类判断。image-based ContainerRunner与Dockerfile构建仍因无镜像/registry权限BLOCKED；真实OS负向测试仅证明已记录local-rootfs配置，不推导其镜像实现已通过。持久BudgetLedger可用不等于SDK隐藏steps均受逐请求约束。Live、人类独立授权P03、真实SDK/Session仍BLOCKED，总体DECISION PENDING。
 
-## 7. 恢复 Live 验证的条件
+## 7. 第二阶段增量与环境冻结
+
+首轮实现 `d5db491bf3299c14b6af98f5cbe952ce56a1a991`、首轮文档与 [manifest](<../artifacts/integration/manifest.json>)保持其历史真实性；不把后续结果倒填到首轮NOT RUN。task10新实现 `c7bfdc1becdc006eb55a7da527c30b3bdd235ace` 只新增专门E1-02纯验证/内部固定Mock重试、测试与 [专用探针](<../scripts/e1_json_probe.py>)。已运行的 [task10增量manifest](<../artifacts/e1-json/manifest.json>)：89项专门测试PASS、115项runtime回归PASS（包含89，不能累加），Ruff/专用probe PASS。真实模型E1-02仍BLOCKED。
+
+[结构化输出API](<../src/autoteacher_m0/runtime/structured_output.py>)为 `E1Output` / `validate_e1_json(text)` / `run_e1_mock_validation(*,responses=None,max_retries=0)`：严格额外字段/精确skill/StrictBool后要求true；4096 UTF8字节，拒重复键/NaN/根数组/围栏等；固定错误无raw值/Pydantic detail/exception chain。只接受fixture数据，不接production Runtime/record/callback；最多2attempts且只无效结构可重试，安全/执行失败终止。它不实现provider内部重试，不是生产授权入口。
+
+[task11官方SDK调查](<SDK_OFFLINE_PROBE.md>)在原锁定runtime0.2.2rc2中真正尝试constructor/start/close；native CLI报告0.2.2-rc.2，但embedded metadata0.0.0-dev与build commit未知不可混同。初始化因native binding不可用而BLOCKED，实际root cause（noexec/缺payload/ABI/dependency）未区分；未调用run/Session.run/模型。只有版本/merged配置和failed-start cleanup、missing-binary负向用例PASS；诊断外层exit0绝非initialize成功，实际registry observer亦未到达。
+
+同版本官方npm源码显示全局 `llm/stream` waterfall在adapter前，可静态设计logical-stream预算预留；`agent/pre-step`可拒step，compaction另走stream，same-step retry需另计。**不是已经完成预算桥**：内部 `files.retry`可在一次stream里追加POST；完整history/tool结果text-only allowlist和冻结middleware等条件未实现动态验证；request-field扩展prepare异常会omit而不fail-closed，不能作预算拒绝关口。真实usage/逐HTTP上界/外部watchdog/独立授权仍未解决，生产Adapter/Gate保持原样。
+
+本阶段实际rootfs归一tar SHA为 `25491e45aa3dc54c526db9b9d46d18b31c7840150473e2fdb4d8b882f02fe9c0`，**不同于首轮**。唯一差异是Podman为task11的bind目标自动新增空 `/probe` mode1755目录；只读归档排除唯一 `./probe` 后精确恢复首轮 `b4ca1b4f7279842bae18736a735469a575a7243dec0edabbc4d8e051c5dc68e8`，runtime文件未改；目录保留，不删除来强行匹配旧hash。Python依赖仍 `e07729d7997944417b1c25531749b3e6e5e34aa4248f01dc8f370282082ecb98`。所有owner已停止rootfs相关输入变化，phase2将重新读取摘要并记录实际值，不把“源码未改”误作“rootfs hash未变”。
+
+Task12流程：新集成提交冻结后Git archive显式公开源，重新跑全量pytest/Ruff、既有插件严格构建+registry、完整wheel真实安装四类CLI，并在无source mount/cwdwork/仅site+deps PYTHONPATH下验证新包API与独立脚本。新增 [phase2 verifier](<../scripts/verify_installed_phase2.py>)复用原verifier而不改原字节；输出新增一份固定白名单E1-02包验收JSON。测试计数取自实际日志，不预填，也不把task10的89与115相加；SDK初始化调查只作为单独独立有限证据引用，不由此宣称H1/模型或生产Adapter成功。新的独立manifest记录冻结SHA、实际argv/UTC/exit/源与产物hash、当前rootfs/deps及空目录差异证明；旧两轮manifest与原始日志完全保留。之后由task13独立审计/报告增量。
+
+## 8. 恢复 Live 验证的条件
 
 1. 完成离线隔离回归；固定源码 Git SHA、全部依赖、插件与配置哈希；审核实际工具清单与上传设置。
 2. 实现外部独立授权/受限控制器、账单 worst-case reservation/每步约束、外部 kill watchdog、真实事件 usage/错误分类、隔离日志。
