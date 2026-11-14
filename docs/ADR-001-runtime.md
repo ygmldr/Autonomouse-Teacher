@@ -1,6 +1,8 @@
 # ADR-001 — DSH Runtime 选型暂缓，保留离线可替换边界
 
-> **第四阶段当前更新：** 实现`f674403d12a6b51249b772090b7b004013d4ceb1`新增锁定真实DSH引擎/真实Python SDK/RPC/Session/工具链路 + 显式synthetic `offline-test-only` provider的17用例离线会话证据，以及stdio账本桥148回归；非实现者独立复核全量326、89子集、148重放、插件8、SDK strict rebuild/17用例、wheel安装CLI均在其声明范围内通过。**这些仍是B层synthetic/本地bookkeeping证据，不是模型、E1b/E2 Live、生产Adapter或真实预算guard；task22 `llm/stream`预算middleware未实现未接线。决策不变：DECISION PENDING，Live BLOCKED。** 第四阶段增量见文末与[REVIEW_PHASE4](<REVIEW_PHASE4.md>)。
+> **第五阶段当前更新：** 实现`feb7118f9aff20c681cc651812b30315288080f1`新增公开 Cordis `llm/stream` 最外层 logical-stream 预算预留/结算候选中间件，并以真实锁定 DSH 引擎/真实 Python SDK/RPC/Session/工具链 + 显式 synthetic `offline-test-only` provider/scripted fixture 在隔离内验证（guard 12/12、selftest 18/18、全量326/89/148/插件8/SDK17/wheel安装等独立复核通过）。**它不是 per-HTTP/wire/billable attempt 控制，不是授权/Key 代理/真实账单上限；task22 中间件尚未接入生产 Runtime/真实 provider，Live/P03/watchdog 仍 BLOCKED。** 一项文档声明准确性观察（V1）已由 owner task31 文档纠错关闭（无代码变更、无新 SHA、未重跑 suite），非代码缺陷。决策不变：DECISION PENDING。第五阶段增量见文末与[REVIEW_PHASE5](<REVIEW_PHASE5.md>)。
+
+> **第四阶段当前更新：** 实现`f674403d12a6b51249b772090b7b004013d4ceb1`新增锁定真实DSH引擎/真实Python SDK/RPC/Session/工具链路 + 显式synthetic `offline-test-only` provider的17用例离线会话证据，以及stdio账本桥148回归；非实现者独立复核全量326、89子集、148重放、插件8、SDK strict rebuild/17用例、wheel安装CLI均在其声明范围内通过。**这些仍是B层synthetic/本地bookkeeping证据，不是模型、E1b/E2 Live、生产Adapter或真实预算guard；task22 `llm/stream`预算middleware原为未实现未接线，第五阶段已交付离线候选。决策不变：DECISION PENDING，Live BLOCKED。** 第四阶段增量见文末与[REVIEW_PHASE4](<REVIEW_PHASE4.md>)。
 
 > **第三阶段当前更新：** 实现`5df4f3bdbecdf0683533ef7f0a176513713436cd`独立241 Python（含89子集）+8插件及镜像安装回归PASS；同原binary+精确只读native cache的无preload SDK启动/registered schemas[]/graceful0子集通过，exact本地OCI的OS命令/candidate metadata target通过。**M0仍DECISION PENDING，Live关闭**；未执行Session/模型/生产Adapter/Runner.run E2E或跨机load。下文前两阶段原状态保持历史，第三阶段增量见文末与[REVIEW_PHASE3](<REVIEW_PHASE3.md>)。
 
@@ -110,3 +112,15 @@ rootfs本轮实际摘要25491e45开头，新增空/probe目录的排除证明恢
 **stdio账本桥：** 148回归独立重放通过（132历史+16修复回归，沿用前轮已闭环的持久`known_fee`/`price_json`）；但它是固定scope持久bookkeeping，`dispatch_allowed`只是首次记账，不是授权/Key代理/provider usage认证/真实账单上限。`src/autoteacher_m0`的runtime/Gate/Adapter未导入它，**task22公开`llm/stream`预留/结算middleware未实现未接线**，不能当运行中预算guard。
 
 **故继续 DECISION PENDING，Live硬关闭。** 下一步无Key可做项：task22预算middleware的reserve-before-dispatch/deny/结算/重试/压缩/无usage/崩溃故障注入与独立验证；真实provider usage/逐billable step记账、外部watchdog、P03独立人类授权与主渠道E1–E5 Live验收仍缺。第四阶段通过不解锁LiveGate、不构成安全/路由批准。
+
+## 第五阶段补充 — 预算守卫离线候选证据成立，选型决策不变
+
+新实现`feb7118f9aff20c681cc651812b30315288080f1`（父`ec1128b`）与[phase5 manifest](<../artifacts/phase5-integration/manifest.json>)（SHA`391767d3b073d239fded57299c5149d91130a9e476a53b525f4f22f4e69b646f`）单列：仅新增`plugins/runtime-budget-guard/`、[RUNTIME_BUDGET_GUARD](<RUNTIME_BUDGET_GUARD.md>)与README/runbook增量；`src/`、`tests/`、`config/`、锁、Gate、Adapter、primary 路由均未改。非实现者独立复核：[REVIEW_PHASE5](<REVIEW_PHASE5.md>)与[reviewer-phase5证据](<../artifacts/reviewer-phase5/evidence.sha256>)。
+
+**新增事实（B层 + 本地 bookkeeping）：** 一个真实公开 Cordis 插件在全局`llm/stream` waterfall 最外层、provider dispatch/迭代之前向固定 scope stdio broker 预留；仅`dispatch_allowed=true`进入 provider，`finally`对每个唯一 reservation 结算/fail 一次且不退款。独立隔离重跑：guard 12/12 case、in-process 18/18 selftest、全量326、89子集、148 broker、插件8、SDK17、wheel构建与无源码安装 CLI/API 及 guard strict build 全部通过；deny/config-tamper/broker-unavailable/no-usage/retry 两次 reservation/SIGKILL-restart pending/counts 与日志一致；real_model_calls=0、http_calls=0、无 Key/网络。
+
+**边界（不夸大）：** 守卫只是 logical-stream（pre-adapter）预留，**不是**provider 库内部每次 HTTP/wire/billable attempt 的控制；text-only/拒绝 Files 路径只是关闭 Files 路径的**前提**，不证明底层 transport 无隐藏 retry/二次 POST；broker 是 fixed-scope bookkeeping，`dispatch_allowed`不是人类授权、Key 代理、provider usage 认证或真实账单上限；synthetic usage/cost 是夹具常量，不是真实账单。**task22 中间件仍未接入生产 Runtime/真实 provider；生产 Gate/Adapter/primary 未改，LiveGate 未开。**
+
+**一项观察 V1（低严重度，文档声明准确性；已关闭）：** 文档 §2/§4 原有三处声明强于实际代码/日志（mutation 后“后续流 fail-closed”无全局 latch 且未测；blocked-scope 单调拒绝“含 compaction/retry 新 stream”未测；retry 两次 reservation 仅 session s9 验证、selftest 无该用例）。核心 reserve-before-provider/deny-before-provider 安全性质不受影响。**owner 已于 task31 文档纠错（docs sha256 `1d0b62a2…`、errata `362dedb3…`，无代码变更/无新 SHA/未重跑 suite），三处已收窄且未引入更强 claim，verify2 轻量复核确认 V1 CLOSED（[REVIEW_PHASE5 §6.1](<REVIEW_PHASE5.md>)）。** 另，task22 owner manifest 的 rootfs after/match 字段矛盾已由 task30 errata（`83ec2433…`，正确 before/after 均`25491e45…`）纠正，旧字节未改，仅作观察。
+
+**故继续 DECISION PENDING，Live硬关闭。** 下一步：把候选 middleware 接入受控 runtime 前补齐 transport 隐藏 retry/Files/真实 usage 与逐 billable attempt 上界、compaction/Judge 全生命周期、kill 时序 settle、独立人类授权 P03 与外部 watchdog；这些仍 NOT RUN/BLOCKED。第五阶段通过不解锁 LiveGate、不构成安全/路由批准。

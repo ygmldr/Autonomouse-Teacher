@@ -1,6 +1,6 @@
 # M0 故障排查与安全复验
 
-首轮历史实现：`d5db491bf3299c14b6af98f5cbe952ce56a1a991`；第二阶段历史实现：`c155789557e525925435e7f8a8bf573856d80311`；第三阶段实现：`5df4f3bdbecdf0683533ef7f0a176513713436cd`；**第四阶段当前实现：`f674403d12a6b51249b772090b7b004013d4ceb1`**。整体仍 **DECISION PENDING，Live BLOCKED**。下文按轮次保留故障事实；新ROnative cache成功配置/localOCI结果与不可外推项见第三阶段补充，SDK B层会话/插件/账本桥结果与边界见第四阶段补充，不将早期失败改写为从未发生。来源：[Runbook](<M0_RUNBOOK.md>)、[威胁模型](<THREAT_MODEL.md>)、[首轮manifest](<../artifacts/integration/manifest.json>)、[首轮审计](<REVIEW.md>)、[阶段二审计](<REVIEW_PHASE2.md>)、[阶段三审计](<REVIEW_PHASE3.md>)、[阶段四审计](<REVIEW_PHASE4.md>)。
+首轮历史实现：`d5db491bf3299c14b6af98f5cbe952ce56a1a991`；第二阶段历史实现：`c155789557e525925435e7f8a8bf573856d80311`；第三阶段实现：`5df4f3bdbecdf0683533ef7f0a176513713436cd`；第四阶段实现：`f674403d12a6b51249b772090b7b004013d4ceb1`；**第五阶段当前实现：`feb7118f9aff20c681cc651812b30315288080f1`**。整体仍 **DECISION PENDING，Live BLOCKED**。下文按轮次保留故障事实；新ROnative cache成功配置/localOCI结果与不可外推项见第三阶段补充，SDK B层会话/插件/账本桥结果与边界见第四阶段补充，预算守卫候选与边界见第五阶段补充，不将早期失败改写为从未发生。来源：[Runbook](<M0_RUNBOOK.md>)、[威胁模型](<THREAT_MODEL.md>)、[首轮manifest](<../artifacts/integration/manifest.json>)、[首轮审计](<REVIEW.md>)、[阶段二审计](<REVIEW_PHASE2.md>)、[阶段三审计](<REVIEW_PHASE3.md>)、[阶段四审计](<REVIEW_PHASE4.md>)、[阶段五审计](<REVIEW_PHASE5.md>)。
 
 ## 先守边界
 
@@ -117,3 +117,19 @@
 | 初始`results.jsonl`有exit125 | 是operator tooling失误（嵌套podman argv，容器创建前失败），非项目代码失败；build attempt1已单独保留，4个用例失败尝试日志被成功重跑覆盖（O1观察） | 把exit125当业务断言失败，或删除记录假装从未发生 |
 | wheel构建attempt1权限失败 | 输出目录root-owned 0755导致uid65534写失败；用专用空输出目录chmod1777重跑，不改隔离 | 扩大容器权限/root运行 |
 | task22预算middleware是否已接线 | 未接线：仓库无`plugins/runtime-budget-guard`，runtime/Gate/Adapter不导入broker；broker/fixture不是运行中预算guard | 把148账本重放或SDK fixture当provider调用前预算拦截/真实账单上限 |
+
+## 第五阶段补充（feb7118；预算守卫离线候选，非Live）
+
+[phase5 manifest](<../artifacts/phase5-integration/manifest.json>)（SHA`391767d3…`）与[独立审计](<REVIEW_PHASE5.md>)：真实公开 Cordis 插件在全局`llm/stream`最外层、provider 之前向固定 scope stdio broker 预留，仅`dispatch_allowed=true`进入 provider，`finally`每个唯一 reservation 结算/fail 一次且不退款。独立隔离重跑 guard 12/12 case、in-process 18/18 selftest、全量326/89/148/插件8/SDK17/wheel安装CLI均通过；deny/config-tamper/unavailable/no-usage/retry 两次 reservation/SIGKILL-restart pending 与日志一致；real_model/http=0、无 Key。**它仍是 logical-stream 级，不是每 HTTP/wire/billable attempt 控制；broker 非授权/Key代理/usage认证/账单上限；task22 中间件未接入生产 Runtime/真实 provider；Live/P03/watchdog 仍 BLOCKED，DECISION PENDING。** 一项文档声明准确性观察 V1（非代码缺陷）已由 owner task31 文档纠错关闭（无代码变更、无新 SHA、未重跑 suite，见 [REVIEW_PHASE5 §6.1](<REVIEW_PHASE5.md>)）。
+
+| 新症状或疑问 | 证据约束下的处理 | 禁止混淆 |
+|---|---|---|
+| 守卫生效是否等于真实账单被控制 | 不是：守卫只保证一次 logical `llm/stream` dispatch 前有 reservation；provider 库内部隐藏 retry/Files 二次 POST 未观测/拦截；text-only 只是关闭 Files 路径的前提 | 把 logical-stream 预留当 per-HTTP/per-billable-attempt 上界，或据此声称真实费用可控 |
+| s4 拒绝是否等于 compaction/retry 也被单调拒绝 | 只证明了同一 blocked scope 上重复 normal/conversation stream 在 provider 前被 `BUDGET_EXCEEDED` 拒绝；compaction-after-denial/retry 新 stream 单调时序 NOT VERIFIED（owner manifest 亦列 not_verified）；文档已按任务30/31 errata 收窄为“同一 scope 新 reserve；compaction/retry 未单独验证” | 把 normal stream 单调性外推到 compaction/Judge/retry 全路径 |
+| mutation 检测后后续流是否 fail-closed | 代码只对当前 stream `failed=true`+worst-case settle，**没有**后续 stream 全局 latch；selftest 也未测后续流。核心安全性质仍成立（后续 stream 仍先 reserve，不存在无预留 dispatch）；文档已收窄并明确“全局 latch 未实现/未验证” | 把单流 worst-case 说成全局 deny-all；或忽略文档已声明该未验证边界 |
+| selftest 是否也验证 retry 两次 reservation | 只有 session-level s9（scripted transient provider）验证 2 次 attempt/2 reservations；selftest 18 例无 retry 用例。文档已收窄为“session s9 实测；selftest 无该用例” | 把 selftest 当成 retry 证据，或把 s9 synthetic 当真实 provider retry |
+| guard 构建/运行输入是否可复现 | 审计者独立 git archive stage（121文件，`7bde63cc…`/`c68b3a1b…`）；guard build 日志与 owner 逐字节相同（`92ea7c57…`）、built `index.js 3c184a62…` 一致；guard suite 在 hash 核验的 rbg 冻结树上独立执行，28/28 语义检查通过 | 用旧日志转发现成数字，或修改 owner stage 让 suite pass |
+| task22 原始 manifest 的 rootfs after/match 矛盾 | 旧 manifest 字节未改；task30 `manifest-errata.json`（`83ec2433…`）记录正确 before/after 均`25491e45…`；审计者独立实测本次运行前后 rootfs/deps 均`25491e45…`/`e07729d7…`，`/var`、`/var/tmp`不存在；旧 after`9d1d4e84…`是早期 build attempt 中间态，不作相等证据 | 引用旧 after/match 当 hash 相等证明，或据此否定整份 guard 证据/改写旧 manifest |
+| 安装/账本/wheel 是否重跑 | 是：全量326/89子集/148broker/Ruff/wheel（`07fcb9e5…`）/wheel-only安装CLI/E1 API/插件8/SDK17 均独立重跑；安装 summary 逐字节相同，其余4产物仅随机UUID/时间不同、归一化语义相同 | 预填数字、跨scope相加或把 synthetic usage 当真实账单 |
+| guard suite 的 `real_runtime 7/7/$0.007198` 是什么 | 是 harness 扫描 s1/s2/s3 DB 的结果，含 s11 restart 交叉验证写入 s1 DB 的 1 条 `FAILED $0.00112` 行；文档 §6 会话聚合 `10=7OK+3FAILED/$0.018904` 是排除 s11 的独立正确 scope | 把两者相加或混称同一计数 |
+| Live/P03 是否已被守卫解锁 | 没有任何解锁：无真实 Key/模型/HTTP，生产 Gate/Adapter/primary 未改，task22 中间件未接入生产 Runtime/真实 provider，P03 人类授权与 watchdog 未完成 | 把离线 guard 候选证据当 Live 授权、真实账单能力或 GO 依据 |

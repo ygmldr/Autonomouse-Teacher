@@ -53,7 +53,9 @@ LiveGate/生产路由改动**。
 `invalid-config-fail-closed` 实际验证（provider invocation=0）。
 
 请求不可变性：处理前计算完整 request digest；`next()` 迭代结束后重新计算并比较；不一致
-立即记录 `RBG_IMMUTABILITY_VIOLATION` 并按 worst-case fail 结算、后续流 fail-closed。
+立即记录 `RBG_IMMUTABILITY_VIOLATION` 并把**当前** stream 置为 failed、按 worst-case
+fail 结算该 reservation；当前实现没有跨后续 stream 的全局 latch（全局 fail-closed
+latch 未实现/未验证）。
 legit loop 请求本身 deep-frozen；selftest 用恶意内层 middleware 修改 `maxTokens` 实际
 触发该检测（见 §6）。
 
@@ -94,8 +96,8 @@ legit loop 请求本身 deep-frozen；selftest 用恶意内层 middleware 修改
 - 输入上界：完整 history/system/tools/stop 的 UTF-8 字节数 + 固定 overhead，超过
   `policy.maxInputTokens` 拒绝（broker 侧 max_input_tokens 为第二道上限）。
 - reserve 返回非 `ok/dispatch_allowed` 或 broker 侧 `BUDGET_EXCEEDED`：在 provider
-  之前抛错；scope blocked 后后续 stream（包括 compaction/retry 产生的新 stream）继续被
-  broker 拒绝（单调）。
+  之前抛错；scope blocked 后同一 scope 的新 reserve 会被 broker 拒绝（s4 实测重复
+  normal stream；compaction/retry 产生的新 stream 未单独验证，见 §7）。
 
 **结算映射**
 
@@ -106,8 +108,8 @@ legit loop 请求本身 deep-frozen；selftest 用恶意内层 middleware 修改
   实际值；无 usage、中断、abort、error、transport 不明、缺 finish → `fail`（worst-case：
   broker 按完整 reservation 计费，绝不退款）。
 - 重试：同一 logical step 的 provider retry 会重新进入 waterfall → 每次 dispatch 独立
-  reservation（selftest/session 均验证 2 次 post-attempt reservation，第一次 worst-case、
-  第二次实际结算）。compaction/Judge 若走同一 `llm/stream` 也各自独立预留；compaction
+  reservation（session s9 实测 2 次 post-attempt reservation：第一次 worst-case、
+  第二次实际结算；selftest 无该用例）。compaction/Judge 若走同一 `llm/stream` 也各自独立预留；compaction
   `purpose` 已在真实 Cordis public waterfall 验证（未触发真实 agent-loop compaction，见 §7）。
 
 ## 5. Config（profile 注入，非客户端）
@@ -143,6 +145,9 @@ runtime 二进制 `1cc41d5a…`、native cache `40c34d27…`（0444）、pkg-cac
 源文件 sha256 与 frozen delivery 完全一致；network none、uid 65534、ro root，
 memory/pids/cpu/noexec 与既有 SDK fixture 相同。宿主机未执行项目 Python/pytest/node
 生成代码；TS 仅在 rootfs 容器内编译。
+注：task22 原始 manifest 的 `shared_rootfs_normalized_tar_sha256.after/match` 字段记录有误，
+环境相等性请以 [manifest-errata.json](../artifacts/runtime-budget-guard/manifest-errata.json)
+与 phase5 独立实测为准（本文件实现/断言/边界内容不变）。
 
 **会话级（真实 DSH Runtime/SDK/RPC + 真实 offline fixture + skill_lookup + guard）**：
 

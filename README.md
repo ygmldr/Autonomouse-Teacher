@@ -4,18 +4,19 @@
 
 ## 最终文档入口
 
-- [当前 M0 验证报告](<docs/M0_REPORT.md>)：顶部与§10为第四阶段独立审计增量；§9保留第三阶段历史，§8保留第二阶段历史，§1–7保留首轮E1-02 NOT RUN，不倒填结果，Live仍BLOCKED。
+- [当前 M0 验证报告](<docs/M0_REPORT.md>)：顶部与§11为第五阶段独立审计增量；§10保留第四阶段历史，§9保留第三阶段历史，§8保留第二阶段历史，§1–7保留首轮E1-02 NOT RUN，不倒填结果，Live仍BLOCKED。
 - [第四阶段冻结证据](<artifacts/phase4-integration/manifest.json>)（gitignored外部证据）：真实锁定DSH引擎/真实Python SDK + 显式`offline-test-only`合成provider的17用例SDK离线会话、stdio账本148回归重放、真实插件严格构建与wheel无源码安装CLI/API，均在既有no-Key禁网隔离内执行；实际计数、argv/UTC/exit与产物hash见该manifest（不预填）。
 - [SDK离线会话闭环](<docs/SDK_OFFLINE_SESSIONS.md>)：真实引擎/Session/工具注册与执行链路，但provider是synthetic fixture，**不是**DeepSeek Live模型证据；[stdio账本桥协议](<docs/BUDGET_BROKER.md>)仅是固定scope的bookkeeping，不是授权/Key代理/真实账单上限，task22运行中预算middleware已作为离线候选交付（[预算守卫](<docs/RUNTIME_BUDGET_GUARD.md>)）但仍未接入生产/真实 provider。
-- [最新第四阶段独立审计](<docs/REVIEW_PHASE4.md>)：非实现者在既有no-Key禁网固定digest容器内独立复核，**PASS仅限其声明的离线范围**、无阻断缺陷：全量pytest 326（含89专门子集，不相加）、stdio账本148重放、插件8/8、wheel构建与无源码安装CLI/E1 API、SDK strict rebuild与17用例suite，以及历史证据/manifest hash交叉核对。**不是真实模型/E1b/E2 Live/生产Adapter；broker只是bookkeeping且task22 middleware仅交付离线候选、未接线；DECISION PENDING与Live BLOCKED不变。**
-- [运行时预算守卫（离线 middleware）](<docs/RUNTIME_BUDGET_GUARD.md>)：公开 Cordis `llm/stream` 最外层 logical-stream 预留/结算 middleware，向固定 scope stdio broker bookkeeping；`dispatch_allowed` 非授权/Key 代理/真实账单上限。仅在无 Key 禁网隔离内配合显式 synthetic provider/scripted fixture 验证，**尚未接入生产 Runtime/真实 provider/Live**；第五阶段集成回归的实际计数/argv/UTC/exit/hash 见外部 [phase5 manifest](<artifacts/phase5-integration/manifest.json>)（不预填）。
+- [最新第五阶段独立审计](<docs/REVIEW_PHASE5.md>)：非实现者在固定 digest 无 Key 禁网 OCI 内独立复核，**PASS 仅限其声明的离线范围**、0 代码/隔离/安全阻断缺陷：全量 pytest 326（含89专门子集，不相加）、broker 148、Ruff、wheel 构建与无源码安装 CLI/E1 API、插件8/8、SDK 17用例、guard strict build、guard 12/12 case + in-process 18/18 selftest 均独立重跑通过；宿主 data-only 语义校验 guard 28/28、SDK 25/25 PASS。**guard 仍是 logical-stream（pre-adapter）bookkeeping middleware，不是每 HTTP/wire/billable attempt 控制，也不是授权/Key 代理/真实账单上限；task22 未接入生产 Runtime/真实 provider，Live/P03 BLOCKED、DECISION PENDING 不变。** 低严重度文档声明准确性 V1 已由 task31 文档纠错关闭（无代码变更/无新实现SHA/未重跑 suite），另有 task30 rootfs errata 指向；详见 [REVIEW_PHASE5 §6.1](<docs/REVIEW_PHASE5.md#L131-L152>)。
+- [第四阶段独立审计（历史）](<docs/REVIEW_PHASE4.md>)：非实现者在既有no-Key禁网固定digest容器内独立复核，**PASS仅限其声明的离线范围**、无阻断缺陷：全量pytest 326（含89专门子集，不相加）、stdio账本148重放、插件8/8、wheel构建与无源码安装CLI/E1 API、SDK strict rebuild与17用例suite，以及历史证据/manifest hash交叉核对。**不是真实模型/E1b/E2 Live/生产Adapter；broker只是bookkeeping且task22 middleware仅交付离线候选、未接线；DECISION PENDING与Live BLOCKED不变。**
+- [运行时预算守卫（离线 middleware）](<docs/RUNTIME_BUDGET_GUARD.md>)：公开 Cordis `llm/stream` 最外层 logical-stream 预留/结算 middleware，向固定 scope stdio broker bookkeeping；`dispatch_allowed` 非授权/Key 代理/真实账单上限。仅在无 Key 禁网隔离内配合显式 synthetic provider/scripted fixture 验证，**尚未接入生产 Runtime/真实 provider/Live**；第五阶段集成回归的实际计数/argv/UTC/exit/hash 见外部 [phase5 manifest](<artifacts/phase5-integration/manifest.json>)（不预填）；独立复核见 [REVIEW_PHASE5](<docs/REVIEW_PHASE5.md>)，task22 原 manifest 的 rootfs errata 见 [manifest-errata.json](<artifacts/runtime-budget-guard/manifest-errata.json>)。
 - [第三阶段历史独立审计](<docs/REVIEW_PHASE3.md>)：241项全量（含89项专门子集）、插件8项、安装CLI/API、精确只读缓存下的SDK启动子集及本地OCI有限验证通过。
 - [第二阶段历史独立审计](<docs/REVIEW_PHASE2.md>)：235项全量（含89项子集）；当时默认无cache SDK初始化BLOCKED，历史与原文保留。
 - [首轮历史独立审计](<docs/REVIEW.md>)：首轮来源/产物哈希与146项离线回归；原文保持不变。
 - [Runtime 决策记录](<docs/ADR-001-runtime.md>)：DECISION PENDING及重新决策条件，不是安全或路由批准。
 - [故障排查](<docs/TROUBLESHOOTING.md>)：已发生的问题、隔离复验与不可绕过的安全边界。
 
-首轮历史证据对应 `d5db491bf3299c14b6af98f5cbe952ce56a1a991`，第二阶段对应 `c155789557e525925435e7f8a8bf573856d80311`；第三阶段冻结实现为 `5df4f3bdbecdf0683533ef7f0a176513713436cd`；第四阶段冻结实现为 `f674403d12a6b51249b772090b7b004013d4ceb1`，其确切源/锁/运行环境/产物清单与实际计数见[phase4冻结证据](<artifacts/phase4-integration/manifest.json>)，独立复核见[第四阶段审计](<docs/REVIEW_PHASE4.md>)。文档归档commit SHA另记，不替代已测试实现SHA；本次仅补文档入口，不改原始manifest以匹配README的新字节。独立授权/受限控制器、Live watchdog与真实usage/逐step记账仍待工程；OpenCode Go第三方API接入仅optional UNVERIFIED。
+首轮历史证据对应 `d5db491bf3299c14b6af98f5cbe952ce56a1a991`，第二阶段对应 `c155789557e525925435e7f8a8bf573856d80311`；第三阶段冻结实现为 `5df4f3bdbecdf0683533ef7f0a176513713436cd`；第四阶段冻结实现为 `f674403d12a6b51249b772090b7b004013d4ceb1`，其确切源/锁/运行环境/产物清单与实际计数见[phase4冻结证据](<artifacts/phase4-integration/manifest.json>)，独立复核见[第四阶段审计](<docs/REVIEW_PHASE4.md>)。第五阶段冻结实现为 `feb7118f9aff20c681cc651812b30315288080f1`（父 `ec1128b`；相对父提交仅预算守卫插件+文档，src/tests/config/锁/Gate/Adapter 未改），证据/计数见[phase5证据](<artifacts/phase5-integration/manifest.json>)、独立复核见[第五阶段审计](<docs/REVIEW_PHASE5.md>)；本次文档归档commit SHA另记，仅补最新入口、task30 rootfs errata 指向与 task31 V1 文档收窄（无代码变更/无新实现SHA/未重跑 suite），不替代已测实现SHA，也不改原始manifest以匹配README的新字节。独立授权/受限控制器、Live watchdog与真实usage/逐step记账仍待工程；OpenCode Go第三方API接入仅optional UNVERIFIED。
 
 ## 第二阶段增量（与首轮历史分开）
 

@@ -1,6 +1,12 @@
 # Autonomous Teacher — M0 验证报告
 
-## 最新状态 — 第四阶段独立审计（2026-11-14 UTC）
+## 最新状态 — 第五阶段独立审计（2026-11-14 UTC）
+
+**当前冻结实现 `feb7118f9aff20c681cc651812b30315288080f1`（父 `ec1128b`；仅 9 文件：预算守卫插件 + 文档/README/runbook，`src/`/`tests/`/`config/`/锁/Gate/Adapter diff 为空）：非实现者独立复核确认第五阶段离线候选交付在其声明的范围内成立。** 独立重跑全量 pytest **326 passed**（含 89 专门子集，不相加）、stdio 账本 **148 passed**、Ruff PASS、wheel 构建（SHA `07fcb9e5…` 与 owner 一致）与 wheel-only 无源码安装 CLI/E1 API、真实 Cordis 插件 strict build + **8/8** registry、SDK strict rebuild（6 产物逐字节一致）与 **17 用例 SDK suite**、guard strict build（日志与 owner 逐字节相同）、以及 **guard 12/12 case + in-process 18/18 selftest** 全部通过；宿主 data-only 语义校验 guard **28/28**、SDK **25/25** PASS。**预算守卫是 logical-stream（pre-adapter）预留/结算 middleware，不是 provider 库内部每次 HTTP/wire/billable attempt 的控制；text-only 只是关闭 Files 路径的前提；broker 是 fixed-scope bookkeeping，`dispatch_allowed` 不是授权/Key 代理/provider usage 认证/真实账单上限；task22 中间件仍是离线候选，未接入生产 Runtime/真实 provider。** 一项低严重度**文档声明超出已测证据（V1）**已由 owner task31 文档纠错关闭（无代码变更、无新 SHA、未重跑 suite；见 [REVIEW_PHASE5 §6.1](<REVIEW_PHASE5.md>)；docs sha256 `1d0b62a2…`、errata sha256 `362dedb3…`）；真实模型/E1/E2/E3/E5、P03 人类授权、外部 watchdog、真实 usage/逐 billable step 记账仍 **BLOCKED**，整体 **DECISION PENDING**。
+
+来源：[第五阶段manifest](<../artifacts/phase5-integration/manifest.json>) SHA `391767d3b073d239fded57299c5149d91130a9e476a53b525f4f22f4e69b646f`；[独立 REVIEW_PHASE5](<REVIEW_PHASE5.md>)；[reviewer raw/evidence](<../artifacts/reviewer-phase5/manifest.json>)；[RUNTIME_BUDGET_GUARD](<RUNTIME_BUDGET_GUARD.md>)。当前状态详见 §11。首轮 d5/146、phase2 c155/235、phase3 5df4f3b/241、phase4 f674403/326+SDK17 均保留为真实历史，不倒填。
+
+## 第四阶段状态历史（2026-11-14 UTC）
 
 **当前冻结实现 `f674403d12a6b51249b772090b7b004013d4ceb1`：非实现者独立复核确认第四阶段离线交付在其声明的范围内成立。** 独立重跑全量 pytest **326 passed**（含 89 专门子集，不相加）、stdio 账本 **148 passed**、Ruff PASS、真实 Cordis 插件 strict build + **8/8** registry、wheel 构建（SHA `07fcb9e5…` 与 owner 一致）与 wheel-only 无源码安装 CLI/E1 API、SDK strict rebuild（6 产物逐字节一致）以及 **17 用例 SDK suite**（`sdk_run_calls15 / synthetic_adapter_invocations16 / real_model_calls0 / http_calls0 / resume_pairs3 / dual_home_bidirectional true`）全部通过；owner 声明计数（`326 / 89子集 / 148重放 / 8 / 17`）与日志一致，不同 scope 不相加。**SDK fixture 是真实锁定 DSH 引擎 + 显式 synthetic `offline-test-only` provider，不是模型、不是 E1b/E2 Live、不是生产 Adapter；stdio broker 只是固定 scope 的 bookkeeping，不是授权/Key 代理/真实账单上限，task22 公开 `llm/stream` 预算 middleware 未实现、未接线。** 真实模型/E1/E2/E3/E5、P03 独立人类授权、外部 watchdog 与真实 usage/逐 step 记账仍 **BLOCKED**，整体 **DECISION PENDING**；生产 Gate/Adapter/默认 primary 路由未改。
 
@@ -18,7 +24,7 @@
 
 新证据：[阶段二manifest](<../artifacts/phase2-integration/manifest.json>) SHA `c512d653f62b6604903890579ea85da48b2fef876f3b087ea96311e7c5c2d94b`；[独立阶段二审计](<REVIEW_PHASE2.md>)及[本轮reviewer原始证据](<../artifacts/reviewer-phase2/manifest.json>)。详见§8。
 
-> **以下§1–7保留首轮d5db491的历史范围、计数和NOT RUN事实；§8保留第二阶段c155789历史；§9保留第三阶段5df4f3b历史。最新第四阶段状态见§10。不把新结果倒填到旧执行中；各阶段 REVIEW、manifest与原始产物保持原样。**
+> **以下§1–7保留首轮d5db491的历史范围、计数和NOT RUN事实；§8保留第二阶段c155789历史；§9保留第三阶段5df4f3b历史；§10保留第四阶段f674403历史。最新第五阶段状态见§11。不把新结果倒填到旧执行中；各阶段 REVIEW、manifest与原始产物保持原样。**
 
 ## 1. 决策与执行范围
 
@@ -305,3 +311,39 @@ exact0.2.2-rc.2原始tar/source静态核实 `llm/stream` 确为pre-adapter water
 **未发现阻断性实现缺陷**；第四阶段在其声明范围内通过。观察O1：phase4 `results.jsonl`/`run_records`保留了最初4个用例的 operator tooling 失误（嵌套podman argv，exit125，容器创建前失败）记录，但这4个失败尝试日志随后被成功重跑覆盖（仅build attempt1单独保留）；manifest已如实说明非项目代码失败，建议后续冻结保留失败尝试独立日志。残余风险均为范围性：B层synthetic无真实模型/usage/费用；task22接线、逐HTTP/retry/compaction预算、人类授权、外部watchdog、SDK内部隐藏transport语义、guest tmpfs持久性、跨机OCI恢复与native/pkg cache官方export重放仍NOT IMPLEMENTED/NOT RUN。
 
 **决策不变：DECISION PENDING；所有 Live 保持 BLOCKED；不签发 GO/CONDITIONAL GO，不把 synthetic fixture 当模型证据、不把 broker 当授权或真实账单上限、不启用 LiveGate。** 详见[独立 REVIEW_PHASE4](<REVIEW_PHASE4.md>)与[reviewer证据清单](<../artifacts/reviewer-phase4/evidence.sha256>)。
+
+## 11. 第五阶段 — runtime budget guard 离线候选集成（独立task28，2026-11-14 UTC）
+
+### 基线与独立覆盖
+
+第五阶段实现 **`feb7118f9aff20c681cc651812b30315288080f1`**（父 `ec1128b`），相对父提交仅 9 文件：`plugins/runtime-budget-guard/`（公开 Cordis 插件）、`docs/RUNTIME_BUDGET_GUARD.md` 与 README/runbook 增量；`src/`、`tests/`、`config/`、`Dockerfile.m0`、`pyproject.toml`、`uv.lock`、`scripts/`、`fixtures/` **diff 为空**。非实现者用 `git archive` 独立重建 121 文件公开 stage（tar SHA `7bde63cc…`、归一化 `c68b3a1b…`、inventory 121/121），在既有固定 digest 无 Key 禁网 OCI（`62d356…`，nonroot/只读/cap0/nnp/cgroup 受限）独立重跑：
+
+| 独立重跑（审计者新argv/新日志） | 结果 | 说明 |
+|---|---|---|
+| 全量 pytest `tests/unit tests/integration` | **326 passed in 4.30s，exit0** | 与owner一致，不预填 |
+| 专门E1-02子集 | **89 passed，exit0** | 326子集，不相加 |
+| stdio账本148回归 | **148 passed，exit0** | 独立scope，不相加 |
+| Ruff | **All checks passed!** | — |
+| wheel构建 | exit0；SHA **`07fcb9e5…` 与owner一致** | — |
+| wheel-only无源码安装CLI/E1 API | exit0；安装/CLI/API/脚本markers全过，5/5 payload自校验 | summary逐字节同，其余4产物归一化语义同 |
+| 插件strict build+8 registry | exit0；3 isolated exit0；**TAP 8/8** | built hash=历史冻结值 |
+| SDK strict rebuild | exit0；2×BUILD_EXIT 0、6 BUILT_FILE一致 | 日志与task20逐字节同`cd44b06f…` |
+| SDK 17用例suite | exit0；summary 17/15/16/0/0/3/dual_home true | 25/25宿主语义校验+owner parity PASS |
+| guard strict build | exit0；3 BUILT_FILE一致（index.js `3c184a62…` 等） | 日志与owner逐字节同`92ea7c57…` |
+| guard 12-case suite + 18/18 selftest | exit0；12/12 case、18/18 selftest、10 worker exit0 | summary与owner同；28/28宿主语义校验（本次/phase5/owner日志均PASS） |
+
+交叉核对：phase5 manifest `391767d3…` 与 11 个 argv hash 全部相符；guard owner manifest `05224052…` 未改写，artifact-hashes **42/42**、stage-additions **45/45**、plugin-source **5/5**、guard-built **3/3**（delivered-files 6/7 唯一差异为 post-freeze 文档 errata 指针）；plugin source（git blob `1ccdb658…`）、guard built（`3c184a62…`）、phase4 冻结 stage/sdk-replay/sdk-build input/plugin stage、rootfs `25491e45…`、deps `e07729d7…`、guard node_modules `cab77a60…` 均与记录一致；native `40c34d27…`(0444)、pkg cache 4857/4857；审计者全部运行前后 canonical rootfs/deps 实测不变，`/var`、`/var/tmp` 不存在；运行后容器 exact-name/全局查询为空、image pin 一致、无后台 job。历史四阶段 manifest/证据（含phase4 53/53+42/42、reviewer-phase4 168/168、sdk-fixture 65/65、budget-broker fixed 24/24、broker closure 75/75、reviewer-phase3 83/83）全部校验通过且未改写。
+
+### 预算守卫边界（不可夸大）
+
+- **logical-stream 级，不是每 HTTP/wire/billable attempt**：一次 `ctx.llm.stream` dispatch = 一次 reservation；provider 库内部隐藏 retry/二次 POST 未被观测/拦截；text-only/拒绝 image/file/attachment 只是关闭项目 Files 路径的**前提**。文档与 owner manifest `non_claims/not_verified` 已列出，未越界。
+- **pre-adapter 预留与 deny 前不进入 provider**：`await broker.reserve` 在 `next()` 之前，仅 `dispatch_allowed=true` 继续；s1 trace 为 `RBG_BOOT→RBG_RESERVE→FIXTURE_INVOCATION→RBG_SETTLE`；s4/s5/s6/s7 fixture=0，denied counter 不变。
+- **固定 argv/无 shell/env 白名单/16KiB帧/settle exactly-once/fail-closed**：`spawn(fixed python, ['-B','-m','autoteacher_m0.accounting.broker','--config',fixed], {cwd, env:5项白名单, shell:false})`；broker policy hash 在 spawn 前校验；broker 不可用/漂移/篡改/子进程错误/超时/非法帧 → deny-all 或 unavailable fail-closed；`finally` 每个唯一 reservation 结算一次，无 usage/中断/error/非权威 finish → worst-case `fail` 全额保留且不退款；s8/s9/s10/s11 与 selftest 的 SQLite 行、RESERVE/SETTLE 计数与日志一致。
+- **broker 非授权/非 Key 代理/非 usage 认证/非账单上限**：`dispatch_allowed` 仅首次记账；守卫未给 broker 增加授权/凭据/usage 认证能力；synthetic usage/cost 是夹具常量，`real_model_calls=0,http_calls=0`、无 Key/网络；task22 中间件未接入生产 Runtime/真实 provider，生产 Gate/Adapter/primary 未改。
+
+### 观察、V1 与决策
+
+- **V1（低严重度文档声明准确性，非代码/隔离缺陷；已关闭）**：[RUNTIME_BUDGET_GUARD](<RUNTIME_BUDGET_GUARD.md>) 原有三处声明强于已测证据——§2 mutation 检测后“后续流 fail-closed”（代码只对当前 stream worst-case settle，无全局 latch 且无测试）；§4 blocked-scope 单调拒绝“包括 compaction/retry 新 stream”（实际只测重复 normal stream）；§4 “selftest/session 均验证 2 次 post-attempt reservation”（实际只有 session s9 验证）。核心安全性质仍成立（后续 stream 仍先 reserve，拒绝/不可用时 provider 不进入，不存在无预留 dispatch）。**owner 已于 task31 完成文档纠错（无代码/测试变更、无新 SHA、未重跑 suite）：docs sha256 `1d0b62a2…`、errata `362dedb3…`，三处已收窄为与证据一致的准确表述且未削弱 reserve-before-provider/deny-before-provider；verify2 轻量复核确认 V1 CLOSED（见 [REVIEW_PHASE5 §6.1](<REVIEW_PHASE5.md>)）。**
+- **O1（owner 证据 errata，Lead 已知）**：task22 owner manifest 的 rootfs `after/match` 字段自相矛盾（after `9d1d4e84…` 却 match=true，来自早期 build attempt 后被删除的空 `/var/tmp`）；旧 manifest 字节未改，`manifest-errata.json`（`83ec2433…`）记录正确 before/after 均为 `25491e45…`；第五阶段独立实测确认 canonical rootfs 前后均 `25491e45…`。仅作证据记录准确性观察，不引用旧 after/match，不影响 guard 代码/测试结论。
+- **O2（标注澄清）**：guard harness summary 的 `real_runtime 7/7/$0.007198` 含 s11 restart 交叉验证写入 s1 DB 的 1 条 `FAILED $0.00112` 行；文档 §6 的会话聚合 `10 reservations = 7 OK + 3 FAILED / $0.018904` 是排除 s11 的独立正确 scope，两者不可相加/混称。
+- **决策不变：DECISION PENDING；所有 Live 保持 BLOCKED；不签发 GO/CONDITIONAL GO，不把 logical-stream guard 当 per-HTTP/真实账单上限，不把 synthetic fixture 当模型证据，不启用 LiveGate。** 详见[独立 REVIEW_PHASE5](<REVIEW_PHASE5.md>)与[reviewer证据清单](<../artifacts/reviewer-phase5/evidence.sha256>)。
