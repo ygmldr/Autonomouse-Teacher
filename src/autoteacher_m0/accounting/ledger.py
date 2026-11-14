@@ -11,6 +11,7 @@ from contextlib import contextmanager
 from dataclasses import asdict, replace
 from decimal import Decimal
 from pathlib import Path
+from threading import local
 from uuid import uuid4
 
 from .budget import BudgetExceeded, BudgetLimits, Reservation
@@ -19,7 +20,8 @@ from .usage import Usage, normalize_usage
 
 
 def _json_dataclass(value: object) -> str:
-    return json.dumps(asdict(value), default=str, sort_keys=True, separators=(",", ":"))
+    return json.dumps(asdict(value), default=lambda item: format(item, "f") if isinstance(item, Decimal) else str(item),
+                      sort_keys=True, separators=(",", ":"))
 
 
 class BudgetLedger:
@@ -31,6 +33,7 @@ class BudgetLedger:
             raise ValueError("persistent ledger requires a file")
         self.scope_id = scope_id
         self.limits = limits or BudgetLimits()
+        self._local = local()
         Path(self.path).parent.mkdir(parents=True, exist_ok=True)
         with self._transaction() as database:
             database.executescript("""
@@ -53,23 +56,87 @@ class BudgetLedger:
                                        (scope_id,)).fetchone()
             if current is None:
                 database.execute("INSERT INTO budget_scopes VALUES (?,?,0)", (scope_id, encoded))
-            elif current[0] != encoded:
+            elif BudgetLimits(**json.loads(current[0])) != self.limits:
+                # Legacy policies may have used scientific Decimal strings.
+                # Compare exact numeric policy, not a formatting-only change.
                 raise ValueError("existing budget scope policy differs; cannot silently relax limits")
 
     @contextmanager
     def _transaction(self):
+        """Compose journal + bookkeeping under one durable writer transaction.
+
+        Nested public operations use per-thread SAVEPOINTs, never a second DB
+        connection/commit. Legacy callers keep their original atomic behavior.
+        """
+        parent = getattr(self._local, "database", None)
+        if parent is not None:
+            savepoint = "nested_" + uuid4().hex
+            parent.execute("SAVEPOINT " + savepoint)
+            try:
+                yield parent
+                parent.execute("RELEASE " + savepoint)
+            except BaseException:
+                parent.execute("ROLLBACK TO " + savepoint)
+                parent.execute("RELEASE " + savepoint)
+                raise
+            return
         database = sqlite3.connect(self.path, timeout=30, isolation_level=None)
         database.row_factory = sqlite3.Row
         try:
             database.execute("PRAGMA busy_timeout=30000")
+            database.execute("PRAGMA synchronous=FULL")
             database.execute("BEGIN IMMEDIATE")
+            self._local.database = database
             yield database
             database.commit()
         except BaseException:
             database.rollback()
             raise
         finally:
+            self._local.database = None
             database.close()
+
+    def bind_broker_policy(self, policy_json: str) -> None:
+        """Additive v1 migration; preserve every legacy reservation and counter.
+
+        Only a trusted launcher chooses policy. A DB gets one broker scope and
+        policy for its lifetime; this audit binding is NOT human authorization.
+        """
+        with self._transaction() as database:
+            database.execute("CREATE TABLE IF NOT EXISTS budget_broker_policy ("
+                             "singleton INTEGER PRIMARY KEY CHECK(singleton=1), "
+                             "scope_id TEXT NOT NULL, policy_json TEXT NOT NULL)")
+            database.execute("CREATE TABLE IF NOT EXISTS budget_broker_messages ("
+                             "scope_id TEXT NOT NULL, message_id TEXT NOT NULL, digest TEXT NOT NULL, "
+                             "response_json TEXT NOT NULL, PRIMARY KEY(scope_id,message_id))")
+            current = database.execute("SELECT scope_id,policy_json FROM budget_broker_policy WHERE singleton=1").fetchone()
+            if current is None:
+                scopes = database.execute("SELECT scope_id FROM budget_scopes").fetchall()
+                if any(row[0] != self.scope_id for row in scopes):
+                    raise ValueError("broker requires exactly its fixed scope")
+                database.execute("INSERT INTO budget_broker_policy VALUES (1,?,?)", (self.scope_id, policy_json))
+            elif current[0] != self.scope_id or current[1] != policy_json:
+                raise ValueError("broker startup policy differs from durable policy")
+
+    def journal_once(self, message_id: str, digest: str, operation) -> tuple[dict, bool]:
+        """Atomically commit a trusted in-process operation plus its reply.
+
+        No protocol accepts callbacks. A lost acknowledgement never reruns the
+        operation. Callers MUST suppress dispatch authorization on replay; this
+        method alone cannot guarantee exactly-once external provider execution.
+        """
+        with self._transaction() as database:
+            previous = database.execute("SELECT digest,response_json FROM budget_broker_messages "
+                                        "WHERE scope_id=? AND message_id=?", (self.scope_id, message_id)).fetchone()
+            if previous is not None:
+                if previous[0] != digest:
+                    raise ValueError("idempotency conflict")
+                return json.loads(previous[1]), True
+            response = operation(database)
+            encoded = json.dumps(response, allow_nan=False, sort_keys=True, separators=(",", ":"))
+            database.execute("INSERT INTO budget_broker_messages VALUES (?,?,?,?)",
+                             (self.scope_id, message_id, digest, encoded))
+            return response, False
 
     def _state(self, database: sqlite3.Connection) -> tuple[list[sqlite3.Row], bool]:
         rows = database.execute("SELECT * FROM budget_reservations WHERE scope_id=?", (self.scope_id,)).fetchall()
@@ -117,8 +184,8 @@ class BudgetLedger:
                                       input_tokens, output_tokens, cost, fee, retry)
             database.execute("INSERT INTO budget_reservations VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", (
                 reservation.reservation_id, self.scope_id, task_id, prices.route_id, prices.model,
-                _json_dataclass(prices), input_tokens, output_tokens, str(cost), str(fee), int(retry),
-                "PENDING", input_tokens, output_tokens, str(cost), 1, None))
+                _json_dataclass(prices), input_tokens, output_tokens, format(cost, "f"), format(fee, "f"), int(retry),
+                "PENDING", input_tokens, output_tokens, format(cost, "f"), 1, None))
             return reservation
 
     def settle(self, reservation: Reservation | str, usage: Usage | None = None, *, status: str = "OK") -> dict:
@@ -137,18 +204,22 @@ class BudgetLedger:
             if usage.actual_cost_usd is None and usage.extra_fees_usd < Decimal(row["known_fee"]):
                 usage = replace(usage, extra_fees_usd=Decimal(row["known_fee"]))
             cost = usage.cost(prices)
+            if usage.estimated and usage.actual_cost_usd is None:
+                # Missing/partial usage cannot refund the worst-case cache path
+                # or known fees, even when cache reads cost more than plain input.
+                cost = max(cost, Decimal(row["reserved_cost"]))
             exceeded = (cost > Decimal(row["reserved_cost"]) or usage.input_tokens > row["input_bound"]
                         or usage.output_tokens > row["output_bound"])
             entry = {"reservation_id": identity, "scope_id": self.scope_id, "task_id": row["task_id"],
                      "route_id": row["route_id"], "model": row["model"], "price_version": prices.version,
                      "input_tokens": usage.input_tokens, "output_tokens": usage.output_tokens,
-                     "cached_input_tokens": usage.cached_input_tokens, "cost_usd": str(cost),
+                     "cached_input_tokens": usage.cached_input_tokens, "cost_usd": format(cost, "f"),
                      "estimated": usage.estimated, "status": status,
                      "cost_kind": "actual" if usage.actual_cost_usd is not None else "estimated",
                      "reservation_exceeded": exceeded}
             database.execute("UPDATE budget_reservations SET status=?,input_used=?,output_used=?,cost=?,estimated=?,"
                              "settlement_json=? WHERE reservation_id=?", (
-                                 status, usage.input_tokens, usage.output_tokens, str(cost), int(usage.estimated),
+                                 status, usage.input_tokens, usage.output_tokens, format(cost, "f"), int(usage.estimated),
                                  json.dumps(entry, sort_keys=True), identity))
             if exceeded:
                 database.execute("UPDATE budget_scopes SET blocked=1 WHERE scope_id=?", (self.scope_id,))
@@ -164,8 +235,8 @@ class BudgetLedger:
             committed = sum((Decimal(row["cost"]) for row in rows), Decimal(0))
             reserved = sum((Decimal(row["cost"]) for row in pending), Decimal(0))
             return {"scope_id": self.scope_id, "requests": len(rows), "pending": len(pending),
-                    "spent_usd": str(committed - reserved), "reserved_usd": str(reserved),
-                    "committed_usd": str(committed),
+                    "spent_usd": format(committed - reserved, "f"), "reserved_usd": format(reserved, "f"),
+                    "committed_usd": format(committed, "f"),
                     "input_tokens": sum(row["input_used"] for row in rows),
                     "output_tokens": sum(row["output_used"] for row in rows),
                     "soft_exceeded": committed >= self.limits.soft_usd, "blocked": blocked,

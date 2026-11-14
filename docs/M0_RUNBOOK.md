@@ -151,3 +151,11 @@ Task17将从新SHA公开stage实际重跑完整pytest（89为子集，计数以�
 3. 由独立人类维护者审查、冻结、批准具体版本，亲自另行注入低额度可撤销实验 Key。审计 Markdown 文件不是授权开关。
 4. 默认官方主路由独立验证 `deepseek-flash` 的实际版本、请求ID与价格快照，不读取内部客户端凭据/不自动 fallback。
 5. 在获批主渠道重新执行完整 E1–E5 必需项。缺证据继续 DECISION PENDING，不签 GO/CONDITIONAL GO，也不将凭据缺失误判技术 NO-GO。
+
+## 10. 第四阶段：SDK离线会话闭环与stdio账本桥集成冻结（非Live）
+
+本节对应第四阶段冻结提交，确切实现SHA、逐源/逐产物hash、完整argv/UTC/exit与实际计数以外部 [phase4 manifest](../artifacts/phase4-integration/manifest.json) 为准，提交正文**不预填**测试数字。冻结范围仅：`plugins/offline-fixture/`、`docs/SDK_OFFLINE_SESSIONS.md`、`docs/BUDGET_BROKER.md`、`src/autoteacher_m0/accounting/{budget,ledger,broker,broker_usage}.py`、`tests/unit/accounting/test_broker.py`、`tests/integration/budget_bridge/test_stdio.py` 及README/本runbook增量；生产Gate/Adapter/默认primary/原任务书/历史manifest与原始证据不改。
+
+**已完成（隔离内实际执行，不计预填）**：冻结提交后Git archive公开stage，在既有固定digest无Key禁网OCI（`62d356…`，nonroot/只读rootfs/cap0/nnp/cgroup受限）重跑全量pytest、Ruff、专门E1-02子集、真实插件strict tsc+8项registry、完整wheel构建，以及wheel-only无源码真安装后的CLI/E1 API/专用脚本。SDK 17用例按[原精确argv](<SDK_OFFLINE_SESSIONS.md>)在同等隔离重放，并先在容器内从当前冻结插件源重新strict build，逐字节核对`BUILT_FILE`与既有runtime产物后再跑suite；stdio账本148回归按其原始test-scope pytest argv在新stage重放（实际计数以日志为准，与全量/89子集等重叠scope不能相加）。二者均按原始隔离边界重放，**不是**从旧日志转发数字；无法重放的部分只做历史日志+当前源字节hash交叉核对并显式标注。
+
+**明确未完成**：SDK用例是真实引擎/真实SDK/RPC/Session/工具链 + **显式synthetic offline fixture provider**，不是DeepSeek Live模型、不是E1/E2/E3 Live、不是生产Adapter；usage是夹具常量，不是账单或tokenizer计量。stdio broker只是固定scope的bookkeeping，`dispatch_allowed`不是人类授权/Key代理/provider usage认证；**task22公开`llm/stream`预算预留/结算middleware尚未实现也未接线**，broker/fixture不能当运行中预算guard。P03独立人类授权、真实Live、外部watchdog、真实usage/逐step记账、Runner.run端到端与跨机OCI恢复仍BLOCKED/NOT RUN；总体DECISION PENDING。旧`d5db491`/`c155789`/`5df4f3b`及其manifest与首轮/二/三阶段原始证据完全保留，新manifest不覆盖、不倒填。

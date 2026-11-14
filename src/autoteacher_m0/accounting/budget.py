@@ -127,6 +127,8 @@ class BudgetGuard:
                 # response; an authoritative total bill is already inclusive.
                 usage = replace(usage, extra_fees_usd=current.extra_fees_usd)
             cost = usage.cost(self.prices)
+            if usage.estimated and usage.actual_cost_usd is None:
+                cost = max(cost, current.cost_usd)
             # Even if a provider breaks the bound, account honestly, trip closed,
             # and never conceal the overrun by clipping actual usage/cost.
             exceeded = (usage.input_tokens > current.input_tokens
@@ -143,7 +145,7 @@ class BudgetGuard:
                      "price_version": self.prices.version, "status": status,
                      "input_tokens": usage.input_tokens, "output_tokens": usage.output_tokens,
                      "cached_input_tokens": usage.cached_input_tokens,
-                     "cost_usd": str(cost), "estimated": usage.estimated,
+                     "cost_usd": format(cost, "f"), "estimated": usage.estimated,
                      "cost_kind": "actual" if usage.actual_cost_usd is not None else "estimated",
                      "reservation_exceeded": exceeded, "retry": current.retry}
             self.entries.append(entry)
@@ -155,9 +157,9 @@ class BudgetGuard:
 
     def snapshot(self) -> dict:
         with self._lock:
-            return {"spent_usd": str(self._spent), "requests": self._requests,
+            return {"spent_usd": format(self._spent, "f"), "requests": self._requests,
                     "input_tokens": self._input, "output_tokens": self._output,
                     "pending": len(self._pending),
-                    "reserved_usd": str(sum((r.cost_usd for r in self._pending.values()), Decimal("0"))),
+                    "reserved_usd": format(sum((r.cost_usd for r in self._pending.values()), Decimal("0")), "f"),
                     "soft_exceeded": self._spent >= self.limits.soft_usd,
                     "blocked": self._breached, "price_version": self.prices.version}

@@ -1,0 +1,34 @@
+# Explicit offline-only overlay, NEVER a production/primary-route fallback.
+# skill_lookup must be separately loaded from its reviewed public fixture entry.
+- id: llm-deepseek
+  disabled: true
+- id: session-log-deepseek
+  config:
+    enabled: false
+- id: plugin-package-inventory-deepseek
+  disabled: true
+- id: compaction-basic
+  disabled: true
+- id: image-offload
+  disabled: true
+- id: tool-fs
+  disabled: true
+- id: tool-working-directory
+  disabled: true
+- id: persistent-bash
+  disabled: true
+- id: persistent-pwsh
+  disabled: true
+- id: terminal-bash
+  disabled: true
+- id: terminal-pwsh
+  disabled: true
+- id: pty
+  disabled: true
+- id: subprocess
+  disabled: true
+- id: jobs
+  disabled: true
+- insert:
+    - id: offline-test-only-provider
+      name: autoteacher-offline-fixture

@@ -5,13 +5,15 @@
 ## 最终文档入口
 
 - [当前 M0 验证报告](<docs/M0_REPORT.md>)：顶部与§9为第三阶段增量；§8保留第二阶段历史，§1–7保留首轮E1-02 NOT RUN，不倒填结果，Live仍BLOCKED。
+- [第四阶段冻结证据](<artifacts/phase4-integration/manifest.json>)（gitignored外部证据）：真实锁定DSH引擎/真实Python SDK + 显式`offline-test-only`合成provider的17用例SDK离线会话、stdio账本148回归重放、真实插件严格构建与wheel无源码安装CLI/API，均在既有no-Key禁网隔离内执行；实际计数、argv/UTC/exit与产物hash见该manifest（不预填）。
+- [SDK离线会话闭环](<docs/SDK_OFFLINE_SESSIONS.md>)：真实引擎/Session/工具注册与执行链路，但provider是synthetic fixture，**不是**DeepSeek Live模型证据；[stdio账本桥协议](<docs/BUDGET_BROKER.md>)仅是固定scope的bookkeeping，不是授权/Key代理/真实账单上限，task22运行中预算middleware尚未接线。
 - [最新第三阶段独立审计](<docs/REVIEW_PHASE3.md>)：241项全量（含89项专门子集）、插件8项、安装CLI/API、精确只读缓存下的SDK启动子集及本地OCI有限验证通过。
 - [第二阶段历史独立审计](<docs/REVIEW_PHASE2.md>)：235项全量（含89项子集）；当时默认无cache SDK初始化BLOCKED，历史与原文保留。
 - [首轮历史独立审计](<docs/REVIEW.md>)：首轮来源/产物哈希与146项离线回归；原文保持不变。
 - [Runtime 决策记录](<docs/ADR-001-runtime.md>)：DECISION PENDING及重新决策条件，不是安全或路由批准。
 - [故障排查](<docs/TROUBLESHOOTING.md>)：已发生的问题、隔离复验与不可绕过的安全边界。
 
-首轮历史证据对应 `d5db491bf3299c14b6af98f5cbe952ce56a1a991`，第二阶段对应 `c155789557e525925435e7f8a8bf573856d80311`；当前第三阶段冻结实现为 `5df4f3bdbecdf0683533ef7f0a176513713436cd`。文档归档SHA另记，不替代已测试实现SHA；本次仅补文档入口，不改原始manifest以匹配README的新字节。独立授权/受限控制器、Live watchdog与真实usage/逐step记账仍待工程；OpenCode Go第三方API接入仅optional UNVERIFIED。
+首轮历史证据对应 `d5db491bf3299c14b6af98f5cbe952ce56a1a991`，第二阶段对应 `c155789557e525925435e7f8a8bf573856d80311`；第三阶段冻结实现为 `5df4f3bdbecdf0683533ef7f0a176513713436cd`；第四阶段冻结实现以本次提交为准，其确切实现SHA、源/锁/运行环境/产物清单与实际计数见[phase4冻结证据](<artifacts/phase4-integration/manifest.json>)。文档归档SHA另记，不替代已测试实现SHA；本次仅补文档入口，不改原始manifest以匹配README的新字节。独立授权/受限控制器、Live watchdog与真实usage/逐step记账仍待工程；OpenCode Go第三方API接入仅optional UNVERIFIED。
 
 ## 第二阶段增量（与首轮历史分开）
 
@@ -28,6 +30,12 @@
 - [本地离线OCI验证](<docs/LOCAL_OCI_VALIDATION.md>)：既有Runner严格`name@sha256`和安全参数未变；精确`62d356…`镜像下已审command-DATA的OS负向探针与candidate元数据target离线构建有证据。**未执行真实ContainerRunner.run生命周期；python-test/plugin-test依赖target未验；offline load/跨机原pin恢复NOT RUN。** 无压缩archive manifest/config字节与执行身份相同，不等于已完成迁移重放。
 
 [第三阶段冻结证据](<artifacts/phase3-integration/manifest.json>)与[独立审计](<docs/REVIEW_PHASE3.md>)实测241项Python全量、包含其中的89项专门子集、插件8项，以及wheel/无源码真安装CLI/API/脚本通过；不同轮次或重叠子集不能相加。新配置SDK ready/registered schemas[]/graceful0和本地exact-image OS/candidate元数据target已通过，仍不声明完整H1、Session/模型、生产Adapter、预算桥、Runner.run端到端或跨机load通过；Gate/模型路由不改，旧默认失败及d5/c7/c155历史证据保留。
+
+## 第四阶段增量（SDK离线闭环与stdio账本桥，非Live）
+
+- [SDK离线会话闭环](<docs/SDK_OFFLINE_SESSIONS.md>)固化**B层**证据：锁定真实DSH引擎二进制 + 真实Python SDK/RPC + 显式`offline-test-only`/`fixture-v1`合成LlmAdapter，覆盖严格E1 JSON、真实`skill_lookup`注册/分发/事件、3/3跨进程save→recall、双独立home同Session ID命名空间、未知/损坏Session负例与受控中断恢复。provider由脚本决定、无HTTP/无Key，**不能记真实模型、E1/E2/E3 Live或生产Adapter通过**。
+- [stdio账本桥协议](<docs/BUDGET_BROKER.md>)固化固定scope、持久SQLite的NDJSON bookkeeping broker；`dispatch_allowed`仅是首次记账记录，不是授权、Key代理或provider usage认证。独立审计发现的旧pending保留费被启动新费追溯重定价缺陷已修复为使用reservation行持久`known_fee`/`price_json`并新增16项回归（历史132+16=148，单次调用不重复计数）；旧`08572a…`manifest/原始证据原样保留，修正证据见[manifest-fixed](<artifacts/budget-broker/manifest-fixed.json>)，独立复核见[closure](<artifacts/reviewer-broker-pre/after-fix/closure.json>)（75/75）。
+- 第四阶段隔离复验（真实实现SHA由phase4 manifest记录）：受限无Key禁网OCI内全量pytest+Ruff、专门E1-02子集、真实插件strict build、完整wheel构建与无源码真安装CLI/E1 API脚本，以及SDK 17用例与broker 148回归的实际重放/交叉核对，均只按日志实际去重计数。**stdio broker与SDK fixture都不代表运行中的预算guard已接线：task22公开`llm/stream`预留/结算middleware未实现、未验证。** 真实模型/E1/E2/E3/E5、P03独立授权、Live watchdog与真实usage/逐step记账仍BLOCKED，总体DECISION PENDING；生产Gate/Adapter/默认primary路由不改。
 
 ## 安全边界
 
