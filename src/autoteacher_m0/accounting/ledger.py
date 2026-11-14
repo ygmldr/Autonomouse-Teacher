@@ -6,6 +6,7 @@ they remain charged at their full bounds until explicit conservative settlement.
 This is accounting infrastructure, not permission to enable blocked Live calls.
 """
 import json
+import re
 import sqlite3
 from contextlib import contextmanager
 from dataclasses import asdict, replace
@@ -117,6 +118,70 @@ class BudgetLedger:
                 database.execute("INSERT INTO budget_broker_policy VALUES (1,?,?)", (self.scope_id, policy_json))
             elif current[0] != self.scope_id or current[1] != policy_json:
                 raise ValueError("broker startup policy differs from durable policy")
+
+    _CALL_ID = re.compile(r"call-[0-9a-f]{48}\Z", re.ASCII)
+    _IDENTIFIER = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,95}\Z", re.ASCII)
+
+    def _ensure_observation_schema(self, database) -> None:
+        """Additive PR4b tables; no change to reservation/journal semantics."""
+        database.execute("CREATE TABLE IF NOT EXISTS budget_call_links ("
+                         "scope_id TEXT NOT NULL, call_id TEXT NOT NULL, reservation_id TEXT NOT NULL, "
+                         "PRIMARY KEY(scope_id, call_id))")
+        database.execute("CREATE TABLE IF NOT EXISTS budget_provider_observations ("
+                         "scope_id TEXT NOT NULL, call_id TEXT NOT NULL, digest TEXT NOT NULL, "
+                         "response_json TEXT NOT NULL, PRIMARY KEY(scope_id, call_id))")
+
+    def bind_call(self, call_id: str, reservation_id: str) -> dict:
+        """Link a stable egress/PR4a call id to one broker reservation.
+
+        The link is durable, per-scope and idempotent. A call id cannot be
+        retargeted to a different reservation (conflict -> ValueError).
+        """
+        if not isinstance(call_id, str) or not self._CALL_ID.fullmatch(call_id):
+            raise ValueError("invalid call id")
+        if not isinstance(reservation_id, str) or not self._IDENTIFIER.fullmatch(reservation_id):
+            raise ValueError("invalid reservation id")
+        with self._transaction() as database:
+            self._ensure_observation_schema(database)
+            row = database.execute("SELECT reservation_id FROM budget_reservations "
+                                   "WHERE scope_id=? AND reservation_id=?",
+                                   (self.scope_id, reservation_id)).fetchone()
+            if row is None:
+                raise ValueError("unknown reservation")
+            previous = database.execute("SELECT reservation_id FROM budget_call_links "
+                                        "WHERE scope_id=? AND call_id=?",
+                                        (self.scope_id, call_id)).fetchone()
+            if previous is not None:
+                if previous[0] != reservation_id:
+                    raise ValueError("call identity already linked to a different reservation")
+                return {"call_id": call_id, "reservation_id": reservation_id, "duplicate": True}
+            database.execute("INSERT INTO budget_call_links VALUES (?,?,?)",
+                             (self.scope_id, call_id, reservation_id))
+            return {"call_id": call_id, "reservation_id": reservation_id, "duplicate": False}
+
+    def call_reservation(self, call_id: str) -> str | None:
+        with self._transaction() as database:
+            self._ensure_observation_schema(database)
+            row = database.execute("SELECT reservation_id FROM budget_call_links "
+                                   "WHERE scope_id=? AND call_id=?", (self.scope_id, call_id)).fetchone()
+            return None if row is None else row[0]
+
+    def observation_once(self, call_id: str, digest: str, operation) -> tuple[dict, bool]:
+        """Durable idempotent delivery per call_id (same payload replay only)."""
+        with self._transaction() as database:
+            self._ensure_observation_schema(database)
+            previous = database.execute("SELECT digest,response_json FROM budget_provider_observations "
+                                        "WHERE scope_id=? AND call_id=?",
+                                        (self.scope_id, call_id)).fetchone()
+            if previous is not None:
+                if previous[0] != digest:
+                    raise ValueError("observation identity conflict")
+                return json.loads(previous[1]), True
+            response = operation(database)
+            encoded = json.dumps(response, allow_nan=False, sort_keys=True, separators=(",", ":"))
+            database.execute("INSERT INTO budget_provider_observations VALUES (?,?,?,?)",
+                             (self.scope_id, call_id, digest, encoded))
+            return response, False
 
     def journal_once(self, message_id: str, digest: str, operation) -> tuple[dict, bool]:
         """Atomically commit a trusted in-process operation plus its reply.

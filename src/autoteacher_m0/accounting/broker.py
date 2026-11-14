@@ -150,8 +150,12 @@ class BookkeepingBroker:
             return _keys(message, common)
         if op == "reserve":
             _keys(message, common | {"task_id", "route_id", "model", "purpose", "input_tokens",
-                                     "output_tokens", "retry"})
+                                     "output_tokens", "retry"}, {"call_id"})
             _identifier(message["task_id"])
+            if "call_id" in message:
+                # PR4b additive v1 field: stable egress/PR4a call identity. Older
+                # v1 clients that do not send it keep the exact previous behavior.
+                _identifier(message["call_id"])
             if not isinstance(message["route_id"], str) or not isinstance(message["model"], str):
                 raise ValueError("invalid route")
             if not isinstance(message["purpose"], str) or message["purpose"] not in PURPOSES:
@@ -210,9 +214,17 @@ class BookkeepingBroker:
                 # A denial cannot be swallowed by compaction/retry then undone.
                 database.execute("UPDATE budget_scopes SET blocked=1 WHERE scope_id=?", (self.ledger.scope_id,))
                 return envelope(identity, code="BUDGET_EXCEEDED")
-            return envelope(identity, ok=True, code="RESERVED", dispatch_allowed=True,
-                            reservation_id=reservation.reservation_id,
-                            reservation=json.loads(canonical(asdict(reservation))))
+            values = {"reservation_id": reservation.reservation_id,
+                      "reservation": json.loads(canonical(asdict(reservation)))}
+            if "call_id" in request:
+                try:
+                    self.ledger.bind_call(request["call_id"], reservation.reservation_id)
+                except ValueError:
+                    # A call id must never be retargeted; raising rolls back the
+                    # whole reservation+journal transaction (fail-closed).
+                    raise ProtocolError("CALL_ID_CONFLICT") from None
+                values["call_id"] = request["call_id"]
+            return envelope(identity, ok=True, code="RESERVED", dispatch_allowed=True, **values)
         raise ProtocolError("UNKNOWN_OPERATION")
 
     def _complete(self, database, request: dict) -> dict:
