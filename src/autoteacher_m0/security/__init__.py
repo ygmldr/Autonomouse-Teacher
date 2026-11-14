@@ -23,6 +23,16 @@ from .credential_boundary import (
     validate_candidate_argv,
     validate_candidate_mounts,
 )
+from .egress import (
+    AttemptState,
+    EgressBoundary,
+    EgressDecision,
+    EgressPolicy,
+    EgressRequest,
+    EgressViolation,
+    MockEgressTransport,
+    policy_from_json,
+)
 from .gates import LiveGate, SecurityBlocked
 from .live_controller import (
     ALWAYS_BLOCKED_REASONS,
@@ -52,7 +62,12 @@ __all__ = [
     "ControllerDecision",
     "CredentialBoundaryViolation",
     "DeadlineLimits",
+    "EgressBoundary",
+    "EgressDecision",
     "EgressPolicy",
+    "EgressRequest",
+    "EgressViolation",
+    "MockEgressTransport",
     "ExecutionAuthorization",
     "ExpectedBindings",
     "ExternalWatchdog",
