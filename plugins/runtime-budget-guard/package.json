@@ -1,0 +1,27 @@
+{
+  "name": "autoteacher-runtime-budget-guard",
+  "version": "0.1.0",
+  "description": "Logical-stream pre-dispatch budget guard middleware for the DeepSeek Harness public llm/stream waterfall; reserves against the fixed-scope stdio bookkeeping broker before any provider dispatch.",
+  "private": true,
+  "type": "module",
+  "main": "./lib/index.js",
+  "types": "./lib/index.d.ts",
+  "exports": { ".": { "types": "./lib/index.d.ts", "default": "./lib/index.js" } },
+  "files": ["lib"],
+  "engines": { "node": ">=22", "dsh": "0.2.2-rc.2" },
+  "packageManager": "npm@10.9.8",
+  "scripts": { "build": "node --max-old-space-size=768 node_modules/typescript/bin/tsc -p tsconfig.json" },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "4.1.0",
+    "@deepseek-ai/dsh-llm": "0.2.2-rc.2"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "4.1.0",
+    "@deepseek-ai/dsh-llm": "0.2.2-rc.2",
+    "@deepseek-ai/dsh-tools": "0.2.2-rc.2",
+    "@deepseek-ai/dsh-attachment": "0.2.2-rc.2",
+    "@deepseek-ai/dsh-package-manifest": "0.2.2-rc.2",
+    "@types/node": "22.19.0",
+    "typescript": "5.9.3"
+  }
+}
