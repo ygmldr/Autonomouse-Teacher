@@ -1,0 +1,16 @@
+# PR2 STATIC-ONLY overlay: proves the locked runtime accepts the reviewed OpenCode Go
+# route shape from docs/OPENCODE_GO_ACCESS.md. It performs NO network call and needs NO key.
+# Required static fields: provider route opencode-go; apiKeyEnv placeholder only
+# (secret injected by an external launcher only); no baseURL override (pi-ai catalog
+# supplies https://opencode.ai/inference/go/v1); reasoning=max; maxRetries=0.
+- insert:
+    - id: llm-pi-ai
+      name: '@deepseek-ai/dsh-llm-pi-ai'
+      config:
+        providers:
+          opencode-go:
+            apiKeyEnv: OPENCODE_API_KEY
+            reasoning: max
+            retryPolicy:
+              mode: normal
+              maxRetries: 0

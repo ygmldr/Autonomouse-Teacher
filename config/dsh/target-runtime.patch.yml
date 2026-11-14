@@ -1,0 +1,57 @@
+# PR2 reviewed target profile patch (no Key, no real provider, container-stage absolute paths).
+# Apply together with the locked sdk-minimal profile; paths assume the reviewed target
+# runtime stage is mounted read-only at /target by the PR2 launcher.
+- id: llm-deepseek
+  disabled: true
+- id: session-log-deepseek
+  config:
+    enabled: false
+- id: plugin-package-inventory-deepseek
+  disabled: true
+- id: compaction-basic
+  disabled: true
+- id: image-offload
+  disabled: true
+- id: tool-fs
+  disabled: true
+- id: tool-working-directory
+  disabled: true
+- id: persistent-bash
+  disabled: true
+- id: persistent-pwsh
+  disabled: true
+- id: terminal-bash
+  disabled: true
+- id: terminal-pwsh
+  disabled: true
+- id: pty
+  disabled: true
+- id: subprocess
+  disabled: true
+- id: jobs
+  disabled: true
+
+- insert:
+    - id: runtime-budget-guard
+      name: /target/runtime/guard/lib/index.js
+      config:
+        policy:
+          provider: offline-test-only
+          model: fixture-v1
+          brokerScopeId: fixed-offline-scope
+          maxOutputTokens: 1024
+          maxInputTokens: 2500000
+          maxProviderRetries: 0
+          purposes: [conversation]
+        broker:
+          python: /opt/python/bin/python3.11
+          pythonPath: /project/src:/deps
+          configPath: /target/runtime/broker-policy.json
+          configSha256: c67d2bbfd9386fa5f2ff651ab0d9ef51a936fb67b5c8e5b96c358adb2ac78129
+          cwd: /work
+          requestTimeoutMs: 5000
+          startupTimeoutMs: 8000
+    - id: offline-test-only-provider
+      name: /target/runtime/fixture/lib/index.js
+    - id: offline-public-skill
+      name: /target/runtime/skill/lib/index.js

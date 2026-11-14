@@ -1,0 +1,36 @@
+{
+  "v": 1,
+  "synthetic": true,
+  "db_path": "/work/at-m0-pr2-broker.db",
+  "scope_id": "fixed-offline-scope",
+  "max_messages": 4096,
+  "limits": {
+    "soft_usd": "3",
+    "hard_usd": "10",
+    "per_call_usd": "0.20",
+    "max_requests": 50,
+    "max_input_tokens": 2500000,
+    "max_output_tokens": 600000,
+    "max_steps": 8,
+    "max_retries": 1
+  },
+  "routes": [
+    {
+      "route_id": "offline-test-only",
+      "model": "fixture-v1",
+      "known_extra_fee_usd": "0",
+      "price": {
+        "version": "pr2-synthetic-v1",
+        "source": "synthetic offline fixture",
+        "captured_at": "2026-11-14T00:00:00Z",
+        "input_per_million": "1",
+        "cached_input_per_million": "0.5",
+        "output_per_million": "2"
+      },
+      "usage_policy": {
+        "cache_write": "input_rate",
+        "reasoning": "included_in_output"
+      }
+    }
+  ]
+}
