@@ -4,6 +4,24 @@
 - 基线：HEAD `7c3806b58af2bd49328bdd9bcc53e858a13c35e5`（父/冻结实现 `feb7118`）；当前决策 **DECISION PENDING**，Live/P03/watchdog **BLOCKED**。
 - 核心原则：**PR0–PR4 可在无 Key/禁网隔离内离线完成；PR5 起必须由维护者人工审批与真实凭据/外部边界，Agent 不得自动进入或自批。** 不得用 `--live` flag/Markdown/环境变量/Agent 自签解锁 Live；不得改写历史冻结证据。
 
+
+## 当前状态（M0 收尾 docs 收口，2026-11-14）
+
+PR0–PR4 已完成并冻结；PR5–PR7 待人类，不自动进入。总体 **DECISION PENDING**；Live/P03/真实 egress/Key/usage/账单仍 **BLOCKED**。
+
+| 阶段 | 状态 | 冻结 commit / 证据 |
+|---|---|---|
+| PR0 | 已完成（docs 基线） | `e8b6e45`；`artifacts/m0-closeout-baseline/manifest.json` `d252c82b…` |
+| PR1 | 已完成（离线 F1–F6） | `fdcfdc9`；manifest `df14f3c1…`；V-PR1-1 errata `9fc6fb93…` |
+| PR3 | 已完成（无 Key 设计/演练） | `9b77a37`；manifest `b5c16f81…`；V-PR3-1 已修 |
+| PR2 | 已完成（目标 Profile dump/F7 缺口） | `7d2cd3e`；manifest `c6ea4e86…`；V-PR2-1 已修 |
+| PR4a | 已完成（mock egress/计费路径） | `8cf2476`；manifest `b04afbc9…`；V-PR4A-1 errata `92020bff…` |
+| PR4b | 已完成（ProviderObservation/usage 映射） | `c802a32`；manifest `de1bdb07…` |
+| Ruff/V-PR3-1 hygiene | 已完成 | `87f44e1`；HEAD repo-wide Ruff `All checks passed!` |
+| PR5–PR7 | **待人类 / BLOCKED** | 见 [CLOSEOUT_REPORT](<M0_CLOSEOUT_REPORT.md>) §7–8 |
+
+裁定与汇总见 [M0_CLOSEOUT_DECISIONS](<M0_CLOSEOUT_DECISIONS.md>) 与 [M0_CLOSEOUT_REPORT](<M0_CLOSEOUT_REPORT.md>)；本表的“已完成”仅指离线/无 Key 声明范围，不是 Live/E1–E5/GO。
+
 ## 0. 当前仓库状态映射（PR0 起点，静态核对）
 
 | 领域 | 现状（证据） | 对路线图含义 |

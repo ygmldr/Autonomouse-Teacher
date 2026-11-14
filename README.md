@@ -4,6 +4,7 @@
 
 ## 最终文档入口
 
+- [M0 收尾报告](<docs/M0_CLOSEOUT_REPORT.md>)：PR0–PR4 离线工作已完成并冻结（`e8b6e45`→`fdcfdc9`→`9b77a37`→`7d2cd3e`→`8cf2476`→`c802a32`→`87f44e1`，详见报告 §2）；5 份独立审计（[PR1](<docs/REVIEW_CLOSEOUT_PR1.md>)、[PR2](<docs/REVIEW_CLOSEOUT_PR2.md>)、[PR3](<docs/REVIEW_CLOSEOUT_PR3.md>)、[PR4A](<docs/REVIEW_CLOSEOUT_PR4A.md>)、[PR4B](<docs/REVIEW_CLOSEOUT_PR4B.md>)）PASS **仅限各自声明的离线/无 Key 范围**；V-PR1-1/V-PR4A-1 已 errata，V-PR2-1/V-PR3-1/V-PR4A-2/V-PR4B-1 的继承 lint 已由 `87f44e1` 清除（HEAD repo-wide Ruff 实测 `All checks passed!`）。真实 Live/P03/egress/Key/usage/账单仍 **BLOCKED**、总体 **DECISION PENDING**，不签发 GO；PR5 前置见报告 §8。
 - [当前 M0 验证报告](<docs/M0_REPORT.md>)：顶部与§11为第五阶段独立审计增量；§10保留第四阶段历史，§9保留第三阶段历史，§8保留第二阶段历史，§1–7保留首轮E1-02 NOT RUN，不倒填结果，Live仍BLOCKED。
 - [第四阶段冻结证据](<artifacts/phase4-integration/manifest.json>)（gitignored外部证据）：真实锁定DSH引擎/真实Python SDK + 显式`offline-test-only`合成provider的17用例SDK离线会话、stdio账本148回归重放、真实插件严格构建与wheel无源码安装CLI/API，均在既有no-Key禁网隔离内执行；实际计数、argv/UTC/exit与产物hash见该manifest（不预填）。
 - [SDK离线会话闭环](<docs/SDK_OFFLINE_SESSIONS.md>)：真实引擎/Session/工具注册与执行链路，但provider是synthetic fixture，**不是**DeepSeek Live模型证据；[stdio账本桥协议](<docs/BUDGET_BROKER.md>)仅是固定scope的bookkeeping，不是授权/Key代理/真实账单上限，task22运行中预算middleware已作为离线候选交付（[预算守卫](<docs/RUNTIME_BUDGET_GUARD.md>)）但仍未接入生产/真实 provider。

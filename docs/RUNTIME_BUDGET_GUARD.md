@@ -260,7 +260,7 @@ Gate/Adapter/primary 或任务书；只新增独立 plugin、docs 与本 artifac
 fixture + scripted providers；15/15 pass；旧 lib 下 13 failed/2 passed 的 fail-first
 证据保留）。Python 侧新增
 `tests/unit/accounting/test_broker_capacity_f1_f2.py` 与
-`tests/integration/budget_bridge/test_stdio_capacity_f2.py`（旧 broker 8 failed/3 passed；
+`tests/integration/budget_bridge/test_stdio_capacity_f2.py`（旧 broker 9 failed/3 passed；
 修复后 accounting + budget_bridge 全套 131 passed）。argv/UTC/exit/镜像身份/产物 hash
 见 `artifacts/m0-closeout-fix-tests/manifest.json`。
 
