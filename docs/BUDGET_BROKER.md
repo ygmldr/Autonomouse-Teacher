@@ -418,3 +418,43 @@ cannot be made exactly-once by a JSON response. The corrected run executes only
 synthetic fixtures, with zero model calls, and all Live remains BLOCKED.
 Production Gate/Adapter/primary route are unchanged, and the separate Task22
 hook integration/ordering/cancellation work is still required.
+
+## v0.5 PR1 增量（F1/F2，2026-11-14）
+
+本增量**不改 NDJSON v1 的消息/响应字段与 op 集合**（仍为 `reserve`/`settle`/`fail`/
+`snapshot` 与同一 envelope），旧 phase5 fixture 与历史 148-case 证据可直接复验；
+仅新增以下**服务端行为语义**与定向测试（全部只在隔离容器执行）。
+
+**F2 容量拆分（journal capacity）**
+
+- `reserve` 准入同时预留该 reservation 未来一次 `settle`/`fail` 的 journal slot：
+  `count + pending + 2 <= max_messages`，否则 `MESSAGE_LIMIT`。`max_messages` 因此是
+  包含完成操作在内的硬上界，不会因完成既有 PENDING 而越界。
+- 既有合法 PENDING 的 `settle`/`fail` 不再先受 `max_messages` 限制：journal 满后仍可
+  完成（其完成容量在 reserve 时已预留）。重复完成幂等：同 message id 重放返回原存储
+  响应（`duplicate=true`）；新 message id 再次完成返回 `ALREADY_SETTLED` 且不新增
+  journal 行/存储。
+- `snapshot` 是只读观测：**不写 journal、不占 `max_messages`、不增长持久存储**，
+  journal 满后仍可读；响应为固定大小聚合对象、单帧 ≤ `MAX_FRAME`，频率/背压由串行
+  `serve` 循环约束。实现：`broker.py` 的 `_operate` / `handle`。
+- guard 可见的 `broker policy.max_messages` 上界与 broker 硬上限对齐为 100,000；M0
+  profile 保持 4096。
+- 残留：`max_messages` 仍是 scope 生命周期累计值（journal 不清除）；PR1 前已存在
+  `count==max_messages` 且仍有 PENDING 的极端 DB 仍允许完成（收尾优先），但新
+  reserve 不再增长 journal。
+
+**F1 归因语义**
+
+- v1 `retry` 布尔字段仅为 legacy/归因字段：step/request 计数不因它豁免；`retry=true`
+  仍计 `max_steps`/`max_retries`。guard 路径固定 `retry:false`，且 M0 guard 已禁用
+  provider 内部自动重试（`maxRetries` 必须 0）；每个 logical stream 独立 reserve、
+  消耗一个 request + 一个 step slot；缺 attempt metadata 时没有免费 retry 配额。
+- 旧单测 `max_messages=1` 首次 reserve 成功的断言按新语义更新为 `MESSAGE_LIMIT`
+  （容量不足就无法预留完成 slot），其余历史原始日志/证据未改写。
+
+**验证（PR1，隔离容器）**
+
+- 新增 Python 测试旧代码 fail-first：`9 failed / 3 passed`；修复后
+  accounting + budget_bridge 全套：`131 passed`。
+- 命令 argv/UTC/exit、镜像身份与产物 hash 见
+  `artifacts/m0-closeout-fix-tests/manifest.json`；历史证据字节未改。

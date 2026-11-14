@@ -22,6 +22,13 @@ for the full boundary, test evidence and integration requirements.
   (`BOOT_INVALID`, fail-closed) instead of letting the loader continue without a
   guard. The upstream loader itself logs and continues when a plugin throws, so
   integration must also assert the `RBG_BOOT` marker before traffic.
+- v0.5 PR1: provider-internal automatic retry is disabled for admitted profiles
+  (`maxRetries` must be 0); every logical stream counts as one request + one step;
+  `requestDigest` is post-hoc audit (`REQUEST_INTEGRITY_UNCERTAIN`) and NOT a
+  pre-send interception; settlement uncertainty is machine-readable
+  (`RBG_RESULT`), fails the call and latches later dispatches; task IDs are
+  `rbg-` + sha256(NFC sessionId); public logs are allowlisted/hashed, raw broker
+  stderr only goes to an explicitly configured restricted file.
 - Built output: strict TypeScript 5.9.3 (`tsc -p tsconfig.json`, `strict`,
   `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`).
 
@@ -34,7 +41,7 @@ policy:
   brokerScopeId: fixed-offline-scope
   maxOutputTokens: 1024                  # request maxTokens bound, 1..1024
   maxInputTokens: 2500000                # conservative input upper bound
-  maxProviderRetries: 1                  # adapter policy > 1 or mode always -> refuse
+  maxProviderRetries: 0                  # v0.5 PR1/M0: provider auto retry disabled; nonzero rejected
   purposes: [conversation, compaction, judge]
 broker:
   python: /opt/python/bin/python3.11     # fixed absolute interpreter
@@ -64,8 +71,10 @@ uncertain settlement leaves the reservation pending and blocks later streams.
 
 ## Test
 
-Configured at the parent repository's `artifacts/runtime-budget-guard/`
-(gitignored test evidence): real locked DSH runtime/SDK/RPC session workers plus
-an in-process real Cordis `LlmRuntime` public-waterfall selftest. Execute only
-inside the reviewed credential-free, no-network, non-root, read-only OCI
-boundary; never run this package or its generated code on the host.
+- `npm run build` compiles `src/` to `lib/` with the pinned TypeScript.
+- `npm test` runs the committed PR1 targeted tests (`tests/guard-pr1.test.mjs`):
+  real Cordis `LlmRuntime` public waterfall + the committed fake NDJSON broker
+  fixture + scripted providers. Execute only inside the reviewed credential-free,
+  no-network, non-root, read-only OCI boundary; never run this package or its
+  generated code on the host. Historical phase5 evidence remains under the
+  parent repository's gitignored `artifacts/` and was not rewritten.

@@ -9,13 +9,30 @@
  * reservation exactly once, with no settlement retry and no refund on missing
  * or ambiguous usage.
  *
+ * v0.5 PR1 semantics (M0):
+ *  - F1: provider-internal automatic retries are DISABLED for an admitted M0
+ *    profile (`maxRetries` must be 0). Every logical stream is a new waterfall
+ *    entry, so every logical stream counts as one request and one step slot in
+ *    the persistent broker. The legacy `retry` boolean is attribution-only; it
+ *    neither grants nor measures provider-internal retries.
+ *  - F3: `requestDigest()` is POST-HOC audit only. A different digest after the
+ *    stream is reported as REQUEST_INTEGRITY_UNCERTAIN: the current stream is
+ *    settled at worst case and the call is failed, but this is NOT a pre-send
+ *    interception and does not bound an already-dispatched provider request.
+ *  - F4: model completion and accounting are separate statuses. Settlement
+ *    uncertainty is machine-readable (`RBG_RESULT`), fails the call, and
+ *    latches the guard fail-closed for all later dispatches.
+ *  - F6: public stderr markers only carry allowlisted codes, numbers, booleans
+ *    and hashed identifiers. Raw broker stderr is written only to a restricted
+ *    diagnostic file when the launcher explicitly opts in.
+ *
  * This plugin is bookkeeping middleware, NOT an authorization layer, Key proxy,
  * OS sandbox, provider-usage authenticator or LiveGate. It controls one
  * candidate-selected logical model stream; it does not observe or bound the
  * provider library's internal HTTP/Files retries.
  */
 import { createHash, randomBytes } from 'node:crypto'
-import { readFileSync } from 'node:fs'
+import { appendFileSync, readFileSync } from 'node:fs'
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import type { Context } from '@deepseek-ai/cordis'
 import { LlmError, type FinishReason, type GenerateOptions, type ResolvedRetryPolicy, type StreamChunk, type TokenUsage } from '@deepseek-ai/dsh-llm'
@@ -25,16 +42,25 @@ export const inject = ['llm']
 
 const MAX_BROKER_FRAME_BYTES = 16384
 const MAX_COUNTER = 1_000_000_000
-const MAX_SESSION_ID = 96
 const MAX_STDERR_LINES = 64
-const GUARD_VERSION = 'rbg-v1'
+const MAX_STDERR_BYTES = 65536
+const GUARD_VERSION = 'rbg-v2'
+/** F1: M0 disables provider-internal automatic retries. */
+const PROVIDER_AUTO_RETRY_LIMIT = 0
 const ID = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,95}$/
 const HEX64 = /^[0-9a-f]{64}$/
+const SAFE_CODE = /^RBG_[A-Z0-9_]{1,80}$/
 const PURPOSES = ['conversation', 'compaction', 'judge'] as const
 type Purpose = (typeof PURPOSES)[number]
 const ALLOWED_BLOCKS = new Set(['text', 'reasoning', 'tool-call', 'tool-addition', 'tool-removal'])
 const ALLOWED_ROLES = new Set(['system', 'user', 'assistant', 'developer', 'tool'])
 const ALLOWED_TOOL = 'skill_lookup'
+
+/** F6: the only phases a failure log may report. */
+type Phase = 'BEFORE_DISPATCH' | 'DISPATCHED' | 'SETTLING' | 'UNKNOWN'
+/** F4: accounting status is independent from model completion status. */
+type AccountingStatus = 'RESERVED' | 'SETTLED' | 'WORST_CASE_HELD' | 'SETTLEMENT_UNCERTAIN'
+type ModelCompletionStatus = 'COMPLETED' | 'ERROR' | 'ABORTED' | 'BLOCKED' | 'UNKNOWN'
 
 type Json = Record<string, unknown>
 
@@ -59,6 +85,7 @@ export interface GuardPolicyConfig {
   brokerScopeId: string
   maxOutputTokens: number
   maxInputTokens: number
+  /** F1: must be 0 in M0; provider-internal retry is disabled. */
   maxProviderRetries: number
   purposes: Purpose[]
 }
@@ -149,11 +176,6 @@ function positiveInt(value: unknown, where: string, max: number): number {
   if (!Number.isSafeInteger(value) || (value as number) < 1 || (value as number) > max) fail(`${where} must be an integer in 1..${max}`)
   return value as number
 }
-function type(value: unknown): string {
-  if (value === null) return 'null'
-  if (Array.isArray(value)) return 'array'
-  return typeof value
-}
 
 function integer(value: unknown, where: string, max: number): number {
   if (!Number.isSafeInteger(value) || (value as number) < 0 || (value as number) > max) fail(`${where} must be an integer in 0..${max}`)
@@ -190,9 +212,12 @@ function parseConfig(raw: unknown): { config: GuardConfig; fixed: FixedBrokerPol
     brokerScopeId: text(policyRaw['brokerScopeId'], 'config.policy.brokerScopeId', 128),
     maxOutputTokens: positiveInt(policyRaw['maxOutputTokens'], 'config.policy.maxOutputTokens', 1024),
     maxInputTokens: positiveInt(policyRaw['maxInputTokens'], 'config.policy.maxInputTokens', 2_500_000),
-    maxProviderRetries: integer(policyRaw['maxProviderRetries'], 'config.policy.maxProviderRetries', 1),
+    // F1: accept only the explicit M0 zero; a nonzero bound would imply
+    // provider-internal retry aggregation this middleware cannot observe.
+    maxProviderRetries: integer(policyRaw['maxProviderRetries'], 'config.policy.maxProviderRetries', PROVIDER_AUTO_RETRY_LIMIT),
     purposes,
   }
+  if (policy.maxProviderRetries !== PROVIDER_AUTO_RETRY_LIMIT) fail('config.policy.maxProviderRetries must be 0 (provider auto retry disabled)')
   const broker: BrokerPolicyConfig = {
     python: absolutePath(brokerRaw['python'], 'config.broker.python'),
     pythonPath: text(brokerRaw['pythonPath'], 'config.broker.pythonPath', 1024),
@@ -230,7 +255,8 @@ function readFixedBrokerPolicy(path: string, expectedSha256: string, policy: Gua
   const scopeId = text(config['scope_id'], 'broker policy.scope_id', 128)
   if (scopeId !== policy.brokerScopeId) fail('broker policy scope_id differs from configured fixed scope')
   const dbPath = absolutePath(config['db_path'], 'broker policy.db_path')
-  positiveInt(config['max_messages'], 'broker policy.max_messages', 1_000_000)
+  // F2: align the guard-visible upper bound with the broker's hard journal cap.
+  positiveInt(config['max_messages'], 'broker policy.max_messages', 100_000)
   const limitsRaw = object(config['limits'], 'broker policy.limits')
   exactKeys(limitsRaw, ['soft_usd', 'hard_usd', 'per_call_usd', 'max_requests', 'max_input_tokens', 'max_output_tokens', 'max_steps', 'max_retries'], 'broker policy.limits')
   const limits: BrokerLimits = {
@@ -289,7 +315,9 @@ function estimateInputBound(options: GenerateOptions, config: GuardConfig): numb
 
 function admit(options: GenerateOptions, config: GuardConfig, registry: string[], retry: ResolvedRetryPolicy): Admission {
   if (registry.length !== 1 || registry[0] !== config.policy.provider) throw new GuardUnavailable('RBG_UNEXPECTED_PROVIDER_REGISTRY')
-  if (retry.mode === 'always' || retry.maxRetries > config.policy.maxProviderRetries) throw new GuardUnavailable('RBG_PROVIDER_RETRY_POLICY_UNSAFE')
+  // F1: any provider-internal retry (mode always or maxRetries > 0) is refused;
+  // the M0 guard cannot observe or count retries hidden inside an adapter.
+  if (retry.mode === 'always' || retry.maxRetries > PROVIDER_AUTO_RETRY_LIMIT) throw new GuardUnavailable('RBG_PROVIDER_RETRY_POLICY_UNSAFE')
   if (options.provider !== config.policy.provider) throw new GuardUnavailable('RBG_ROUTE_MISMATCH')
   if (options.model !== config.policy.model) throw new GuardUnavailable('RBG_MODEL_MISMATCH')
   if (typeof options.sessionId !== 'string' || options.sessionId.length < 1 || options.sessionId.length > 512) throw new GuardUnavailable('RBG_SESSION_ATTRIBUTION_MISSING')
@@ -330,11 +358,19 @@ function admit(options: GenerateOptions, config: GuardConfig, registry: string[]
   return { options, purpose, sessionId, taskId, inputBound, outputBound: outputBound as number, digest: requestDigest(options) }
 }
 
-/** Stable, bounded broker-safe task attribution from the session identity. */
+function sha256Hex(value: string | Buffer): string {
+  return createHash('sha256').update(value).digest('hex')
+}
+
+/** F5: stable injective task attribution: rbg- + sha256(canonical sessionId). */
 function encodeTaskId(sessionId: string): string {
-  const cleaned = sessionId.replace(/[^A-Za-z0-9_.:-]/g, '_').replace(/^[^A-Za-z0-9]+/, '')
-  const payload = (cleaned || 'session').slice(0, MAX_SESSION_ID - 4)
-  return `rbg-${payload}`
+  const canonical = sessionId.normalize('NFC')
+  return `rbg-${sha256Hex(canonical).slice(0, 64)}`
+}
+
+/** F6: public identifiers are only hashed IDs, never raw session/transport IDs. */
+function hashId(value: string): string {
+  return sha256Hex(value).slice(0, 32)
 }
 
 function requestDigest(options: GenerateOptions): string {
@@ -345,7 +381,7 @@ function requestDigest(options: GenerateOptions): string {
     maxTokens: options.maxTokens ?? null, sessionId: options.sessionId ?? null,
     purpose: options.purpose ?? null, stop: options.stop ?? null,
   })
-  return createHash('sha256').update(material).digest('hex')
+  return sha256Hex(material)
 }
 
 /** One broker usage projection; never invents counters. */
@@ -365,11 +401,47 @@ function log(kind: string, payload: Json): void {
   process.stderr.write(`RBG_${kind} ${JSON.stringify({ guard: GUARD_VERSION, ...payload }, (_key, value: unknown) => typeof value === 'bigint' ? Number(value) : value)}\n`)
 }
 
+/** F6: only fixed RBG_* codes may reach public logs. */
+function safeErrorCode(error: unknown): string {
+  if (error instanceof GuardUnavailable && SAFE_CODE.test(error.reason.split(' ')[0] ?? '')) return error.reason.split(' ')[0] as string
+  const message = error instanceof Error ? error.message : ''
+  const match = /^RBG_[A-Z0-9_]{1,80}/.exec(message)
+  return match === null ? 'RBG_STREAM_ERROR' : match[0]
+}
+
+/** F6: broker reply codes are allowlisted; unknown codes are replaced. */
+const BROKER_REPLY_CODES = new Set([
+  'RESERVED', 'SETTLED', 'FAILED', 'SNAPSHOT', 'DUPLICATE_NO_DISPATCH',
+  'MESSAGE_LIMIT', 'BUDGET_EXCEEDED', 'ROUTE_BLOCKED', 'UNKNOWN_RESERVATION',
+  'ALREADY_SETTLED', 'INVALID_USAGE', 'INVALID_MESSAGE', 'FRAME_TOO_LARGE',
+  'INCOMPLETE_FRAME', 'IDEMPOTENCY_CONFLICT', 'INTERNAL_ERROR', 'STARTUP_BLOCKED',
+])
+function safeBrokerCode(code: unknown): string {
+  return typeof code === 'string' && BROKER_REPLY_CODES.has(code) ? code : 'UNKNOWN'
+}
+
+/** F6: raw broker stderr only goes to an explicitly configured restricted file. */
+function storeRawDiagnostics(code: string, lines: readonly string[]): Json {
+  const path = process.env['RBG_RAW_DIAGNOSTICS_PATH']
+  const joined = lines.join('\n')
+  const summary: Json = { count: lines.length, bytes: Buffer.byteLength(joined, 'utf8'), sha256: sha256Hex(joined) }
+  if (path === undefined || path.length === 0 || path.length > 1024 || !path.startsWith('/')) return summary
+  try {
+    appendFileSync(path, `${lines.join('\n')}\n`, { encoding: 'utf8', mode: 0o600 })
+    summary['restricted_file'] = true
+    summary['restricted_file_hash'] = hashId(path)
+  } catch {
+    summary['restricted_file'] = false
+  }
+  return summary
+}
+
 /** Sequential NDJSON client for one fixed broker child process. */
 class BrokerClient {
   #child: ChildProcessWithoutNullStreams | null = null
   #buffer = ''
   #stderrLines: string[] = []
+  #stderrBytes = 0
   #pending: {
     id: string
     resolve: (reply: BrokerReply) => void
@@ -380,6 +452,10 @@ class BrokerClient {
   #started = false
   #shuttingDown = false
   #unavailable: string | null = null
+  #phase: Phase = 'BEFORE_DISPATCH'
+  #settling = false
+  #dispatchedCount = 0
+  #activeReservation: string | null = null
 
   constructor(
     private readonly config: BrokerPolicyConfig,
@@ -405,37 +481,77 @@ class BrokerClient {
       v: 1, id: requestId, op: 'reserve', task_id: admission.taskId,
       route_id: this.policy.provider, model: this.policy.model,
       purpose: admission.purpose, input_tokens: admission.inputBound,
-      output_tokens: admission.outputBound, retry: false,
+      output_tokens: admission.outputBound,
+      // F1: attribution-only legacy field; provider-internal retry is disabled
+      // and every logical stream already consumes one request/step slot.
+      retry: false,
     }, !this.#started)
     if (reply.ok !== true || reply.dispatch_allowed !== true || reply.duplicate !== false || typeof reply.reservation_id !== 'string' || !ID.test(reply.reservation_id)) {
-      throw new GuardUnavailable(`RBG_RESERVE_REJECTED_${reply.code}`)
+      throw new GuardUnavailable(`RBG_RESERVE_REJECTED_${safeBrokerCode(reply.code)}`)
     }
     const costUsd = typeof reply.reservation?.cost_usd === 'string' ? reply.reservation.cost_usd : 'unrecorded'
+    this.#activeReservation = reply.reservation_id
+    this.#dispatchedCount += 1
+    this.#phase = 'DISPATCHED'
     log('RESERVE', {
-      reservation_id: reply.reservation_id, task_id: admission.taskId, purpose: admission.purpose,
-      input_bound: admission.inputBound, output_bound: admission.outputBound, reserved_cost_usd: costUsd,
-      session_id: admission.sessionId, request_digest: admission.digest, provider: this.policy.provider, model: this.policy.model,
+      reservation_id_hash: hashId(reply.reservation_id), task_id: admission.taskId,
+      task_steps_charged: 1, retry_field: 'attribution-only',
+      purpose: admission.purpose, input_bound: admission.inputBound, output_bound: admission.outputBound,
+      reserved_cost_usd: costUsd, session_id_hash: hashId(admission.sessionId),
+      request_digest: admission.digest, provider: this.policy.provider, model: this.policy.model,
     })
     return { reservationId: reply.reservation_id, costUsd }
   }
 
-  async settle(admission: Admission, reservationId: string, usage: TokenUsage | null, finish: FinishReason | undefined, failed: boolean): Promise<void> {
+  /** F4: settle returns a machine-readable accounting status; uncertainty throws. */
+  async settle(admission: Admission, reservationId: string, usage: TokenUsage | null, finish: FinishReason | undefined, failed: boolean): Promise<{ accountingStatus: AccountingStatus; costUsd: string | null; estimated: boolean | null }> {
     const authoritative = !failed && usage !== null && finish !== undefined && (finish.kind === 'stop' || finish.kind === 'tool-calls' || finish.kind === 'max-tokens')
     const mapped = authoritative && usage !== null ? brokerUsage(usage) : null
     const op = mapped === null ? 'fail' : 'settle'
-    const reply = await this.request({
-      v: 1, id: requestIdentity('s'), op, reservation_id: reservationId,
-      usage: mapped,
-    }, false)
-    if (reply.ok !== true || (reply.code !== 'SETTLED' && reply.code !== 'FAILED')) {
-      throw new GuardUnavailable(`RBG_SETTLE_REJECTED_${reply.code}`)
+    this.#settling = true
+    this.#phase = 'SETTLING'
+    try {
+      const reply = await this.request({
+        v: 1, id: requestIdentity('s'), op, reservation_id: reservationId,
+        usage: mapped,
+      }, false)
+      if (reply.ok !== true || (reply.code !== 'SETTLED' && reply.code !== 'FAILED')) {
+        this.#fail('RBG_SETTLE_UNCERTAIN', 'SETTLING')
+        throw new GuardUnavailable('RBG_SETTLE_UNCERTAIN')
+      }
+      const accountingStatus: AccountingStatus = op === 'settle' ? 'SETTLED' : 'WORST_CASE_HELD'
+      log('SETTLE', {
+        reservation_id_hash: hashId(reservationId), operation: op, accounting_status: accountingStatus,
+        settlement_status: typeof reply.settlement?.status === 'string' ? reply.settlement.status : null,
+        cost_usd: typeof reply.settlement?.cost_usd === 'string' ? reply.settlement.cost_usd : null,
+        estimated: typeof reply.settlement?.estimated === 'boolean' ? reply.settlement.estimated : null,
+        reservation_exceeded: typeof reply.settlement?.reservation_exceeded === 'boolean' ? reply.settlement.reservation_exceeded : null,
+        authoritative_usage: authoritative, unmapped_usage_worst_case: mapped === null,
+      })
+      return {
+        accountingStatus,
+        costUsd: typeof reply.settlement?.cost_usd === 'string' ? reply.settlement.cost_usd : null,
+        estimated: typeof reply.settlement?.estimated === 'boolean' ? reply.settlement.estimated : null,
+      }
+    } catch (error) {
+      if (!(error instanceof GuardUnavailable && error.reason === 'RBG_SETTLE_UNCERTAIN')) {
+        this.#fail('RBG_SETTLE_UNCERTAIN', 'SETTLING')
+      }
+      // Never retry settlement: an unknown acknowledgement leaves the broker
+      // PENDING reservation untouched and latches later dispatches off.
+      throw new GuardUnavailable('RBG_SETTLE_UNCERTAIN')
+    } finally {
+      this.#settling = false
+      if (this.#unavailable === null) {
+        this.#activeReservation = null
+        this.#phase = 'BEFORE_DISPATCH'
+      }
     }
-    log('SETTLE', {
-      reservation_id: reservationId, operation: op, status: reply.settlement?.status ?? null,
-      cost_usd: reply.settlement?.cost_usd ?? null, estimated: reply.settlement?.estimated ?? null,
-      reservation_exceeded: reply.settlement?.reservation_exceeded ?? null,
-      authoritative_usage: authoritative, unmapped_usage_worst_case: mapped === null,
-    })
+  }
+
+  /** F4: explicit fail-closed latch after an uncertain settlement. */
+  latchSettlementUncertain(): void {
+    this.#fail('RBG_SETTLE_UNCERTAIN', 'SETTLING')
   }
 
   async shutdown(): Promise<void> {
@@ -454,6 +570,13 @@ class BrokerClient {
     })
   }
 
+  #currentPhase(): Phase {
+    if (this.#settling) return 'SETTLING'
+    if (this.#activeReservation !== null || this.#phase === 'DISPATCHED') return 'DISPATCHED'
+    if (this.#started && this.#dispatchedCount > 0) return 'UNKNOWN'
+    return 'BEFORE_DISPATCH'
+  }
+
   #ensureStarted(): void {
     if (this.#started) return
     if (this.#unavailable !== null) throw new GuardUnavailable(this.#unavailable)
@@ -470,8 +593,8 @@ class BrokerClient {
       child = spawn(this.config.python, ['-B', '-m', 'autoteacher_m0.accounting.broker', '--config', this.config.configPath], {
         cwd: this.config.cwd, env, shell: false, stdio: ['pipe', 'pipe', 'pipe'],
       })
-    } catch (error) {
-      this.#fail(`RBG_BROKER_SPAWN_FAILED ${(error as Error).message}`)
+    } catch {
+      this.#fail('RBG_BROKER_SPAWN_FAILED', 'BEFORE_DISPATCH')
       throw new GuardUnavailable(this.#unavailable ?? 'RBG_BROKER_SPAWN_FAILED')
     }
     this.#child = child
@@ -480,12 +603,16 @@ class BrokerClient {
     child.stdout.on('data', (chunk: string) => this.#onStdout(chunk))
     child.stderr.on('data', (chunk: string) => {
       for (const line of chunk.split('\n')) {
-        if (line.length > 0 && this.#stderrLines.length < MAX_STDERR_LINES) this.#stderrLines.push(line.slice(0, 512))
+        if (line.length === 0) continue
+        this.#stderrBytes += Buffer.byteLength(line, 'utf8')
+        if (this.#stderrLines.length < MAX_STDERR_LINES && this.#stderrBytes <= MAX_STDERR_BYTES) this.#stderrLines.push(line.slice(0, 512))
       }
     })
-    child.on('error', (error: Error) => this.#fail(`RBG_BROKER_CHILD_ERROR ${error.message}`))
+    child.on('error', () => this.#fail('RBG_BROKER_CHILD_ERROR', this.#currentPhase()))
     child.on('exit', (code, signal) => {
-      if (!this.#shuttingDown) this.#fail(`RBG_BROKER_EXITED code=${String(code)} signal=${String(signal)}`)
+      if (!this.#shuttingDown) this.#fail('RBG_BROKER_EXITED', this.#currentPhase(), {
+        exit_code: typeof code === 'number' ? code : null, signaled: signal !== null,
+      })
     })
   }
 
@@ -494,34 +621,34 @@ class BrokerClient {
     for (;;) {
       const index = this.#buffer.indexOf('\n')
       if (index < 0) {
-        if (Buffer.byteLength(this.#buffer, 'utf8') > MAX_BROKER_FRAME_BYTES) this.#fail('RBG_BROKER_FRAME_TOO_LARGE')
+        if (Buffer.byteLength(this.#buffer, 'utf8') > MAX_BROKER_FRAME_BYTES) this.#fail('RBG_BROKER_FRAME_TOO_LARGE', this.#currentPhase())
         return
       }
       const line = this.#buffer.slice(0, index)
       this.#buffer = this.#buffer.slice(index + 1)
-      if (Buffer.byteLength(line, 'utf8') > MAX_BROKER_FRAME_BYTES) { this.#fail('RBG_BROKER_FRAME_TOO_LARGE'); return }
+      if (Buffer.byteLength(line, 'utf8') > MAX_BROKER_FRAME_BYTES) { this.#fail('RBG_BROKER_FRAME_TOO_LARGE', this.#currentPhase()); return }
       if (line.length === 0) continue
       let reply: BrokerReply
       try {
         reply = JSON.parse(line) as BrokerReply
       } catch {
-        this.#fail('RBG_BROKER_INVALID_JSON')
+        this.#fail('RBG_BROKER_INVALID_JSON', this.#currentPhase())
         return
       }
       if (typeof reply !== 'object' || reply === null || reply.v !== 1 || typeof reply.code !== 'string' || typeof reply.ok !== 'boolean') {
-        this.#fail('RBG_BROKER_INVALID_ENVELOPE')
+        this.#fail('RBG_BROKER_INVALID_ENVELOPE', this.#currentPhase())
         return
       }
       const pending = this.#pending
       if (pending === null || reply.id !== pending.id) {
-        this.#fail('RBG_BROKER_UNMATCHED_RESPONSE')
+        this.#fail('RBG_BROKER_UNMATCHED_RESPONSE', this.#currentPhase())
         return
       }
       this.#pending = null
       clearTimeout(pending.timer)
       if (!reply.ok) {
-        pending.reject(new GuardUnavailable(`RBG_BROKER_REJECTED_${reply.code}`))
-        if (reply.code === 'STARTUP_BLOCKED' || reply.code === 'ROUTE_BLOCKED' || reply.code === 'INTERNAL_ERROR') this.#fail(`RBG_BROKER_STARTUP_${reply.code}`)
+        pending.reject(new GuardUnavailable(`RBG_BROKER_REJECTED_${safeBrokerCode(reply.code)}`))
+        if (reply.code === 'STARTUP_BLOCKED' || reply.code === 'ROUTE_BLOCKED' || reply.code === 'INTERNAL_ERROR') this.#fail(`RBG_BROKER_STARTUP_${safeBrokerCode(reply.code)}`, this.#currentPhase())
       } else {
         pending.resolve(reply)
       }
@@ -535,7 +662,7 @@ class BrokerClient {
     return new Promise<BrokerReply>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.#pending = null
-        this.#fail('RBG_BROKER_TIMEOUT')
+        this.#fail('RBG_BROKER_TIMEOUT', this.#currentPhase())
         reject(new GuardUnavailable('RBG_BROKER_TIMEOUT'))
       }, timeoutMs)
       this.#pending = { id, resolve, reject, timer }
@@ -545,14 +672,14 @@ class BrokerClient {
             const pending = this.#pending
             this.#pending = null
             if (pending !== null) { clearTimeout(pending.timer); pending.reject(new GuardUnavailable('RBG_BROKER_WRITE_FAILED')) }
-            this.#fail('RBG_BROKER_WRITE_FAILED')
+            this.#fail('RBG_BROKER_WRITE_FAILED', this.#currentPhase())
           }
         })
       } catch {
         const pending = this.#pending
         this.#pending = null
         if (pending !== null) { clearTimeout(pending.timer); pending.reject(new GuardUnavailable('RBG_BROKER_WRITE_FAILED')) }
-        this.#fail('RBG_BROKER_WRITE_FAILED')
+        this.#fail('RBG_BROKER_WRITE_FAILED', this.#currentPhase())
       }
     })
   }
@@ -563,18 +690,29 @@ class BrokerClient {
     if (pending !== null) { clearTimeout(pending.timer); pending.reject(error) }
   }
 
-  #fail(reason: string): void {
-    if (this.#unavailable === null) this.#unavailable = reason
-    this.#rejectPending(new GuardUnavailable(reason))
+  #fail(code: string, phase: Phase, extra: Json = {}): void {
+    if (this.#unavailable !== null) { this.#rejectPending(new GuardUnavailable(this.#unavailable)); return }
+    const safeCode = SAFE_CODE.test(code) ? code : 'RBG_BROKER_UNAVAILABLE'
+    this.#unavailable = safeCode
+    this.#rejectPending(new GuardUnavailable(safeCode))
     const child = this.#child
     if (child !== null && child.exitCode === null && !this.#shuttingDown) {
       try { child.kill('SIGKILL') } catch { /* already gone */ }
     }
-    if (this.#stderrLines.length > 0) {
-      const stderr = this.#stderrLines.splice(0, this.#stderrLines.length)
-      log('BROKER_DIAGNOSTICS', { reason, stderr_lines: stderr })
-    }
-    log('UNAVAILABLE', { reason, reservations_not_dispatched: true })
+    const stderr = this.#stderrLines.splice(0, this.#stderrLines.length)
+    this.#stderrBytes = 0
+    const diagnostics = storeRawDiagnostics(safeCode, stderr)
+    log('UNAVAILABLE', {
+      code: safeCode,
+      phase,
+      latch: true,
+      dispatched: this.#dispatchedCount > 0,
+      dispatched_count: this.#dispatchedCount,
+      reservation_pending: this.#activeReservation !== null,
+      reservation_id_hash: this.#activeReservation === null ? null : hashId(this.#activeReservation),
+      stderr: diagnostics,
+      ...extra,
+    })
   }
 }
 
@@ -584,18 +722,32 @@ function requestIdentity(kind: string): string {
   return `rbg-${kind}-${requestCounter}-${randomBytes(6).toString('hex')}`
 }
 
+function mapFinishReason(finish: FinishReason | undefined): ModelCompletionStatus {
+  const kind = finish === undefined ? 'unknown' : String((finish as { kind?: unknown }).kind ?? 'unknown')
+  if (kind === 'stop' || kind === 'tool-calls' || kind === 'max-tokens') return 'COMPLETED'
+  if (kind === 'aborted') return 'ABORTED'
+  if (kind === 'error') return 'ERROR'
+  if (kind === 'blocked') return 'BLOCKED'
+  return 'UNKNOWN'
+}
+
+function mapStreamError(error: unknown): ModelCompletionStatus {
+  if (error instanceof Error && (error.name === 'AbortError' || /abort/i.test(error.message))) return 'ABORTED'
+  return 'ERROR'
+}
+
 export function apply(ctx: Context, rawConfig: unknown): void {
   let parsed: { config: GuardConfig; fixed: FixedBrokerPolicy }
   try {
     parsed = parseConfig(rawConfig)
   } catch (error) {
-    const reason = error instanceof GuardUnavailable ? error.reason : String((error as Error).message)
-    log('BOOT_INVALID', { reason, fail_closed: true })
+    const code = safeErrorCode(error)
+    log('BOOT_INVALID', { code, fail_closed: true })
     // Even a malformed guard configuration must fail closed: every stream is refused
     // before any provider dispatch. The upstream loader continues after a throwing
     // plugin, so a registered deny-all middleware is the safe behavior.
     ctx.on('llm/stream', async function* (): AsyncIterable<StreamChunk> {
-      throw new GuardUnavailable(`RBG_GUARD_BOOT_INVALID ${reason}`)
+      throw new GuardUnavailable('RBG_GUARD_BOOT_INVALID')
     }, { prepend: true })
     return
   }
@@ -604,12 +756,20 @@ export function apply(ctx: Context, rawConfig: unknown): void {
   ctx.effect(() => () => broker.shutdown(), 'runtime-budget-guard: broker child shutdown')
   log('BOOT', {
     provider: config.policy.provider, model: config.policy.model,
-    broker_scope: fixed.scopeId, broker_db_path: fixed.dbPath,
-    broker_policy_sha256: config.broker.configSha256, broker_python: config.broker.python,
-    broker_config: config.broker.configPath, cwd: config.broker.cwd,
+    broker_scope: fixed.scopeId,
+    broker_db_path_hash: hashId(fixed.dbPath),
+    broker_policy_sha256: config.broker.configSha256,
+    broker_python_hash: hashId(config.broker.python),
+    broker_config_hash: hashId(config.broker.configPath),
+    cwd_hash: hashId(config.broker.cwd),
     max_input_bound: config.policy.maxInputTokens, max_output_bound: config.policy.maxOutputTokens,
-    max_provider_retries: config.policy.maxProviderRetries, purposes: config.policy.purposes,
-    task22_pending: 'stdio broker only; a live provider/full-budget bridge remains task22 follow-up',
+    max_provider_retries: config.policy.maxProviderRetries,
+    provider_auto_retry: 'disabled',
+    logical_stream_slots: 'every stream = one request + one step',
+    retry_field_semantics: 'attribution-only; no provider-internal retry quota',
+    task_id_scheme: 'rbg-' + 'sha256(NFC sessionId)[0:64]',
+    public_log_contract: 'allowlisted codes/numbers/booleans/hashed IDs only',
+    purposes: config.policy.purposes,
   })
 
   ctx.on('llm/stream', async function* (options: GenerateOptions, next: () => AsyncIterable<StreamChunk>): AsyncIterable<StreamChunk> {
@@ -620,35 +780,85 @@ export function apply(ctx: Context, rawConfig: unknown): void {
     let usage: TokenUsage | null = null
     let finish: FinishReason | undefined
     let failed = false
+    let integrityUncertain = false
+    let modelCompletionStatus: ModelCompletionStatus = 'UNKNOWN'
+    let accountingStatus: AccountingStatus = 'RESERVED'
+    let settlementError: Error | null = null
     try {
       reservation = await broker.reserve(admission)
       const stream = next()
       for await (const chunk of stream) {
         if (chunk.type === 'usage') usage = chunk.usage
-        else if (chunk.type === 'finish') finish = chunk.reason
+        else if (chunk.type === 'finish') {
+          finish = chunk.reason
+          if (modelCompletionStatus === 'UNKNOWN') modelCompletionStatus = mapFinishReason(chunk.reason)
+        }
         yield chunk
       }
       const after = requestDigest(options)
       if (after !== admission.digest) {
+        // F3: post-hoc detection only. This is NOT a pre-send interception and
+        // it cannot bound a request that the downstream provider already sent.
         failed = true
-        log('IMMUTABILITY_VIOLATION', { reservation_id: reservation.reservationId, before: admission.digest, after })
+        integrityUncertain = true
+        log('REQUEST_INTEGRITY_UNCERTAIN', {
+          reservation_id_hash: hashId(reservation.reservationId),
+          before_digest: admission.digest, after_digest: after,
+          interception: 'post-hoc-only',
+          accounting_status_after_settle: 'WORST_CASE_HELD',
+        })
       }
     } catch (error) {
       failed = true
-      if (reservation === null) log('STREAM_REFUSED', { reason: error instanceof GuardUnavailable ? error.reason : String((error as Error).message) })
+      modelCompletionStatus = mapStreamError(error)
+      // F3: re-check the digest even when the downstream throws early (for
+      // example a mutated provider route is rejected by the runtime). This is
+      // still post-hoc classification; it never claims a pre-send interception.
+      const afterCatch = requestDigest(options)
+      if (afterCatch !== admission.digest) {
+        integrityUncertain = true
+        log('REQUEST_INTEGRITY_UNCERTAIN', {
+          reservation_id_hash: reservation === null ? null : hashId(reservation.reservationId),
+          before_digest: admission.digest, after_digest: afterCatch,
+          interception: 'post-hoc-only',
+          accounting_status_after_settle: 'WORST_CASE_HELD',
+        })
+      }
+      if (reservation === null) log('STREAM_REFUSED', { phase: 'BEFORE_DISPATCH', code: safeErrorCode(error) })
       throw error
     } finally {
       if (reservation !== null) {
         try {
-          await broker.settle(admission, reservation.reservationId, usage, finish, failed)
-        } catch (error) {
-          // Never retry settlement issuance: the reservation stays conservatively
-          // pending and the guard fails closed for all later streams.
-          const reason = error instanceof GuardUnavailable ? error.reason : String((error as Error).message)
-          log('SETTLE_UNCERTAIN', { reservation_id: reservation.reservationId, reason })
-          await broker.shutdown()
+          const result = await broker.settle(admission, reservation.reservationId, usage, finish, failed)
+          accountingStatus = result.accountingStatus
+        } catch {
+          accountingStatus = 'SETTLEMENT_UNCERTAIN'
+          broker.latchSettlementUncertain()
+          settlementError = new GuardUnavailable('RBG_SETTLEMENT_UNCERTAIN')
         }
       }
+      log('RESULT', {
+        v: 1,
+        model_completion_status: modelCompletionStatus,
+        accounting_status: accountingStatus,
+        dispatched: reservation !== null,
+        reservation_id_hash: reservation === null ? null : hashId(reservation.reservationId),
+        session_id_hash: hashId(admission.sessionId),
+        task_id: admission.taskId,
+        integrity_uncertain: integrityUncertain,
+        settlement_uncertain: accountingStatus === 'SETTLEMENT_UNCERTAIN',
+        retry_field: 'attribution-only',
+      })
+      if (settlementError !== null) throw settlementError
+      if (integrityUncertain) throw new GuardUnavailable('RBG_REQUEST_INTEGRITY_UNCERTAIN')
     }
   }, { prepend: true })
+}
+
+/** Test-only helpers: committed targeted tests import these; not runtime API. */
+export const __test = {
+  encodeTaskId,
+  hashId,
+  requestDigest,
+  safeErrorCode,
 }

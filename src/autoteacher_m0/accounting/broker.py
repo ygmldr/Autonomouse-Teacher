@@ -176,11 +176,29 @@ class BookkeepingBroker:
         op = request["op"]
         count = database.execute("SELECT COUNT(*) FROM budget_broker_messages WHERE scope_id=?",
                                  (self.ledger.scope_id,)).fetchone()[0]
-        if count >= self.max_messages:
-            raise ProtocolError("MESSAGE_LIMIT")
+        # F2: journal capacity is split. Observation never consumes journal quota
+        # and never writes a row; it stays available after the journal cap. The
+        # aggregate snapshot is a fixed-size object (one bounded NDJSON frame),
+        # and serve() processes one line at a time, so frequency/backpressure and
+        # response size are bounded by the protocol loop, not by journal storage.
         if op == "snapshot":
             return envelope(identity, ok=True, code="SNAPSHOT", snapshot=self.ledger.snapshot())
+        if op in {"settle", "fail"}:
+            # Completing an already-counted PENDING reservation is capacity that
+            # was reserved when the reservation was admitted. It must remain
+            # possible even after new reservations are refused (F2), and the
+            # admission invariant below keeps count+1 <= max_messages.
+            return self._complete(database, request)
         if op == "reserve":
+            pending = database.execute(
+                "SELECT COUNT(*) FROM budget_reservations WHERE scope_id=? AND status='PENDING'",
+                (self.ledger.scope_id,)).fetchone()[0]
+            # Reserve admission reserves ONE journal slot for this request and ONE
+            # future settle/fail slot for the same reservation. Existing pending
+            # reservations already hold their completion slots, so:
+            #   count + new_reserve_row + (pending + this_completion) <= max_messages
+            if count + pending + 2 > self.max_messages:
+                raise ProtocolError("MESSAGE_LIMIT")
             policy = self.routes.get((request["route_id"], request["model"]))
             if policy is None:
                 return envelope(identity, code="ROUTE_BLOCKED")
@@ -195,11 +213,18 @@ class BookkeepingBroker:
             return envelope(identity, ok=True, code="RESERVED", dispatch_allowed=True,
                             reservation_id=reservation.reservation_id,
                             reservation=json.loads(canonical(asdict(reservation))))
+        raise ProtocolError("UNKNOWN_OPERATION")
+
+    def _complete(self, database, request: dict) -> dict:
+        identity = request["id"]
+        op = request["op"]
         row = database.execute("SELECT * FROM budget_reservations WHERE scope_id=? AND reservation_id=?",
                                (self.ledger.scope_id, request["reservation_id"])).fetchone()
         if row is None:
             return envelope(identity, code="UNKNOWN_RESERVATION")
         if row["status"] != "PENDING":
+            # Repeating a completion (same or new message id) is idempotent:
+            # no extra journal row, no double charge, no refund (T-JOURNAL).
             return envelope(identity, code="ALREADY_SETTLED")
         policy = self.routes.get((row["route_id"], row["model"]))
         if policy is None:
@@ -222,6 +247,29 @@ class BookkeepingBroker:
             identity = message["id"]
         try:
             request = self._validate_message(message)
+            # F2: snapshot is a read-only observation. It is NOT journaled (so it
+            # neither consumes the message quota nor grows durable storage) and it
+            # remains available after the journal cap. Frequency and size are
+            # bounded by the serial serve loop and MAX_FRAME.
+            if request["op"] == "snapshot":
+                with self.ledger._transaction() as database:
+                    return self._operate(database, request)
+            # F2: a completion repeated with a NEW message id for an already
+            # settled reservation is idempotent and must not add another journal
+            # row/storage. Exact same-id replays still fall through to journal_once
+            # so the original stored response (and duplicate flag) is preserved.
+            if request["op"] in {"settle", "fail"}:
+                with self.ledger._transaction() as database:
+                    seen = database.execute(
+                        "SELECT digest,response_json FROM budget_broker_messages "
+                        "WHERE scope_id=? AND message_id=?",
+                        (self.ledger.scope_id, request["id"])).fetchone()
+                    if seen is None:
+                        row = database.execute(
+                            "SELECT status FROM budget_reservations WHERE scope_id=? AND reservation_id=?",
+                            (self.ledger.scope_id, request["reservation_id"])).fetchone()
+                        if row is not None and row[0] != "PENDING":
+                            return envelope(identity, code="ALREADY_SETTLED")
             digest = hashlib.sha256(canonical(request).encode("utf-8")).hexdigest()
             response, duplicate = self.ledger.journal_once(request["id"], digest,
                                                           lambda db: self._operate(db, request))

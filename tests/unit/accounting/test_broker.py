@@ -386,8 +386,31 @@ def test_message_journal_cap_preserves_existing_identities_and_pending(tmp_path)
     setup = config(tmp_path)
     setup["max_messages"] = 1
     broker = BookkeepingBroker(setup)
-    first = broker.handle(request())
-    assert broker.handle(request("new"))["code"] == "MESSAGE_LIMIT"
+    # F2: reserve admission also reserves one future settle/fail journal slot,
+    # so a journal limit of one message cannot admit any reservation at all.
+    denied = broker.handle(request())
+    assert denied["code"] == "MESSAGE_LIMIT" and not denied["dispatch_allowed"]
+    assert broker.ledger.snapshot()["pending"] == 0
+    # A replay of the denied reservation must not grant one either.
     assert not broker.handle(request())["dispatch_allowed"]
-    assert broker.ledger.snapshot()["pending"] == 1
-    assert first["reservation_id"] == broker.handle(request())["reservation_id"]
+
+
+def test_message_journal_cap_completes_existing_pending_and_snapshot(tmp_path):
+    setup = config(tmp_path)
+    setup["max_messages"] = 2
+    broker = BookkeepingBroker(setup)
+    first = broker.handle(request())
+    assert first["dispatch_allowed"]
+    # One reservation row plus its reserved completion slot fill the journal.
+    assert broker.handle(request("new"))["code"] == "MESSAGE_LIMIT"
+    snapshot = broker.handle({"v": 1, "id": "state", "op": "snapshot"})
+    assert snapshot["ok"] and snapshot["snapshot"]["pending"] == 1
+    completed = broker.handle(settle(first["reservation_id"]))
+    assert completed["ok"] and completed["code"] == "SETTLED"
+    assert broker.ledger.snapshot()["pending"] == 0
+    # Repeating the completion is idempotent: no second charge, no extra row.
+    assert broker.handle(settle(first["reservation_id"], identity="settle-2"))["code"] == "ALREADY_SETTLED"
+    assert broker.ledger.snapshot()["requests"] == 1
+    # The journal is permanently full for new reservations; snapshots stay readable.
+    assert broker.handle(request("third"))["code"] == "MESSAGE_LIMIT"
+    assert broker.handle({"v": 1, "id": "state-2", "op": "snapshot"})["ok"]

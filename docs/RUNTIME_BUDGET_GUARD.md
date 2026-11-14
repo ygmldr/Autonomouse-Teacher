@@ -107,9 +107,11 @@ legit loop 请求本身 deep-frozen；selftest 用恶意内层 middleware 修改
 - 只有收到 authoritative usage 且 finish 为 `stop`/`tool-calls`/`max-tokens` 才 settle
   实际值；无 usage、中断、abort、error、transport 不明、缺 finish → `fail`（worst-case：
   broker 按完整 reservation 计费，绝不退款）。
-- 重试：同一 logical step 的 provider retry 会重新进入 waterfall → 每次 dispatch 独立
-  reservation（session s9 实测 2 次 post-attempt reservation：第一次 worst-case、
-  第二次实际结算；selftest 无该用例）。compaction/Judge 若走同一 `llm/stream` 也各自独立预留；compaction
+- 重试（v0.5 PR1）：M0 禁用 provider 内部自动重试（adapter `maxRetries` 必须为 0，
+  `mode=always`/非零一律拒绝）；orchestrator 级重试是**新的 logical stream**，重新进入
+  waterfall → 每次 dispatch 独立 reservation 并独立消耗 request/step slot（session s9
+  实测 2 次 post-attempt reservation：第一次 worst-case、第二次实际结算；selftest 无该用例）。
+  `retry:false` 仅归因，不声称能限制 provider 内部 retry。compaction/Judge 若走同一 `llm/stream` 也各自独立预留；compaction
   `purpose` 已在真实 Cordis public waterfall 验证（未触发真实 agent-loop compaction，见 §7）。
 
 ## 5. Config（profile 注入，非客户端）
@@ -121,7 +123,7 @@ policy:
   brokerScopeId: fixed-offline-scope
   maxOutputTokens: 1024
   maxInputTokens: 2500000
-  maxProviderRetries: 1
+  maxProviderRetries: 0   # v0.5 PR1/M0: provider auto retry disabled (nonzero rejected)
   purposes: [conversation, compaction, judge]
 broker:
   python: /opt/python/bin/python3.11
@@ -221,3 +223,47 @@ provider 是显式 scripted test fixture（不是真实模型），仅用于公�
 Gate/Adapter/primary 或任务书；只新增独立 plugin、docs 与本 artifacts。既有 task20
 （17-case）、task21（132+16=148、独立 closure 75/75）、phase4（326 全量、manifest
 `bfea6fa1…`）证据原样保留。本文件中的数量来自最终隔离日志，不与历史轮次相加。
+
+## 10. v0.5 PR1 增量（F1/F3/F4/F5/F6，2026-11-14）
+
+本节记录 PR1 的行为增量与定向测试；**不改变**核心 `reserve-before-provider` /
+`deny-before-provider` 性质，不改 phase5 冻结字节与历史结论。guard 源码现为 v0.5 PR1
+（旧冻结 blob `1ccdb658…` / 旧构建 lib `3c184a62…` 仍可从 git 历史重建用于复验）。
+
+- **F1**：M0 profile 必须 `maxProviderRetries=0`；adapter `providerRetryPolicy` 为
+  `mode=always` 或 `maxRetries>0` 一律拒绝（`RBG_PROVIDER_RETRY_POLICY_UNSAFE`）。
+  每个 logical stream（含 orchestrator 级重试/compaction）都是独立 waterfall entry，
+  独立 reserve 并独立消耗 request/step slot；`retry:false` 仅归因，不再声称限制
+  provider 内部 retry。provider 内部真实隐藏 retry 行为仍 **UNVERIFIED**（无 Live）；
+  M0 以“禁用而非计数”消除它。
+- **F3**：`requestDigest` 保留为**事后审计**：流结束后 digest 不一致 →
+  `RBG_REQUEST_INTEGRITY_UNCERTAIN`，当前 stream 按 worst-case settle、调用失败；
+  明确**不是发包前拦截**，不能据此声称已控制真实计费请求。真正事前拦截留 PR3/PR4。
+- **F4**：拆 `model_completion_status`（COMPLETED/ERROR/ABORTED/BLOCKED/UNKNOWN）与
+  `accounting_status`（RESERVED/SETTLED/WORST_CASE_HELD/SETTLEMENT_UNCERTAIN）；
+  每次 stream 输出机器可读 `RBG_RESULT`。settle 未知/失败 → accounting 为
+  SETTLEMENT_UNCERTAIN、抛错使上层验收失败、显式 fail-closed latch（后续 dispatch =
+  provider 调用 0）；PENDING 不释放、不退款、不重试结算。
+- **F5**：`encodeTaskId = "rbg-" + sha256(NFC(sessionId)).hex[0:64]`（≤96 字符），
+  稳定单射；旧 reservation 保留旧 ID，新 reservation 使用新 ID。
+- **F6**：`RBG_*` 公开日志只输出 allowlist 错误码/数字/布尔/哈希 ID（session /
+  reservation / 路径均哈希）；故障 `RBG_UNAVAILABLE` 使用
+  `phase=BEFORE_DISPATCH|DISPATCHED|SETTLING|UNKNOWN` + dispatched 计数，删除固定
+  `reservations_not_dispatched:true`；raw broker stderr 仅在 launcher 显式设置
+  `RBG_RAW_DIAGNOSTICS_PATH` 时写入 0600 受限文件，公开日志只含 count/bytes/sha256。
+  `sk-FAKE-SECRET` 哨兵测试覆盖 error/stderr/session/公开日志。
+- **F2（guard 侧）**：broker policy `max_messages` 校验上界对齐 broker 硬上限
+  100,000（M0 profile 仍 4096）；guard 不内建 snapshot。
+
+**新增测试**：`plugins/runtime-budget-guard/tests/guard-pr1.test.mjs`
+（15 cases，真实 Cordis `LlmRuntime` public waterfall + committed fake NDJSON broker
+fixture + scripted providers；15/15 pass；旧 lib 下 13 failed/2 passed 的 fail-first
+证据保留）。Python 侧新增
+`tests/unit/accounting/test_broker_capacity_f1_f2.py` 与
+`tests/integration/budget_bridge/test_stdio_capacity_f2.py`（旧 broker 8 failed/3 passed；
+修复后 accounting + budget_bridge 全套 131 passed）。argv/UTC/exit/镜像身份/产物 hash
+见 `artifacts/m0-closeout-fix-tests/manifest.json`。
+
+**未变/未验证**：per-internal-HTTP/Files/wire attempt 仍不观测；无 Live/真实
+Key/HTTP（real_model=0、http=0）；真实 agent-loop compaction/Judge 未触发；mutation
+仍可能已发包后才检测；历史 phase5 证据与 docs 历史字节不改；Live 仍 BLOCKED。
