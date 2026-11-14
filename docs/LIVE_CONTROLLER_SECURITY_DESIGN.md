@@ -149,7 +149,7 @@ path 前缀仅 `/inference/go/`。设计上：
 全部测试在固定 digest `localhost/autoteacher-local-oci@sha256:62d3569e…64667b`
 （image id `56db1e2a…`，Python 3.11.15，pytest 9.2.0）内、`--network none`、只读、
 非 root、无 host home/socket 运行；宿主机不执行 pytest。结果：**104 passed, 1 skipped**
-（skip 为既有 `/input` 外部探针契约，与本 PR 无关），Ruff `All checks passed!`。
+（skip 为既有 `/input` 外部探针契约，与本 PR 无关）。Ruff：**PR3 scoped**（`src/autoteacher_m0/security tests/unit/security tests/integration/sandbox scripts`）`All checks passed!`；当时 **repo-wide** Ruff 仍因既有/后续文件的未用 import/赋值未通过，已由 V-PR3-1 修复（commit `fix: closeout ruff hygiene (V-PR3-1)`，详见 `artifacts/m0-controller-no-key/manifest-errata.json`）；修复后 repo-wide `All checks passed!`，PR3 安全负测结论不受影响。
 
 | 类别 | 关键负测（测试文件） | 期望/结果 |
 |---|---|---|

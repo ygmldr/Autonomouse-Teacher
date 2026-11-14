@@ -4,7 +4,6 @@ Every child here is launched ONLY by isolated-container pytest. No network, no
 credentials and no real model are involved.
 """
 import json
-from pathlib import Path
 import signal
 import subprocess
 import sys

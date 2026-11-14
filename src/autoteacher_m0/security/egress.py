@@ -17,8 +17,7 @@ from dataclasses import dataclass, field
 from decimal import Decimal
 from enum import StrEnum
 import hashlib
-import json
-from typing import Iterable, Mapping, Sequence
+from typing import Iterable, Mapping
 
 from autoteacher_m0.contracts import ErrorCode, RuntimeFailure
 

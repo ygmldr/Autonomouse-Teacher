@@ -26,7 +26,6 @@ import json
 import os
 from pathlib import Path
 import subprocess
-import sys
 import tempfile
 import time
 
@@ -112,7 +111,6 @@ def verify(*, binary: Path, profile: str, patches: list[Path], target_root: Path
         stderr = runtime_stderr.read_text(encoding="utf-8") if runtime_stderr else ""
         code = 0
     else:
-        stderr_path = None
         argv = [str(binary), "--profile", profile]
         for patch in patches:
             argv += ["--patch", str(patch)]

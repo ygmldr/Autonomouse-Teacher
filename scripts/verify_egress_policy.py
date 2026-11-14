@@ -11,7 +11,6 @@ and Live stays BLOCKED.
 from __future__ import annotations
 
 import json
-import sys
 
 from autoteacher_m0.security.egress import (
     AttemptState, EgressBoundary, EgressPolicy, EgressRequest, EgressViolation,
@@ -37,7 +36,6 @@ def request(**overrides: object) -> EgressRequest:
 
 def main() -> int:
     boundary = EgressBoundary()
-    transport = MockEgressTransport(boundary)
 
     allowed = boundary.require(request())
     check("approved_request_allowed", allowed.allowed and allowed.call_id.startswith("eg-"))

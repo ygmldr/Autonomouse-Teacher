@@ -4,10 +4,7 @@ Runs only inside the isolated, credential-free container pytest image. These tes
 are added by v0.5 PR1; they do not rewrite any historical evidence.
 """
 from concurrent.futures import ThreadPoolExecutor
-from copy import deepcopy
-import json
 
-import pytest
 
 from autoteacher_m0.accounting.broker import BookkeepingBroker
 

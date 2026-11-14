@@ -21,7 +21,7 @@
 | 凭据 | 无真实 Key；测试仅用固定假值 `oc_sk_FAKE_REHEARSAL_…` 做泄漏负测 |
 | 时间 | 2026-11-14T15:00:14Z → 15:00:33Z（UTC） |
 | exit | 0 |
-| 结果 | **104 passed, 1 skipped**（105 collected）；Ruff `All checks passed!` |
+| 结果 | **104 passed, 1 skipped**（105 collected）；Ruff：**PR3 scoped**（security/unit/sandbox/scripts）`All checks passed!`；repo-wide 当时有未用 import/赋值（与 PR3 security 无关），已由 V-PR3-1 修复，修复后 repo-wide `All checks passed!`（见 `artifacts/m0-controller-no-key/manifest-errata.json`） |
 | skip | `tests/integration/sandbox/test_probe_contract.py`（需外部 `/input` 探针 mount，既有契约，与本 PR 无关） |
 
 argv：`artifacts/m0-controller-no-key/argv/no-key-tests.argv.json`；
