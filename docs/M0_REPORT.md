@@ -1,6 +1,12 @@
 # Autonomous Teacher — M0 验证报告
 
-## 最新状态 — 第三阶段独立审计（2026-11-13 UTC）
+## 最新状态 — 第四阶段独立审计（2026-11-14 UTC）
+
+**当前冻结实现 `f674403d12a6b51249b772090b7b004013d4ceb1`：非实现者独立复核确认第四阶段离线交付在其声明的范围内成立。** 独立重跑全量 pytest **326 passed**（含 89 专门子集，不相加）、stdio 账本 **148 passed**、Ruff PASS、真实 Cordis 插件 strict build + **8/8** registry、wheel 构建（SHA `07fcb9e5…` 与 owner 一致）与 wheel-only 无源码安装 CLI/E1 API、SDK strict rebuild（6 产物逐字节一致）以及 **17 用例 SDK suite**（`sdk_run_calls15 / synthetic_adapter_invocations16 / real_model_calls0 / http_calls0 / resume_pairs3 / dual_home_bidirectional true`）全部通过；owner 声明计数（`326 / 89子集 / 148重放 / 8 / 17`）与日志一致，不同 scope 不相加。**SDK fixture 是真实锁定 DSH 引擎 + 显式 synthetic `offline-test-only` provider，不是模型、不是 E1b/E2 Live、不是生产 Adapter；stdio broker 只是固定 scope 的 bookkeeping，不是授权/Key 代理/真实账单上限，task22 公开 `llm/stream` 预算 middleware 未实现、未接线。** 真实模型/E1/E2/E3/E5、P03 独立人类授权、外部 watchdog 与真实 usage/逐 step 记账仍 **BLOCKED**，整体 **DECISION PENDING**；生产 Gate/Adapter/默认 primary 路由未改。
+
+来源：[第四阶段manifest](<../artifacts/phase4-integration/manifest.json>) SHA `bfea6fa1d4cb3d144879b784aeb76c73f1fee3ef0842034b37dba939e90a2df5`；[独立 REVIEW_PHASE4](<REVIEW_PHASE4.md>)；[reviewer raw/evidence](<../artifacts/reviewer-phase4/manifest.json>)。当前状态详见 §10。首轮 d5/146、phase2 c155/235、phase3 5df4f3b/241 及其 SDK keyless 子集均保留为真实历史，不倒填。
+
+## 第三阶段状态历史（2026-11-13 UTC）
 
 **当前冻结实现 `5df4f3bdbecdf0683533ef7f0a176513713436cd`：独立241 Python PASS（含89专门子集，不相加）、插件8 PASS、Ruff/wheel/无源码真实安装CLI与E1 API脚本PASS。** 同原1cc SDK binary配精确RO40c34 native cache，无preload且scratch noexec不变，已实际initialize-ready、观察registered schemas[]、graceful0及负握手cleanup。exact本地OCI manifest62d/config56db的独立OS命令与candidate元数据target实测通过。**这些是限定新增子集，不是完整H1/Session/模型/Runner.run生命周期或跨机load验证；整体仍DECISION PENDING / Live BLOCKED。**
 
@@ -12,7 +18,7 @@
 
 新证据：[阶段二manifest](<../artifacts/phase2-integration/manifest.json>) SHA `c512d653f62b6604903890579ea85da48b2fef876f3b087ea96311e7c5c2d94b`；[独立阶段二审计](<REVIEW_PHASE2.md>)及[本轮reviewer原始证据](<../artifacts/reviewer-phase2/manifest.json>)。详见§8。
 
-> **以下§1–7保留首轮d5db491的历史范围、计数和NOT RUN事实；§8保留第二阶段c155789历史。最新第三阶段状态见§9，不把新结果倒填到旧执行中；首轮/phase2 REVIEW、manifest与原始产物保持原样。**
+> **以下§1–7保留首轮d5db491的历史范围、计数和NOT RUN事实；§8保留第二阶段c155789历史；§9保留第三阶段5df4f3b历史。最新第四阶段状态见§10。不把新结果倒填到旧执行中；各阶段 REVIEW、manifest与原始产物保持原样。**
 
 ## 1. 决策与执行范围
 
@@ -265,3 +271,37 @@ exact0.2.2-rc.2原始tar/source静态核实 `llm/stream` 确为pre-adapter water
 - Dockerfile python-test/plugin-test依赖stages仍NOT RUN；本次Node build使用共享rootfs，不是依赖target通过。本次image OS负向probe不代替全部资源攻击/恢复矩阵。
 
 当前还可无Key推进offline-test-only provider下真实SDK/RPC/Session/工具/恢复与预算桥故障注入、受控独立平面下Runner lifecycle、离线依赖target与OCI接收端roundtrip。公开prehook/Files retry/extension omission调查仍是静态结论，未因native ready或image OS通过而实现每billable attempt预算/usage/watchdog。P03独立授权、可信凭据部署、private eval权限与全部强制Live门槛仍缺；**DECISION PENDING保持不变，不是只差Key或批准。**
+
+## 10. 第四阶段 — SDK离线会话闭环与stdio账本桥（独立task24，2026-11-14 UTC）
+
+### 基线与独立覆盖
+
+第四阶段实现 **`f674403d12a6b51249b772090b7b004013d4ceb1`**（父提交 `e0ce9c8`），相对父提交仅17文件：离线fixture插件、SDK离线会话/ broker文档、accounting 4实现文件、2测试与README/runbook增量；生产 Gate/Adapter/默认primary/config/锁/Dockerfile **diff为空**。非实现者用 `git archive` 从该提交重建94文件公开stage（tar SHA `408ee068…`、归一化 `67fffd66…`），逐文件核对 Git blob 与 owner `final-stage` 后，在既有固定digest无Key禁网OCI（`62d356…`，nonroot/只读/cap0/nnp/cgroup受限）独立重跑：
+
+| 独立重跑（审计者新argv/新日志） | 结果 | 唯一说明 |
+|---|---|---|
+| 全量 pytest `tests/unit tests/integration` | **326 passed in 4.26s，exit0** | 与owner 326一致；不预填 |
+| 专门 E1-02 子集 | **89 passed in 0.20s，exit0** | 326子集，不相加 |
+| stdio账本148回归重放 | **148 passed in 3.96s，exit0** | stage内 broker/test 字节=前轮独立闭环 fixed源码；132历史+16修复回归 |
+| Ruff | **All checks passed!**，exit0 | 与owner lint日志逐字节相同 |
+| wheel构建 | exit0，wheel SHA **`07fcb9e5…`与owner一致** | 构建日志与owner逐字节相同 |
+| wheel-only无源码安装CLI/E1 API | exit0；安装/CLI/API/脚本 markers与5个payload自校验通过 | 与owner语义一致 |
+| 真实Cordis插件strict build+8 registry | exit0；3 isolated命令exit0；**TAP 8/8 pass**；built产物hash=阶段3冻结值 | 紧构建输入经hash核验 |
+| SDK fixture strict rebuild | exit0；**6个BUILT_FILE hash与task20/phase4期望一致**；日志与task20 build日志逐字节相同 | 从冻结插件源重新tsc |
+| SDK 17用例suite | exit0；summary `cases17/sdk_run15/synthetic16/real_model0/http0/resume_pairs3/dual_home true` | 25项数据语义检查+与owner日志case级parity PASS |
+
+交叉核对：phase4 manifest `bfea6fa1…`/`artifact-hashes 53/53`/`key-hashes 42/42`/wheel/plugin-built/installed-input 均 OK；重放输入归一化 hash 与历史一致（`final-stage 67fffd66…`、`sdk-build input ad041386…`、`sdk-replay f438c048…`=task20 stage、rootfs `25491e45…`、deps `e07729d7…`、插件node deps `026a7a15…`）；SDK runtime/validator/suite/worker/native cache hash与task20 manifest一致；pkg cache **4857/4857 OK**；owner安装产物5/5与日志一致、独立重跑的 `installed-summary.json`逐字节相同（其余4个仅随机UUID/时间戳不同，归一化后语义相同）；运行后容器 exact-name/全局查询为空。历史证据未改写：integration `711b02b4…`、phase2 `c512d653…`、phase3 `f4021242…` 及 sdk-fixture 65/65、budget-broker evidence-fixed 24/24、reviewer-phase3 83/83、broker closure 75/75 均校验通过。
+
+### SDK fixture（B层）与stdio broker边界（不可夸大）
+
+- **B层=真实锁定DSH引擎二进制`1cc41d5a…` + 真实Python SDK0.2.2rc2 + 真实JSON-RPC/Session v4/工具注册表/执行器 + 显式确定性`offline-test-only`/`fixture-v1`脚本provider。** provider无HTTP/无模型/无非确定输出，必须`AUTOTEACHER_OFFLINE_FIXTURE=1`且真实provider列表为空才注册；16次invocation全部`real_model_calls=0/http_calls=0`。真实的是引擎/会话/工具链路，不是模型。
+- **工具事件非模型选择**：`tool-call`由脚本在`FIXTURE_TOOL`下产生；真实的是`request/header`中已注册`skill_lookup` schema、真实分发/执行、`callId`关联与`tool/result`（`isError=false`，结果等于公开`skills.json`的`binary_search`条目）。不能记“模型调用了工具”或 E1b/E2 Live。
+- **语义与日志一致**：3/3跨新worker进程save→recall（同Session ID、不同PID、nonce精确回显）；双独立home同Session ID双向nonce隔离；unknown/corrupt resume为明确`JsonRpcError`且0 run；受控SIGTERM后`TransportClosedError(active-input)`、turn1 `aborted/disposed`、无usage/finish、turn2 resume恢复并保留中断痕迹。双home只证API/命名空间逻辑隔离（非E5文件系统隔离），17用例不是E4真实评估/教学效果证据。
+- **不是运行中预算guard**：stdio broker 148重放通过且沿用前轮已闭环的持久`known_fee`/`price_json`修复；但`dispatch_allowed`只是首次记账，broker未被runtime/Gate/Adapter导入，仓库无task22 `plugins/runtime-budget-guard`，公开`llm/stream`预留/结算middleware不存在。README/runbook/SDK/broker文档均明确此限制。
+- **无Key/无Live**：容器env白名单、suite/worker环境断言、invocation计数、`.env.example`不含Key、HarnessAdapter仍硬`SECURITY_BLOCKED`（父提交以来未改）、LiveGate未动。
+
+### 审计结论、观察与未完成项
+
+**未发现阻断性实现缺陷**；第四阶段在其声明范围内通过。观察O1：phase4 `results.jsonl`/`run_records`保留了最初4个用例的 operator tooling 失误（嵌套podman argv，exit125，容器创建前失败）记录，但这4个失败尝试日志随后被成功重跑覆盖（仅build attempt1单独保留）；manifest已如实说明非项目代码失败，建议后续冻结保留失败尝试独立日志。残余风险均为范围性：B层synthetic无真实模型/usage/费用；task22接线、逐HTTP/retry/compaction预算、人类授权、外部watchdog、SDK内部隐藏transport语义、guest tmpfs持久性、跨机OCI恢复与native/pkg cache官方export重放仍NOT IMPLEMENTED/NOT RUN。
+
+**决策不变：DECISION PENDING；所有 Live 保持 BLOCKED；不签发 GO/CONDITIONAL GO，不把 synthetic fixture 当模型证据、不把 broker 当授权或真实账单上限、不启用 LiveGate。** 详见[独立 REVIEW_PHASE4](<REVIEW_PHASE4.md>)与[reviewer证据清单](<../artifacts/reviewer-phase4/evidence.sha256>)。

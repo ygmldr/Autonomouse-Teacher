@@ -1,5 +1,7 @@
 # ADR-001 — DSH Runtime 选型暂缓，保留离线可替换边界
 
+> **第四阶段当前更新：** 实现`f674403d12a6b51249b772090b7b004013d4ceb1`新增锁定真实DSH引擎/真实Python SDK/RPC/Session/工具链路 + 显式synthetic `offline-test-only` provider的17用例离线会话证据，以及stdio账本桥148回归；非实现者独立复核全量326、89子集、148重放、插件8、SDK strict rebuild/17用例、wheel安装CLI均在其声明范围内通过。**这些仍是B层synthetic/本地bookkeeping证据，不是模型、E1b/E2 Live、生产Adapter或真实预算guard；task22 `llm/stream`预算middleware未实现未接线。决策不变：DECISION PENDING，Live BLOCKED。** 第四阶段增量见文末与[REVIEW_PHASE4](<REVIEW_PHASE4.md>)。
+
 > **第三阶段当前更新：** 实现`5df4f3bdbecdf0683533ef7f0a176513713436cd`独立241 Python（含89子集）+8插件及镜像安装回归PASS；同原binary+精确只读native cache的无preload SDK启动/registered schemas[]/graceful0子集通过，exact本地OCI的OS命令/candidate metadata target通过。**M0仍DECISION PENDING，Live关闭**；未执行Session/模型/生产Adapter/Runner.run E2E或跨机load。下文前两阶段原状态保持历史，第三阶段增量见文末与[REVIEW_PHASE3](<REVIEW_PHASE3.md>)。
 
 > 第二阶段历史更新：最新实现`c155789557e525925435e7f8a8bf573856d80311`已独立235 Python（含89专门子集）+8插件及安装CLI回归通过，离线E1-02缺口已补。SDK无Keyinitialize实际尝试仍受native binding阻塞；公开预算hooks仍是静态可行性，桥未实现。**决策继续DECISION PENDING，不解锁Live。** 本文原有下列证据保持首轮d5db491历史，增量见文末与[REVIEW_PHASE2](<REVIEW_PHASE2.md>)。
@@ -96,3 +98,15 @@ rootfs本轮实际摘要25491e45开头，新增空/probe目录的排除证明恢
 公开预算hooks仍是静态可行性：logical stream未必等于HTTP计费attempt，Files retry与field-extension异常omit边界仍在。下一步可离线实现显式offline-test-only provider驱动真实SDK/RPC/Session/工具/恢复、预算桥的预留/拒绝/结算故障注入、受控controller lifecycle及独立OCI接收端验证，不必等真实Key。独立授权/可信凭据部署、真实usage/费用/总watchdog、private评估权限和主渠道完整Live验收仍未完成。
 
 故继续 **DECISION PENDING**；GO/CONDITIONAL GO的强制门槛、禁止Agent自批和既定默认路由不变。新keyless配置不是安全批准或自动放行项。
+
+## 第四阶段补充 — B层会话证据成立，选型决策不变
+
+新实现`f674403d12a6b51249b772090b7b004013d4ceb1`与[phase4 manifest](<../artifacts/phase4-integration/manifest.json>)（SHA`bfea6fa1d4cb3d144879b784aeb76c73f1fee3ef0842034b37dba939e90a2df5`）单列，父提交`e0ce9c8`；相对父提交仅离线fixture/accounting/docs/README/runbook 17文件，生产Gate/Adapter/默认primary/config/锁未改。非实现者独立复核：[REVIEW_PHASE4](<REVIEW_PHASE4.md>)与[reviewer-phase4证据](<../artifacts/reviewer-phase4/evidence.sha256>)。
+
+**新增事实（B层）：** 真实锁定DSH引擎`1cc41d5a…`/真实Python SDK0.2.2rc2/真实JSON-RPC/Session v4/工具注册表与执行器，配合显式`offline-test-only`/`fixture-v1`确定性脚本provider，17用例覆盖严格E1 JSON、真实`skill_lookup`注册/分发/执行事件、3/3跨进程save→recall、双home同Session ID双向隔离、unknown/corrupt负例、受控SIGTERM中断与resume恢复；独立重跑summary与owner一致（`17/15/16/0/0/3`），25项语义检查与case级parity通过。SDK strict build从冻结插件源重新tsc，6产物与task20一致。
+
+**接受与不接受：** 接受B层“真实引擎/SDK/RPC/Session/工具链路在synthetic provider下工作”这一事实；**不接受**其为真实模型、E1b/E2 Live、E3完整PASS、E5文件系统隔离、生产Adapter或真实usage/账单证据。双home只证API/命名空间逻辑隔离；工具`tool-call`由脚本决定，不是模型选择。
+
+**stdio账本桥：** 148回归独立重放通过（132历史+16修复回归，沿用前轮已闭环的持久`known_fee`/`price_json`）；但它是固定scope持久bookkeeping，`dispatch_allowed`只是首次记账，不是授权/Key代理/provider usage认证/真实账单上限。`src/autoteacher_m0`的runtime/Gate/Adapter未导入它，**task22公开`llm/stream`预留/结算middleware未实现未接线**，不能当运行中预算guard。
+
+**故继续 DECISION PENDING，Live硬关闭。** 下一步无Key可做项：task22预算middleware的reserve-before-dispatch/deny/结算/重试/压缩/无usage/崩溃故障注入与独立验证；真实provider usage/逐billable step记账、外部watchdog、P03独立人类授权与主渠道E1–E5 Live验收仍缺。第四阶段通过不解锁LiveGate、不构成安全/路由批准。

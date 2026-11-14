@@ -1,6 +1,6 @@
 # M0 故障排查与安全复验
 
-首轮历史实现：`d5db491bf3299c14b6af98f5cbe952ce56a1a991`；第二阶段历史实现：`c155789557e525925435e7f8a8bf573856d80311`；**第三阶段当前实现：`5df4f3bdbecdf0683533ef7f0a176513713436cd`**。整体仍 **DECISION PENDING，Live BLOCKED**。下文按轮次保留故障事实；新ROnative cache成功配置/localOCI结果与不可外推项见第三阶段补充，不将早期失败改写为从未发生。来源：[Runbook](<M0_RUNBOOK.md>)、[威胁模型](<THREAT_MODEL.md>)、[首轮manifest](<../artifacts/integration/manifest.json>)、[首轮审计](<REVIEW.md>)、[阶段二审计](<REVIEW_PHASE2.md>)、[阶段三审计](<REVIEW_PHASE3.md>)。
+首轮历史实现：`d5db491bf3299c14b6af98f5cbe952ce56a1a991`；第二阶段历史实现：`c155789557e525925435e7f8a8bf573856d80311`；第三阶段实现：`5df4f3bdbecdf0683533ef7f0a176513713436cd`；**第四阶段当前实现：`f674403d12a6b51249b772090b7b004013d4ceb1`**。整体仍 **DECISION PENDING，Live BLOCKED**。下文按轮次保留故障事实；新ROnative cache成功配置/localOCI结果与不可外推项见第三阶段补充，SDK B层会话/插件/账本桥结果与边界见第四阶段补充，不将早期失败改写为从未发生。来源：[Runbook](<M0_RUNBOOK.md>)、[威胁模型](<THREAT_MODEL.md>)、[首轮manifest](<../artifacts/integration/manifest.json>)、[首轮审计](<REVIEW.md>)、[阶段二审计](<REVIEW_PHASE2.md>)、[阶段三审计](<REVIEW_PHASE3.md>)、[阶段四审计](<REVIEW_PHASE4.md>)。
 
 ## 先守边界
 
@@ -100,3 +100,20 @@
 | stage.sha256只有dash | 是完整归一化tar stdin流摘要；按记录tar算法重算整树c063，不按普通文件清单-c | 把误用stdin产生的FAILED当源文件损坏，或加exclude隐藏差异 |
 
 本轮的有限实际命令与原始结果在[reviewer-phase3](<../artifacts/reviewer-phase3/manifest.json>)，[native诊断](<SDK_NATIVE_DIAGNOSTIC.md>)和[localOCI报告](<LOCAL_OCI_VALIDATION.md>)保留来源、历史失败与NOT RUN边界。仍可离线继续真实SDK/RPC的显式测试provider/Session/工具/恢复、pre-stream预算桥/transport上界、受控独立controller生命周期、依赖targets与OCI接收端roundtrip。不得因startup或image命令通过便注入Key；P03/可信部署/生产Adapter/真实usage与总watchdog/强制Live依旧未完成。
+
+## 第四阶段补充（f674403；真实引擎+synthetic fixture，非Live）
+
+[phase4 manifest](<../artifacts/phase4-integration/manifest.json>)（SHA`bfea6fa1d4cb3d144879b784aeb76c73f1fee3ef0842034b37dba939e90a2df5`）与[独立审计](<REVIEW_PHASE4.md>)：全量326/89专门子集/148账本重放/Ruff、插件strict build+8 registry、wheel构建与无源码安装CLI/API、SDK strict rebuild与17用例suite均在其声明范围内通过。SDK fixture是真实锁定DSH引擎/真实SDK/RPC/Session/工具链 + 显式`offline-test-only`确定性脚本provider；**不是模型、不是E1b/E2 Live、不是生产Adapter**。stdio broker只是bookkeeping，task22预算middleware未实现未接线。真实模型/usage/费用/P03/Live watchdog仍BLOCKED，DECISION PENDING不变。
+
+| 新症状或疑问 | 证据约束下的处理 | 禁止混淆 |
+|---|---|---|
+| `FIXTURE_INVOCATION`有真实SDK/RPC/工具事件，是否可记模型/Live | 否：provider为显式synthetic脚本，16次invocation全部`real_model_calls=0/http_calls=0`；只有引擎/会话/工具注册与执行链路真实 | 把synthetic当DeepSeek模型、E1b/E2 Live、E3完整PASS或生产Adapter |
+| `tool-call`/`tool/result`是否证明模型选择工具 | 否：脚本在`FIXTURE_TOOL`下产生`tool-call`；真实的是header schema、分发、执行、`callId`关联与结果文本。日志`selection_source`与源码均可核 | 写成“模型调用了skill_lookup”或E2完整PASS |
+| resume/双home/unknown/corrupt/interrupt是否真按日志 | 数据集校验器对mine+owner原始日志重算25项全过：3对跨新进程PID同Session、双home双向nonce互斥、unknown/corrupt为明确JsonRpcError且0 run、SIGTERM后TransportClosedError(active-input)+turn1 aborted/disposed且无usage/finish、turn2 resume恢复 | 把双home当E5文件系统隔离，或把失败中断伪装成功 |
+| 17用例/148/326/89能否相加 | 不能：326含89专门子集；148为独立broker回归scope；17为SDK fixture suite；只按日志实际去重计数 | 预填数字、跨scope相加或把历史125/127/132再累加 |
+| SDK suite复现输入从哪来 | `sdk-replay`归一化tar`f438c048…`经核验等于task20冻结stage（diff -r无差异）；strict build从`build-input`重新tsc，6产物与task20一致，build日志逐字节同`cd44b06f…` | 用旧日志转发现成数字，或声称从零重新下载依赖闭包 |
+| 插件8/安装CLI是否重跑过 | 是：插件命令在hash核验stage上独立执行，3 isolated exit0、TAP 8/8、built=阶段3冻结值；wheel独立重建SHA`07fcb9e5…`与owner相同，安装verifier独立执行且summary逐字节相同 | 把插件registry测试当模型工具调用；把安装CLI当真实SDK生命周期 |
+| pkg/native cache身份 | 本次只读重算：native`40c34d27…`mode0444；pkg cache`4857/4857`文件sha256 -c OK；SDK validator/suite/worker/runtime与task20 manifest一致 | 重新下载同名cache替换、放宽noexec或用系统Node替代锁定SEA |
+| 初始`results.jsonl`有exit125 | 是operator tooling失误（嵌套podman argv，容器创建前失败），非项目代码失败；build attempt1已单独保留，4个用例失败尝试日志被成功重跑覆盖（O1观察） | 把exit125当业务断言失败，或删除记录假装从未发生 |
+| wheel构建attempt1权限失败 | 输出目录root-owned 0755导致uid65534写失败；用专用空输出目录chmod1777重跑，不改隔离 | 扩大容器权限/root运行 |
+| task22预算middleware是否已接线 | 未接线：仓库无`plugins/runtime-budget-guard`，runtime/Gate/Adapter不导入broker；broker/fixture不是运行中预算guard | 把148账本重放或SDK fixture当provider调用前预算拦截/真实账单上限 |
