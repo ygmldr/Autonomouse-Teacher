@@ -16,6 +16,7 @@ from threading import local
 from uuid import uuid4
 
 from .budget import BudgetExceeded, BudgetLimits, Reservation
+from .call_identity import CALL_ID_PATTERN, REQUEST_DIGEST_PATTERN
 from .pricing import PriceSnapshot, money
 from .usage import Usage, normalize_usage
 
@@ -183,6 +184,119 @@ class BudgetLedger:
                              (self.scope_id, call_id, digest, encoded))
             return response, False
 
+    def _ensure_claim_schema(self, database) -> None:
+        """ADR-002 additive table: one persistent dispatch claim per call/attempt."""
+        database.execute("CREATE TABLE IF NOT EXISTS budget_dispatch_claims ("
+                         "scope_id TEXT NOT NULL, call_id TEXT NOT NULL, reservation_id TEXT NOT NULL, "
+                         "request_digest TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'CLAIMED', "
+                         "PRIMARY KEY(scope_id, call_id), UNIQUE(scope_id, reservation_id))")
+
+    @staticmethod
+    def _claim_row(row) -> dict:
+        return {"call_id": row["call_id"], "reservation_id": row["reservation_id"],
+                "request_digest": row["request_digest"], "status": row["status"]}
+
+    def claim_dispatch(self, call_id: str, reservation_id: str, request_digest: str,
+                       *, allowed_routes=None) -> dict:
+        """Atomically validate and persist the single M0 dispatch claim.
+
+        Validation and INSERT happen in one durable transaction. A duplicate of
+        the same claim returns ALREADY_CLAIMED; a different digest/reservation for
+        the same call returns CALL_ID_CONFLICT; another call for the same
+        reservation returns RESERVATION_ALREADY_CLAIMED. Nothing is refunded or
+        retried here.
+        """
+        if not isinstance(call_id, str) or not CALL_ID_PATTERN.fullmatch(call_id):
+            return {"ok": False, "code": "INVALID_CALL_ID"}
+        if not isinstance(reservation_id, str) or not self._IDENTIFIER.fullmatch(reservation_id):
+            return {"ok": False, "code": "INVALID_RESERVATION_ID"}
+        if not isinstance(request_digest, str) or not REQUEST_DIGEST_PATTERN.fullmatch(request_digest):
+            return {"ok": False, "code": "INVALID_REQUEST_DIGEST"}
+        with self._transaction() as database:
+            self._ensure_observation_schema(database)
+            self._ensure_claim_schema(database)
+            scope = database.execute("SELECT blocked FROM budget_scopes WHERE scope_id=?",
+                                     (self.scope_id,)).fetchone()
+            if scope is None:
+                return {"ok": False, "code": "UNKNOWN_SCOPE"}
+            if scope[0]:
+                return {"ok": False, "code": "SCOPE_BLOCKED"}
+            row = database.execute("SELECT * FROM budget_reservations WHERE scope_id=? AND reservation_id=?",
+                                   (self.scope_id, reservation_id)).fetchone()
+            if row is None:
+                return {"ok": False, "code": "UNKNOWN_RESERVATION"}
+            if allowed_routes is not None and (row["route_id"], row["model"]) not in allowed_routes:
+                return {"ok": False, "code": "ROUTE_BLOCKED"}
+            if row["status"] != "PENDING":
+                return {"ok": False, "code": "RESERVATION_NOT_PENDING"}
+            if Decimal(row["reserved_cost"]) > self.limits.per_call_usd:
+                return {"ok": False, "code": "BUDGET_BOUND_BLOCKED"}
+            link = database.execute("SELECT reservation_id FROM budget_call_links "
+                                    "WHERE scope_id=? AND call_id=?",
+                                    (self.scope_id, call_id)).fetchone()
+            if link is None:
+                return {"ok": False, "code": "UNBOUND_CALL"}
+            if link[0] != reservation_id:
+                return {"ok": False, "code": "CALL_LINK_MISMATCH"}
+            existing = database.execute("SELECT * FROM budget_dispatch_claims "
+                                        "WHERE scope_id=? AND call_id=?",
+                                        (self.scope_id, call_id)).fetchone()
+            if existing is not None:
+                claim = self._claim_row(existing)
+                if (existing["reservation_id"] != reservation_id
+                        or existing["request_digest"] != request_digest):
+                    return {"ok": False, "code": "CALL_ID_CONFLICT", "claim": claim}
+                return {"ok": False, "code": "ALREADY_CLAIMED", "duplicate": True, "claim": claim}
+            other = database.execute("SELECT call_id FROM budget_dispatch_claims "
+                                     "WHERE scope_id=? AND reservation_id=?",
+                                     (self.scope_id, reservation_id)).fetchone()
+            if other is not None:
+                return {"ok": False, "code": "RESERVATION_ALREADY_CLAIMED",
+                        "claim": {"call_id": other[0], "reservation_id": reservation_id,
+                                  "request_digest": None, "status": "CLAIMED"}}
+            try:
+                database.execute("INSERT INTO budget_dispatch_claims VALUES (?,?,?,?,?)",
+                                 (self.scope_id, call_id, reservation_id, request_digest, "CLAIMED"))
+            except sqlite3.IntegrityError:
+                raced = database.execute("SELECT * FROM budget_dispatch_claims "
+                                         "WHERE scope_id=? AND call_id=?",
+                                         (self.scope_id, call_id)).fetchone()
+                if raced is None:
+                    return {"ok": False, "code": "CLAIM_RACE_LOST"}
+                claim = self._claim_row(raced)
+                if (raced["reservation_id"] == reservation_id
+                        and raced["request_digest"] == request_digest):
+                    return {"ok": False, "code": "ALREADY_CLAIMED", "duplicate": True, "claim": claim}
+                return {"ok": False, "code": "CALL_ID_CONFLICT", "claim": claim}
+            return {"ok": True, "code": "CLAIMED",
+                    "claim": {"call_id": call_id, "reservation_id": reservation_id,
+                              "request_digest": request_digest, "status": "CLAIMED"}}
+
+    def claim_for_call(self, call_id: str) -> dict | None:
+        with self._transaction() as database:
+            self._ensure_claim_schema(database)
+            row = database.execute("SELECT * FROM budget_dispatch_claims "
+                                   "WHERE scope_id=? AND call_id=?",
+                                   (self.scope_id, call_id)).fetchone()
+            return None if row is None else self._claim_row(row)
+
+    def mark_claim_completed(self, reservation_id: str) -> int:
+        with self._transaction() as database:
+            self._ensure_claim_schema(database)
+            cursor = database.execute("UPDATE budget_dispatch_claims SET status='COMPLETED' "
+                                      "WHERE scope_id=? AND reservation_id=? AND status='CLAIMED'",
+                                      (self.scope_id, reservation_id))
+            return cursor.rowcount
+
+    def _claim_counts(self, database) -> dict:
+        self._ensure_claim_schema(database)
+        total = database.execute("SELECT COUNT(*) FROM budget_dispatch_claims WHERE scope_id=?",
+                                 (self.scope_id,)).fetchone()[0]
+        pending = database.execute("SELECT COUNT(*) FROM budget_dispatch_claims "
+                                   "WHERE scope_id=? AND status='CLAIMED'",
+                                   (self.scope_id,)).fetchone()[0]
+        return {"total": total, "pending": pending, "completed": total - pending}
+
     def journal_once(self, message_id: str, digest: str, operation) -> tuple[dict, bool]:
         """Atomically commit a trusted in-process operation plus its reply.
 
@@ -305,4 +419,5 @@ class BudgetLedger:
                     "input_tokens": sum(row["input_used"] for row in rows),
                     "output_tokens": sum(row["output_used"] for row in rows),
                     "soft_exceeded": committed >= self.limits.soft_usd, "blocked": blocked,
-                    "routes": sorted({row["route_id"] for row in rows})}
+                    "routes": sorted({row["route_id"] for row in rows}),
+                    "claims": self._claim_counts(database)}

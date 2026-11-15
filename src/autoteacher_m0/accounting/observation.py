@@ -30,6 +30,8 @@ import json
 import re
 
 from .broker_usage import MAX_COUNTER, REASONING_POLICIES
+from . import call_identity as _call_identity
+from .call_identity import CALL_ID_PATTERN, ObservationSchemaError
 from .pricing import money
 from .usage import Usage
 
@@ -43,14 +45,9 @@ ERROR_KINDS = frozenset({"none", "timeout", "http_4xx", "http_5xx", "transport",
 COMPLETENESS = frozenset({"AUTHORITATIVE", "PARTIAL", "MISSING", "UNKNOWN"})
 COUNTER_FIELDS = ("input", "cache_read", "cache_write", "output", "reasoning")
 _HASH = re.compile(r"[0-9a-f]{64}\Z", re.ASCII)
-_CALL_ID = re.compile(r"call-[0-9a-f]{48}\Z", re.ASCII)
 _REQUEST_DIGEST = re.compile(r"[0-9a-f]{64}\Z", re.ASCII)
 _DECIMAL = re.compile(r"(?:0|[1-9][0-9]{0,11})(?:\.[0-9]{1,9})?\Z", re.ASCII)
 _TRUSTED_EGRESS_SEAL = object()
-
-
-class ObservationSchemaError(ValueError):
-    """Rejected observation/call-identity schema; message never embeds raw payload."""
 
 
 def normalize_reasoning_policy(value: object) -> str:
@@ -287,36 +284,6 @@ def observation_digest(observation: ProviderObservation) -> str:
     return hashlib.sha256(material.encode("utf-8")).hexdigest()
 
 
-@dataclass(frozen=True)
-class CallIdentity:
-    """Trusted identity of one external logical call/attempt; no SDK dependence."""
-    run_id: str
-    logical_step: int
-    attempt_index: int
-    request_digest: str
-
-    def __post_init__(self) -> None:
-        object.__setattr__(self, "run_id", _bounded_text(self.run_id, "run_id", 128))
-        if type(self.logical_step) is not int or not 0 <= self.logical_step <= MAX_COUNTER:
-            raise ObservationSchemaError("invalid logical_step")
-        if type(self.attempt_index) is not int or not 0 <= self.attempt_index <= MAX_COUNTER:
-            raise ObservationSchemaError("invalid attempt_index")
-        if not isinstance(self.request_digest, str) or not _REQUEST_DIGEST.fullmatch(self.request_digest):
-            raise ObservationSchemaError("invalid request_digest")
-
-    def canonical(self) -> dict:
-        return {"v": 1, "run_id": self.run_id, "logical_step": self.logical_step,
-                "attempt_index": self.attempt_index, "request_digest": self.request_digest}
-
-    @property
-    def call_id(self) -> str:
-        material = json.dumps(self.canonical(), sort_keys=True, separators=(",", ":"), allow_nan=False)
-        return "call-" + hashlib.sha256(material.encode("utf-8")).hexdigest()[:48]
-
-
-def derive_call_id(run_id: str, logical_step: int, attempt_index: int, request_digest: str) -> str:
-    """Stable, bounded call id: same identity -> same id; different attempt -> different id."""
-    return CallIdentity(run_id, logical_step, attempt_index, request_digest).call_id
 
 
 @dataclass(frozen=True)
@@ -334,7 +301,7 @@ class TrustedEgressProvenance:
     _seal: object = field(default=None, repr=False, compare=False)
 
     def __post_init__(self) -> None:
-        if not isinstance(self.call_id, str) or not _CALL_ID.fullmatch(self.call_id):
+        if not isinstance(self.call_id, str) or not CALL_ID_PATTERN.fullmatch(self.call_id):
             raise ObservationSchemaError("invalid provenance call_id")
         if not isinstance(self.request_digest, str) or not _REQUEST_DIGEST.fullmatch(self.request_digest):
             raise ObservationSchemaError("invalid provenance request_digest")
@@ -383,7 +350,7 @@ def deliver_observation(ledger, call_id: str, observation: ProviderObservation |
     Repeated delivery for the same call_id+payload is idempotent; a different
     payload for the same call_id is a conflict.
     """
-    if not isinstance(call_id, str) or not _CALL_ID.fullmatch(call_id):
+    if not isinstance(call_id, str) or not CALL_ID_PATTERN.fullmatch(call_id):
         raise ObservationSchemaError("invalid call_id")
     if type(cache_discount_approved) is not bool:
         raise ObservationSchemaError("cache_discount_approved must be boolean")
@@ -463,6 +430,7 @@ def deliver_observation(ledger, call_id: str, observation: ProviderObservation |
                                      cache_discount_approved=cache_discount_approved,
                                      provider_invoice_authenticated=trusted)
         settlement = ledger.settle(reservation_id, usage, status="OK" if status == "SETTLED" else "FAILED")
+        ledger.mark_claim_completed(reservation_id)
         return {"ok": True, "code": status, "call_id": call_id, "reservation_id": reservation_id,
                 "accounting_status": status, "settlement": settlement, "observation_digest": digest}
 
@@ -474,3 +442,8 @@ def deliver_observation(ledger, call_id: str, observation: ProviderObservation |
         return response
     response["duplicate"] = duplicate
     return response
+
+# Backwards-compatible re-exports (ADR-002 canonical module is call_identity.py).
+# ADR-002 canonical identity module; keep names importable from observation too.
+CallIdentity = _call_identity.CallIdentity
+derive_call_id = _call_identity.derive_call_id

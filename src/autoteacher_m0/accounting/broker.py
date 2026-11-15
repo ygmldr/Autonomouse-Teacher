@@ -12,6 +12,7 @@ import re
 import sys
 
 from .budget import BudgetExceeded, BudgetLimits
+from .call_identity import CALL_ID_PATTERN, REQUEST_DIGEST_PATTERN
 from .broker_usage import UsagePolicy, counter, decimal_string, official_usage, validate_usage
 from .ledger import BudgetLedger
 from .pricing import PriceSnapshot
@@ -153,9 +154,11 @@ class BookkeepingBroker:
                                      "output_tokens", "retry"}, {"call_id"})
             _identifier(message["task_id"])
             if "call_id" in message:
-                # PR4b additive v1 field: stable egress/PR4a call identity. Older
-                # v1 clients that do not send it keep the exact previous behavior.
-                _identifier(message["call_id"])
+                # PR4b additive v1 field, canonicalized by ADR-002. Older v1
+                # clients that do not send it keep the exact previous behavior;
+                # clients must send call-<48hex>, never an egress-local eg- id.
+                if not isinstance(message["call_id"], str) or not CALL_ID_PATTERN.fullmatch(message["call_id"]):
+                    raise ProtocolError("INVALID_CALL_ID")
             if not isinstance(message["route_id"], str) or not isinstance(message["model"], str):
                 raise ValueError("invalid route")
             if not isinstance(message["purpose"], str) or message["purpose"] not in PURPOSES:
@@ -164,6 +167,15 @@ class BookkeepingBroker:
             counter(message["output_tokens"], positive=True)
             if type(message["retry"]) is not bool:
                 raise ValueError("retry must be boolean")
+            return message
+        if op == "claim":
+            _keys(message, common | {"call_id", "reservation_id", "request_digest"})
+            if not isinstance(message["call_id"], str) or not CALL_ID_PATTERN.fullmatch(message["call_id"]):
+                raise ProtocolError("INVALID_CALL_ID")
+            _identifier(message["reservation_id"])
+            if (not isinstance(message["request_digest"], str)
+                    or not REQUEST_DIGEST_PATTERN.fullmatch(message["request_digest"])):
+                raise ProtocolError("INVALID_REQUEST_DIGEST")
             return message
         if op in {"settle", "fail"}:
             _keys(message, common | {"reservation_id", "usage"})
@@ -250,6 +262,7 @@ class BookkeepingBroker:
             return envelope(identity, code="INVALID_USAGE")
         settlement = self.ledger.settle(request["reservation_id"], usage,
                                         status="FAILED" if op == "fail" else "OK")
+        self.ledger.mark_claim_completed(request["reservation_id"])
         return envelope(identity, ok=True, code="FAILED" if op == "fail" else "SETTLED",
                         reservation_id=request["reservation_id"], settlement=settlement, usage_mapping=mapping)
 
@@ -266,6 +279,19 @@ class BookkeepingBroker:
             if request["op"] == "snapshot":
                 with self.ledger._transaction() as database:
                     return self._operate(database, request)
+            # ADR-002: claim is an additive v1 op with its own durable unique
+            # table/transaction; it is deliberately NOT journaled so it cannot
+            # consume the fixed completion/message capacity or be replayed as a
+            # second license. Replays are answered from budget_dispatch_claims.
+            if request["op"] == "claim":
+                result = self.ledger.claim_dispatch(
+                    request["call_id"], request["reservation_id"], request["request_digest"],
+                    allowed_routes=set(self.routes))
+                if result["ok"]:
+                    return envelope(identity, ok=True, code="CLAIMED", dispatch_allowed=True,
+                                    claim=result["claim"])
+                return envelope(identity, ok=False, code=result["code"], dispatch_allowed=False,
+                                duplicate=result.get("duplicate", False), claim=result.get("claim"))
             # F2: a completion repeated with a NEW message id for an already
             # settled reservation is idempotent and must not add another journal
             # row/storage. Exact same-id replays still fall through to journal_once
