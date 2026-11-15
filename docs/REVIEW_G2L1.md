@@ -2,6 +2,7 @@
 
 - 任务：`task-80` 独立 Reviewer（与实现者 `verify2` 不同身份）；日期：2026-11-15 UTC
 - 对象：G2 代码基线 `32bea5bcf8d35d778a54c04cebb0ae08fb1f849c`；实现 `2786e25a9e5bd590255026d76fc362abb16d0e7b`（9 files，父 `688ed01`）；docs `19f5270141a3a8cb59049df73755a27751ee29f1`（3 files，父 `2786e25`）；审阅时 HEAD=`19f5270`，worktree clean
+- 归档状态：审阅完成后维护者 docs-only 提交 `c52b173`（仅新增本文件，不改代码）；当前工作树只有本文件审阅后文字修订（4 insertions/3 deletions；归档说明/absence 措辞）。**评审对象仍是 `2786e25`/`19f5270`；`c52b173` 不改变被审代码。**
 - 契约：`docs/M0_REQUEST_BINDING_CONTRACT.md`（APPROVED Option A）；报告：`docs/M0_G2L1_FIX_REPORT.md`；findings：`docs/M0_G2L1_FINDINGS.md`；任务书：v0.7 §8
 - 证据根：`artifacts/reviewer-g2l1/`（reviewer 自建，未复用 owner 的运行结果作为结论）
 - 边界：只做离线/无 Key 审阅；**不进入 G3/G4/Live，不签发 GO**；未修改 `src/`、`tests/`、`scripts/` 或 Git 历史；仅新增本文件与 `artifacts/reviewer-g2l1/`；宿主未运行 pytest；未读取 `/root/.config/autoteacher`
@@ -91,11 +92,11 @@ rg -n 'authorize\(|require\(|claim_dispatch\(|claim_dispatch_for_request\(|MockE
 | descriptor deny | claimer.calls=0；permission=None |
 | 伪造/重放 permission | forged → provider_calls=0；真实 permission 首次 → 1；同 permission 二次 → 仍 1（单次消费） |
 | **BIND-01（Reservation=A，实际=B，均 allowlist）** | prepared/actual route B，reserve route A → `CLAIM_REJECTED:ROUTE_MISMATCH`；**provider_calls=0**；broker snapshot `claims.total=0`；broker 原始 claim（expected B）返回 `ROUTE_MISMATCH`；broker 停止后直接查 SQLite：**无 CALL_A 的 claim 行** |
-| **FIX-08（恰好一次）** | 真实 bound claim 成功；`TrustedEgressTransport` 派发 **provider_calls=1**；重复 claim → `ALREADY_CLAIMED`，重复 dispatch → False；provider 仍 1；broker snapshot `claims.total=1`；重启/直接 SQLite 后 claim 行仍在且关联 reservation |
+| **FIX-08（恰好一次）** | 真实 bound claim 成功；`TrustedEgressTransport` 派发 **provider_calls=1**；重复 claim → `ALREADY_CLAIMED`，重复 dispatch → False；provider 仍 1；broker snapshot `claims.total=1`；broker 关闭后直接 SQLite 查询，claim 行仍在且关联 reservation |
 | claim 表结构 | `PRAGMA table_info(budget_dispatch_claims)` 仍是 5 列（scope_id/call_id/reservation_id/request_digest/status），无迁移 |
 | 并发/崩溃/重启 | INT-05 两真实 broker 进程争一 license → 恰 1 `CLAIMED`；INT-06 SIGKILL 后重启 replay → `ALREADY_CLAIMED`、`dispatch_allowed=False`、claims=1；INT-17 同 reservation 第二 call → `RESERVATION_ALREADY_CLAIMED`；均在本轮 `targeted-required` 重跑 PASS |
 | v1 兼容 | 旧调用不带 expected 字段 → `CLAIMED`（claims 总数 2）；新 egress + 无 `claim_bound` claimer → `CLAIM_BINDING_UNSUPPORTED`，claimer_calls=0、provider=0 |
-| 环境 absence | 容器内 uid=65534；无 `*_KEY/*_TOKEN` env；`/root/.config/autoteacher` 不存在；`socket.socket()` → PermissionError；宿主 `podman ps -a` 0 容器；无 broker 残留 |
+| 环境 absence | 容器内 uid=65534；无 `*_KEY/*_TOKEN` env；`/root/.config/autoteacher` 不存在；`socket.socket()` → PermissionError；宿主 `podman ps -a` 0 容器；无 host broker/probe 进程（`logs/absence-after.txt`） |
 | 真实 Key/模型/网络 | 0；所有 provider 为 in-process synthetic/scripted，Broker 为本地 stdio + 本地 SQLite |
 
 **denied 场景 provider 实际调用=0 的证据不是只靠 `decision.allowed`：** BIND-01/FIX-05/09/BIND-08 均使用带内部计数的 provider；probe 中 `provider_calls=0`/`1` 为实际函数调用计数，且 BIND-01 在真实 SQLite 中无 claim 行。
@@ -183,6 +184,6 @@ artifacts/reviewer-g2l1/run_probe.sh mechanism-probe 180
 - 独立 stage：`artifacts/reviewer-g2l1/stage/`（192 files，all 0444）、`stage-base-32bea5b/`（baseline RED）。
 - 独立 manifest/hashes：`artifacts/reviewer-g2l1/manifest.json`、`hashes.sha256`、`commands.jsonl`、`stage-identity.txt`。
 - 审阅 probe：`artifacts/reviewer-g2l1/probe/mechanism_probe.py`、`logs/mechanism-probe.stdout.log`。
-- 失败证据：`logs/baseline-red.stdout.log`（旧代码 11 failed）、`logs/targeted-required.stdout.log`（38 passed）、`logs/full-tests-rs.stdout.log`（skip 原因）。
+- 失败/absence 证据：`logs/baseline-red.stdout.log`（旧代码 11 failed）、`logs/targeted-required.stdout.log`（38 passed）、`logs/full-tests-rs.stdout.log`（skip 原因）、`logs/absence-after.txt`（容器/进程 absence）。
 - 审计报告：`identity/identity-report.txt`（0 failures）、`identity/packet-audit.txt`（RED/并发/absence/matrix 缺口如实记录）。
 - **STOP**：G2-L1-FIX 独立审阅完成；G3 未启动，需维护者另行明确批准。
