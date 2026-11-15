@@ -4,6 +4,7 @@
 
 ## 最终文档入口
 
+- [G0–G2 closeout](<docs/M0_G2_CLOSEOUT_REPORT.md>)：G0/G1/G2 离线工作已完成并冻结（G1 `842583d`/`00df577`/`4d71530`，docs `70cb574`；G2 `ada8e28`/`32bea5b`）；G2 独立审计 [REVIEW_G2](<docs/REVIEW_G2.md>) 结论 **PASS_FOR_DECLARED_G2_SCOPE**（仅限离线/无 Key 声明范围），G1 为 PASS_WITH_ERRATA（见 [post-freeze errata](<docs/M0_G1_ERRATA_POSTFREEZE.md>)）；**G2-L1**（legacy authorize 未强制 claim）是 G3/Live 前必须收口的前置，V-G2-1 为证据身份注记；**G3+ 未授权**，Live/E1–E5/LiveGate/真实 Key/egress/usage/账单仍 **BLOCKED**、总体 **DECISION PENDING**，不签发 GO；OpenCode Go 凭据未使用、0 真实调用/0 预算消耗。
 - [M0 收尾报告](<docs/M0_CLOSEOUT_REPORT.md>)：PR0–PR4 离线工作已完成并冻结（`e8b6e45`→`fdcfdc9`→`9b77a37`→`7d2cd3e`→`8cf2476`→`c802a32`→`87f44e1`，详见报告 §2）；5 份独立审计（[PR1](<docs/REVIEW_CLOSEOUT_PR1.md>)、[PR2](<docs/REVIEW_CLOSEOUT_PR2.md>)、[PR3](<docs/REVIEW_CLOSEOUT_PR3.md>)、[PR4A](<docs/REVIEW_CLOSEOUT_PR4A.md>)、[PR4B](<docs/REVIEW_CLOSEOUT_PR4B.md>)）PASS **仅限各自声明的离线/无 Key 范围**；V-PR1-1/V-PR4A-1 已 errata，V-PR2-1/V-PR3-1/V-PR4A-2/V-PR4B-1 的继承 lint 已由 `87f44e1` 清除（HEAD repo-wide Ruff 实测 `All checks passed!`）。真实 Live/P03/egress/Key/usage/账单仍 **BLOCKED**、总体 **DECISION PENDING**，不签发 GO；PR5 前置见报告 §8。
 - [当前 M0 验证报告](<docs/M0_REPORT.md>)：顶部与§11为第五阶段独立审计增量；§10保留第四阶段历史，§9保留第三阶段历史，§8保留第二阶段历史，§1–7保留首轮E1-02 NOT RUN，不倒填结果，Live仍BLOCKED。
 - [第四阶段冻结证据](<artifacts/phase4-integration/manifest.json>)（gitignored外部证据）：真实锁定DSH引擎/真实Python SDK + 显式`offline-test-only`合成provider的17用例SDK离线会话、stdio账本148回归重放、真实插件严格构建与wheel无源码安装CLI/API，均在既有no-Key禁网隔离内执行；实际计数、argv/UTC/exit与产物hash见该manifest（不预填）。

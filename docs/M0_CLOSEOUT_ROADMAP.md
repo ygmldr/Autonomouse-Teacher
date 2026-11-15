@@ -5,7 +5,21 @@
 - 核心原则：**PR0–PR4 可在无 Key/禁网隔离内离线完成；PR5 起必须由维护者人工审批与真实凭据/外部边界，Agent 不得自动进入或自批。** 不得用 `--live` flag/Markdown/环境变量/Agent 自签解锁 Live；不得改写历史冻结证据。
 
 
-## 当前状态（M0 收尾 docs 收口，2026-11-14）
+## 当前状态（G0–G2 closeout，2026-11-15）
+
+G0/G1/G2 已完成并冻结；G3+ 待维护者，不自动进入。总体 **DECISION PENDING**；Live/E1–E5/LiveGate/真实 Key/egress/usage/账单仍 **BLOCKED**。
+
+| Gate | 状态 | 冻结 commit / 证据 |
+|---|---|---|
+| G0 | 已完成（baseline/blockers/裁定） | `92c9f71`；baseline `0923d002…`、blockers `0002beb1…`、`artifacts/g0-baseline/manifest.json` `6634c004…`（2/2） |
+| G1 | 已完成；`PASS_FOR_DECLARED_G1_SCOPE_WITH_ERRATA` | `842583d`/`00df577`/`4d71530`，docs `70cb574`；`REVIEW_G1` `3c082720…`、addendum `6618edfd…`、[post-freeze errata](<M0_G1_ERRATA_POSTFREEZE.md>) `9ba17660…` |
+| G2 | 已完成；`PASS_FOR_DECLARED_G2_SCOPE`（仅离线/无 Key） | `ada8e28`（broker）/`32bea5b`（egress）；`REVIEW_G2` `dc71fda8…`、reviewer manifest `d4b8f495…`（evidence 200/200） |
+| G2-L1 | 条件性遗留（不阻断当前声明 G2） | legacy `authorize()/require()` 未强制 claim；G3/Live 前必须强制 claimer/移除 fallback 并审计调用点 |
+| G3+ | **待维护者 / 未授权** | 需维护者人工审批与真实凭据/外部边界；Agent 不得自动进入 |
+
+详见 [M0_G2_CLOSEOUT_REPORT](<M0_G2_CLOSEOUT_REPORT.md>)、[G2 审计](<REVIEW_G2.md>)、[G1 errata](<M0_G1_ERRATA_POSTFREEZE.md>)；本表“已完成”仅指离线/无 Key 声明范围，不是 Live/E1–E5/GO。
+
+## 历史状态（PR0–PR4 closeout，2026-11-14）
 
 PR0–PR4 已完成并冻结；PR5–PR7 待人类，不自动进入。总体 **DECISION PENDING**；Live/P03/真实 egress/Key/usage/账单仍 **BLOCKED**。
 
