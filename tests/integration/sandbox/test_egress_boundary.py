@@ -4,6 +4,7 @@ Runs inside the fixed no-Key OCI test container. NullModel/transport outcomes ar
 synthetic observers, not provider wire evidence; Live stays BLOCKED.
 """
 from __future__ import annotations
+import hashlib
 import pytest
 
 from autoteacher_m0.security.egress import (
@@ -12,19 +13,44 @@ from autoteacher_m0.security.egress import (
 )
 
 
+DIGEST = "a" * 64
+
+
+def call_id_for(logical_stream_id="s1", reservation_id="r1", attempt_ordinal=1,
+                route_id="opencode-go", model="deepseek-v4.1-flash") -> str:
+    material = "|".join((logical_stream_id, reservation_id, str(attempt_ordinal),
+                         route_id, model))
+    return "call-" + hashlib.sha256(material.encode("utf-8")).hexdigest()[:48]
+
+
 def req(**overrides):
     base = dict(logical_stream_id="s1", reservation_id="r1", attempt_ordinal=1,
-                route_id="opencode-go", model="deepseek-v4.1-flash")
+                route_id="opencode-go", model="deepseek-v4.1-flash",
+                request_digest=DIGEST)
     base.update(overrides)
+    if "call_id" not in overrides:
+        base["call_id"] = call_id_for(
+            base["logical_stream_id"], base["reservation_id"], base["attempt_ordinal"],
+            base["route_id"], base["model"])
     return EgressRequest(**base)
 
 
 def test_allowlist_allows_only_approved_route_and_call_ids_are_stable():
     boundary = EgressBoundary()
     first = boundary.require(req())
-    assert first.call_id.startswith("eg-") and len(first.call_id) == 27
+    assert first.call_id == call_id_for()
+    assert first.legacy_egress_event_id.startswith("eg-")
+    assert len(first.legacy_egress_event_id) == 27
     assert boundary.authorize(req()).call_id == first.call_id
     assert boundary.authorize(req(attempt_ordinal=2)).call_id != first.call_id
+
+
+def test_egress_requires_canonical_call_id_and_digest():
+    boundary = EgressBoundary()
+    denied = boundary.authorize(req(call_id="eg-1234"))
+    assert "CALL_ID_INVALID_OR_MISSING" in denied.reasons
+    denied = boundary.authorize(req(request_digest=""))
+    assert "REQUEST_DIGEST_INVALID" in denied.reasons
 
 
 @pytest.mark.parametrize("overrides,reason", [

@@ -17,7 +17,8 @@ from dataclasses import dataclass, field
 from decimal import Decimal
 from enum import StrEnum
 import hashlib
-from typing import Iterable, Mapping
+import re
+from typing import Iterable, Mapping, Protocol
 
 from autoteacher_m0.contracts import ErrorCode, RuntimeFailure
 
@@ -26,6 +27,8 @@ OPENCODE_GO_PORT = 443
 OPENCODE_GO_PATH_PREFIX = "/inference/go/"
 MAX_ATTEMPTS_PER_STREAM = 4
 MAX_OUTPUT_TOKENS = 1024
+CALL_ID_RE = re.compile(r"call-[0-9a-f]{48}\Z", re.ASCII)
+REQUEST_DIGEST_RE = re.compile(r"[0-9a-f]{64}\Z", re.ASCII)
 
 
 class EgressViolation(RuntimeFailure):
@@ -41,6 +44,22 @@ class AttemptState(StrEnum):
     SETTLED_USAGE = "SETTLED_USAGE"
     BILLABLE_UNKNOWN = "BILLABLE_UNKNOWN"
     NOT_BILLABLE_HTTP_ERROR = "NOT_BILLABLE_HTTP_ERROR"
+
+
+@dataclass(frozen=True)
+class ClaimResult:
+    """Normalized result from a trusted Broker dispatch-claim call."""
+    claimed: bool
+    code: str
+    reasons: tuple[str, ...] = ()
+    claim: Mapping[str, object] | None = None
+
+
+class BrokerClaimer(Protocol):
+    """Trusted stdio-Broker claim client; must talk to a real persistent ledger."""
+
+    def claim(self, request: "EgressRequest") -> ClaimResult:
+        ...
 
 
 @dataclass(frozen=True)
@@ -60,6 +79,8 @@ class EgressRequest:
     has_images: bool = False
     store: bool = False
     estimated_cost_usd: str = "0.003933"
+    call_id: str = ""
+    request_digest: str = ""
 
 
 @dataclass(frozen=True)
@@ -83,10 +104,12 @@ class EgressDecision:
     allowed: bool
     reasons: tuple[str, ...]
     call_id: str
+    legacy_egress_event_id: str
     logical_stream_id: str
     reservation_id: str
     attempt_ordinal: int
     route_model: tuple[str, str]
+    claim: ClaimResult | None = None
 
 
 @dataclass
@@ -100,7 +123,8 @@ class LogicalStreamEgress:
     state: AttemptState = AttemptState.NOT_DISPATCHED
 
 
-def _call_id(request: EgressRequest, route_model: tuple[str, str]) -> str:
+def _legacy_egress_event_id(request: EgressRequest, route_model: tuple[str, str]) -> str:
+    """Log-only PR4a event id; never a settlement/claim/broker identity."""
     material = "|".join((
         request.logical_stream_id, request.reservation_id, str(request.attempt_ordinal),
         route_model[0], route_model[1], request.host, str(request.port), request.path,
@@ -111,8 +135,10 @@ def _call_id(request: EgressRequest, route_model: tuple[str, str]) -> str:
 class EgressBoundary:
     """Deterministic allowlist/deny + counter + stable call-id prototype."""
 
-    def __init__(self, policy: EgressPolicy | None = None) -> None:
+    def __init__(self, policy: EgressPolicy | None = None,
+                 claimer: BrokerClaimer | None = None) -> None:
         self.policy = policy or EgressPolicy()
+        self.claimer = claimer
         self._streams: dict[str, LogicalStreamEgress] = {}
         self._decisions: list[dict] = []
 
@@ -122,10 +148,16 @@ class EgressBoundary:
             self._streams[key] = LogicalStreamEgress(key, request.reservation_id)
         return self._streams[key]
 
-    def authorize(self, request: EgressRequest) -> EgressDecision:
+    def _evaluate(self, request: EgressRequest) -> EgressDecision:
+        """Pure policy/identity evaluation; counters are updated by callers."""
         policy = self.policy
         reasons: list[str] = []
         route_model = (request.route_id, request.model)
+        if not isinstance(request.call_id, str) or not CALL_ID_RE.fullmatch(request.call_id):
+            reasons.append("CALL_ID_INVALID_OR_MISSING")
+        if (not isinstance(request.request_digest, str)
+                or not REQUEST_DIGEST_RE.fullmatch(request.request_digest)):
+            reasons.append("REQUEST_DIGEST_INVALID")
         if policy.require_reservation and not request.reservation_id.strip():
             reasons.append("NO_RESERVATION")
         if route_model not in policy.approved_routes:
@@ -154,21 +186,62 @@ class EgressBoundary:
             reasons.append("ATTEMPT_ORDINAL_INVALID")
         elif stream.attempts + 1 > policy.max_attempts:
             reasons.append("ATTEMPT_LIMIT_EXCEEDED")
-        decision = EgressDecision(not reasons, tuple(reasons), _call_id(request, route_model),
-                                  request.logical_stream_id, request.reservation_id,
-                                  request.attempt_ordinal, route_model)
+        return EgressDecision(not reasons, tuple(reasons), request.call_id,
+                              _legacy_egress_event_id(request, route_model),
+                              request.logical_stream_id, request.reservation_id,
+                              request.attempt_ordinal, route_model)
+
+    def _record(self, request: EgressRequest, decision: EgressDecision) -> None:
+        stream = self._stream(request)
         stream.attempts += int(decision.allowed)
         stream.denied += int(not decision.allowed)
-        if not decision.allowed:
-            if not request.reservation_id.strip():
-                stream.state = AttemptState.BILLABLE_UNKNOWN
-                stream.worst_case_held_usd += Decimal(request.estimated_cost_usd)
+        if not decision.allowed and not request.reservation_id.strip():
+            stream.state = AttemptState.BILLABLE_UNKNOWN
+            stream.worst_case_held_usd += Decimal(request.estimated_cost_usd)
         self._decisions.append({
-            "call_id": decision.call_id, "allowed": decision.allowed,
+            "call_id": decision.call_id, "legacy_egress_event_id": decision.legacy_egress_event_id,
+            "allowed": decision.allowed, "claim": (dict(decision.claim.claim)
+            if decision.claim is not None and decision.claim.claim is not None else None),
             "reasons": list(decision.reasons), "stream": request.logical_stream_id,
             "reservation": request.reservation_id, "attempt": request.attempt_ordinal,
             "route": request.route_id, "model": request.model,
         })
+
+    def authorize(self, request: EgressRequest) -> EgressDecision:
+        decision = self._evaluate(request)
+        self._record(request, decision)
+        return decision
+
+    def claim_dispatch(self, request: EgressRequest) -> EgressDecision:
+        """Policy check then one persistent Broker claim; claim failure => 0 dispatch."""
+        decision = self._evaluate(request)
+        if not decision.allowed:
+            self._record(request, decision)
+            return decision
+        if self.claimer is None:
+            # Descriptor-only legacy path (PR4a tests); G2 integration always
+            # supplies a real stdio-Broker claimer.
+            self._record(request, decision)
+            return decision
+        claim = self.claimer.claim(request)
+        if claim.claimed:
+            decision = EgressDecision(decision.allowed, decision.reasons, decision.call_id,
+                                      decision.legacy_egress_event_id, decision.logical_stream_id,
+                                      decision.reservation_id, decision.attempt_ordinal,
+                                      decision.route_model, claim=claim)
+            self._record(request, decision)
+            return decision
+        reasons = decision.reasons + (f"CLAIM_REJECTED:{claim.code}",) + tuple(claim.reasons)
+        denied = EgressDecision(False, reasons, decision.call_id, decision.legacy_egress_event_id,
+                                decision.logical_stream_id, decision.reservation_id,
+                                decision.attempt_ordinal, decision.route_model, claim=claim)
+        self._record(request, denied)
+        return denied
+
+    def require_claim(self, request: EgressRequest) -> EgressDecision:
+        decision = self.claim_dispatch(request)
+        if not decision.allowed:
+            raise EgressViolation(decision.reasons)
         return decision
 
     def record_outcome(self, decision: EgressDecision, *,
@@ -245,10 +318,14 @@ class MockEgressTransport:
                  worst_case_usd: str = "0.003933") -> dict:
         if scenario not in self.SCENARIOS:
             raise ValueError("unknown mock scenario")
-        decision = self.boundary.authorize(request)
+        if self.boundary.claimer is not None:
+            decision = self.boundary.claim_dispatch(request)
+        else:
+            decision = self.boundary.authorize(request)
         if not decision.allowed:
-            return {"call_id": decision.call_id, "dispatched": False,
-                    "denied_reasons": list(decision.reasons),
+            return {"call_id": decision.call_id,
+                    "legacy_egress_event_id": decision.legacy_egress_event_id,
+                    "dispatched": False, "denied_reasons": list(decision.reasons),
                     "state": AttemptState.NOT_DISPATCHED.value}
         result = self.SCENARIOS[scenario]
         state = self.boundary.record_outcome(
@@ -257,7 +334,11 @@ class MockEgressTransport:
         # No automatic retry: the transport returns the single observed attempt.
         self._retry_counts[decision.logical_stream_id] = self._retry_counts.get(
             decision.logical_stream_id, 0) + int(result["error"] is not None)
-        return {"call_id": decision.call_id, "dispatched": True, "scenario": scenario,
+        return {"call_id": decision.call_id,
+                "legacy_egress_event_id": decision.legacy_egress_event_id,
+                "claim": (dict(decision.claim.claim) if decision.claim is not None
+                          and decision.claim.claim is not None else None),
+                "dispatched": True, "scenario": scenario,
                 "http_status": result["status"], "state": state.value,
                 "usage_known": result["usage"] is not None,
                 "worst_case_conservative": state is AttemptState.BILLABLE_UNKNOWN,
