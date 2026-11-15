@@ -7,6 +7,7 @@ and a hung local subprocess; it never contacts a provider, SDK or real key.
 from __future__ import annotations
 
 import copy
+from decimal import Decimal
 from dataclasses import replace
 from datetime import datetime, timezone
 import json
@@ -23,6 +24,7 @@ from autoteacher_m0.security.authorization import (
     ApprovedRoute,
     ExpectedBindings,
 )
+from autoteacher_m0.security.authorization import BudgetLimits
 from autoteacher_m0.security.egress import EgressPolicy
 from autoteacher_m0.security.credential_boundary import (
     LauncherOnlySecret,
@@ -82,8 +84,8 @@ def external_fixture(root: Path) -> dict[str, Path]:
         "bindings": dict(BINDINGS),
         "route": dict(ROUTE),
         "allowed_tools": ["skill_lookup"],
-        "budget": {"scope": SCOPE, "per_call_cap_usd": "0.10",
-                   "total_cap_usd": "1.00", "max_calls": 10},
+        "budget": {"scope": SCOPE, "per_call_cap_usd": "0.20",
+                   "total_cap_usd": "10.00", "max_calls": 50},
         "deadline": {"total_seconds": 120, "max_steps": 8, "max_dispatch_attempts": 8},
     }
     signed = copy.deepcopy(payload)
@@ -99,14 +101,19 @@ def external_fixture(root: Path) -> dict[str, Path]:
 
 def controller(fixture: dict[str, Path], *, launcher_secret: LauncherOnlySecret | None = None,
                repo_root: Path = REPO,
-               egress: EgressPolicy | None = None) -> TrustedLiveController:
-    return TrustedLiveController(
+               egress: EgressPolicy | None = None,
+               expected_budget: BudgetLimits | None = None) -> TrustedLiveController:
+    kwargs = dict(
         repo_root=repo_root, authorization_path=fixture["auth"],
         trusted_keys_path=fixture["keys"], revocation_path=fixture["revoked"],
         expected=ExpectedBindings(**BINDINGS), approved_route=ApprovedRoute(**ROUTE),
         actual_tools=("skill_lookup",), budget_scope=SCOPE,
         candidate_stage=fixture["stage"], launcher_secret=launcher_secret,
-        egress=egress)
+        egress=egress,
+    )
+    if expected_budget is not None:
+        kwargs["expected_budget"] = expected_budget
+    return TrustedLiveController(**kwargs)
 
 
 def test_signed_authorization_is_valid_but_controller_still_blocked() -> None:
@@ -236,3 +243,56 @@ def test_auth08_complete_egress_policy_mismatch_blocks(replacement) -> None:
         assert any(reason.startswith("EGRESS_POLICY_FIELD_MISMATCH")
                    for reason in decision.reasons), decision.reasons
         assert decision.boundary_deployed is False
+
+
+# ---- G1 fix B-G1-1: budget-only policy mutation must be rejected by Controller ----
+def _resign_budget(fixture: dict[str, Path], **changes: object) -> None:
+    payload = json.loads(fixture["auth"].read_text(encoding="utf-8"))
+    payload["budget"].update(changes)
+    signed = {key: value for key, value in payload.items() if key != "signature"}
+    payload["signature"]["value"] = ed25519.sign(canonical(signed), SEED).hex()
+    fixture["auth"].write_text(json.dumps(payload), encoding="utf-8")
+
+
+@pytest.mark.parametrize("changes", [
+    {"per_call_cap_usd": "0.10"},
+    {"per_call_cap_usd": "0.05"},
+    {"total_cap_usd": "9.00"},
+    {"total_cap_usd": "5.00"},
+    {"max_calls": 25},
+    {"max_calls": 10},
+])
+def test_auth08_budget_only_mutation_is_rejected(changes: dict[str, object]) -> None:
+    with tempfile.TemporaryDirectory() as directory:
+        fixture = external_fixture(Path(directory))
+        _resign_budget(fixture, **changes)
+        decision = controller(fixture).inspect(now=NOW)
+        assert decision.authorization_approved is False, changes
+        assert decision.status == "BLOCKED"
+        assert any(reason.startswith("BUDGET_POLICY_MISMATCH:")
+                   for reason in decision.reasons), decision.reasons
+
+
+def test_auth08_approved_budget_passes_policy_but_controller_stays_blocked() -> None:
+    with tempfile.TemporaryDirectory() as directory:
+        fixture = external_fixture(Path(directory))
+        decision = controller(fixture).inspect(now=NOW)
+        assert decision.authorization_approved is True
+        assert decision.status == "BLOCKED"
+        assert decision.boundary_deployed is False
+        assert not any(reason.startswith("BUDGET_POLICY_MISMATCH:")
+                       for reason in decision.reasons), decision.reasons
+        assert all(reason in decision.reasons for reason in ALWAYS_BLOCKED_REASONS)
+
+
+def test_auth08_explicit_expected_budget_is_compared() -> None:
+    with tempfile.TemporaryDirectory() as directory:
+        fixture = external_fixture(Path(directory))
+        # Signed authorization stays at approved 0.20/10.00/50; only the
+        # Controller's expected policy is changed, so the mismatch must come
+        # from the explicit expected budget input, not from the authorization.
+        expected = BudgetLimits(SCOPE, Decimal("0.20"), Decimal("5.00"), 50)
+        decision = controller(fixture, expected_budget=expected).inspect(now=NOW)
+        assert decision.authorization_approved is False
+        assert any(reason.startswith("BUDGET_POLICY_MISMATCH:")
+                   for reason in decision.reasons), decision.reasons

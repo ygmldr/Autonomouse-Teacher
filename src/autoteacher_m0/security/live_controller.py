@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
+from decimal import Decimal
 from pathlib import Path
 
 from autoteacher_m0.contracts import ErrorCode, RuntimeFailure
@@ -20,6 +21,7 @@ from autoteacher_m0.contracts import ErrorCode, RuntimeFailure
 from .authorization import (
     ApprovedRoute,
     AuthorizationDecision,
+    BudgetLimits,
     ExpectedBindings,
     load_execution_authorization,
 )
@@ -35,6 +37,15 @@ from .gates import LiveGate, SecurityBlocked
 from .watchdog import WatchdogPolicy
 
 EXPECTED_EGRESS_POLICY = EgressPolicy()
+
+# Aligned with the approved M0 policy in config/budgets.yaml:
+#   hard_call_usd=0.20, hard_total_usd=10.0, max_live_requests=50
+# (v0.6 §9.5: US$3 soft / US$10 hard / <=50 calls). These are fixed policy
+# inputs, never taken from the candidate authorization itself.
+M0_APPROVED_BUDGET_PER_CALL_CAP_USD = Decimal("0.20")
+M0_APPROVED_BUDGET_TOTAL_CAP_USD = Decimal("10.00")
+M0_APPROVED_BUDGET_MAX_CALLS = 50
+BUDGET_POLICY_FIELDS = ("scope", "per_call_cap_usd", "total_cap_usd", "max_calls")
 
 EGRESS_POLICY_FIELDS = (
     "host_ports", "methods", "path_prefix", "approved_routes", "max_tokens",
@@ -73,6 +84,7 @@ class TrustedLiveController:
                  "62d3569ec38e27ed16fa3147515c1c78d993bb7df831cc1fe29811f3fe64667b",
                  launcher_secret: LauncherOnlySecret | None = None,
                  egress: EgressPolicy | None = None,
+                 expected_budget: BudgetLimits | None = None,
                  watchdog_policy: WatchdogPolicy | None = None) -> None:
         if not candidate_stage.is_dir():
             raise ValueError("candidate stage must be a controller-created directory")
@@ -89,11 +101,17 @@ class TrustedLiveController:
         self.image = image
         self.launcher_secret = launcher_secret
         self.egress = egress or EgressPolicy()
+        self.expected_budget = expected_budget or BudgetLimits(
+            budget_scope,
+            M0_APPROVED_BUDGET_PER_CALL_CAP_USD,
+            M0_APPROVED_BUDGET_TOTAL_CAP_USD,
+            M0_APPROVED_BUDGET_MAX_CALLS,
+        )
         self.watchdog_policy = watchdog_policy or WatchdogPolicy()
 
     def authorization_decision(self, *, now: datetime | None = None
                                 ) -> AuthorizationDecision:
-        return load_execution_authorization(
+        decision = load_execution_authorization(
             authorization_path=self.authorization_path,
             trusted_keys_path=self.trusted_keys_path,
             revocation_path=self.revocation_path,
@@ -104,6 +122,20 @@ class TrustedLiveController:
             budget_scope=self.budget_scope,
             now=now,
         )
+        if decision.authorization is None:
+            return decision
+        mismatches = tuple(
+            f"BUDGET_POLICY_MISMATCH:{field}"
+            for field in BUDGET_POLICY_FIELDS
+            if getattr(decision.authorization.budget, field)
+            != getattr(self.expected_budget, field)
+        )
+        if not mismatches:
+            return decision
+        # A validly signed authorization for different budget caps is still a
+        # policy violation: deny it explicitly instead of relying on the
+        # controller's generic BLOCKED state.
+        return AuthorizationDecision(False, decision.reasons + mismatches, None)
 
     def candidate_command(self) -> list[str]:
         return ContainerRunner(image=self.image, engine=self.candidate_engine).command(
