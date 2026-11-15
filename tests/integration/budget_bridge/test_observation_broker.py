@@ -9,6 +9,7 @@ import subprocess
 import sys
 
 from autoteacher_m0.accounting import ProviderObservation, deliver_observation, derive_call_id
+from autoteacher_m0.accounting.observation import issue_trusted_egress_provenance
 from autoteacher_m0.accounting.broker import BookkeepingBroker
 
 
@@ -74,12 +75,17 @@ def test_stdio_reserve_call_id_then_deliver_authoritative_observation(tmp_path):
     assert replay["duplicate"] and not replay["dispatch_allowed"]
     broker = BookkeepingBroker(config)
     assert broker.ledger.call_reservation(call_id) == first["reservation_id"]
-    response = deliver_observation(broker.ledger, call_id, observation())
+    trust = issue_trusted_egress_provenance(call_id=call_id, request_digest="a" * 64,
+                                             observed_route="offline-test-only", model_reported="fixture-v1")
+    response = deliver_observation(broker.ledger, call_id, observation(),
+                                   reasoning_policy="inclusive", cache_discount_approved=True, provenance=trust)
     assert response["ok"] and response["code"] == "SETTLED"
     assert response["settlement"]["cost_usd"] == "0.001017"
     state = broker.ledger.snapshot()
     assert state["pending"] == 0 and state["requests"] == 1
-    replay_delivery = deliver_observation(broker.ledger, call_id, observation())
+    replay_delivery = deliver_observation(broker.ledger, call_id, observation(),
+                                          reasoning_policy="inclusive", cache_discount_approved=True,
+                                          provenance=trust)
     assert replay_delivery["duplicate"] is True and replay_delivery["code"] == "SETTLED"
 
 
@@ -101,7 +107,8 @@ def test_stdio_partial_usage_holds_full_bound_and_pending_survives_sigkill(tmp_p
     broker = BookkeepingBroker(config)
     partial = observation(input=7, cache_read=None, cache_write=None, output=None,
                           reasoning=None, complete_or_uncertain="PARTIAL")
-    response = deliver_observation(broker.ledger, call_id, partial)
+    response = deliver_observation(broker.ledger, call_id, partial,
+                                   reasoning_policy="inclusive", cache_discount_approved=False)
     assert response["ok"] and response["code"] == "WORST_CASE_HELD"
     assert response["settlement"]["cost_usd"] == "0.00112"
     state = broker.ledger.snapshot()
@@ -117,7 +124,8 @@ def test_stdio_unknown_observation_keeps_reservation_pending(tmp_path):
     unknown = observation(input=None, cache_read=None, cache_write=None, output=None, reasoning=None,
                           usage_raw_hash=None, cost_estimate=None, cost_source="unknown",
                           error_kind="transport", complete_or_uncertain="UNKNOWN")
-    response = deliver_observation(broker.ledger, call_id, unknown)
+    response = deliver_observation(broker.ledger, call_id, unknown,
+                                   reasoning_policy="inclusive", cache_discount_approved=False)
     assert not response["ok"] and response["code"] == "SETTLEMENT_UNCERTAIN"
     assert broker.ledger.snapshot()["pending"] == 1
     # A restart still sees the unresolved reservation (no refund/zero fill).

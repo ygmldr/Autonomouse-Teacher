@@ -31,6 +31,11 @@ def counter(value: object, *, positive: bool = False) -> int:
     return value
 
 
+REASONING_INCLUDED = "included_in_output"
+REASONING_ADDITIONAL = "additional_output"
+REASONING_POLICIES = frozenset({"inclusive", "additional"})
+
+
 @dataclass(frozen=True)
 class UsagePolicy:
     cache_write: str
@@ -39,8 +44,13 @@ class UsagePolicy:
     def __post_init__(self) -> None:
         if self.cache_write != "input_rate":
             raise ValueError("unknown cache-write billing rule")
-        if self.reasoning not in {"included_in_output", "additional_output"}:
+        if self.reasoning not in {REASONING_INCLUDED, REASONING_ADDITIONAL}:
             raise ValueError("unknown reasoning billing rule")
+
+    @property
+    def reasoning_policy(self) -> str:
+        """Canonical observation-side reasoning policy for this route policy."""
+        return "inclusive" if self.reasoning == REASONING_INCLUDED else "additional"
 
 
 def validate_usage(value: object) -> None:

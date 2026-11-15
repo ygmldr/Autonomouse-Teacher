@@ -1,29 +1,35 @@
 """Normalized provider observation and usage mapping (no SDK types leaked).
 
-PR4b accounting-side contract:
+G1 accounting-side contract (supersedes the PR4b module semantics):
 
 * ``ProviderObservation`` is a strict, plain-Python normalized record of one
   external provider call. Missing fields stay ``None`` and are never filled with
-  zero. Unknown keys/schema are rejected.
+  zero. Unknown keys/schema are rejected. Reasoning is validated only against an
+  explicit route billing policy (inclusive vs additional), never silently.
 * ``CallIdentity`` derives a stable, bounded ``call_id`` from trusted identity
   fields so an egress/HTTP attempt can be correlated with a broker reservation.
-* ``deliver_observation`` durably maps one ``call_id`` to its reservation and
-  settles it: AUTHORITATIVE -> SETTLED, PARTIAL/MISSING -> WORST_CASE_HELD,
-  UNKNOWN -> SETTLEMENT_UNCERTAIN (reservation stays PENDING). Delivery is
-  idempotent per ``call_id``; a different observation for the same call_id is a
-  conflict.
+* ``deliver_observation`` requires explicit ``reasoning_policy`` and
+  ``cache_discount_approved`` route-policy parameters. ``AUTHORITATIVE`` and
+  ``provider_invoice`` observations additionally require a
+  ``TrustedEgressProvenance`` issued to the trusted egress/Controller (G2
+  wiring); caller-forged observations never obtain authoritative settlement.
+  PARTIAL/MISSING always use at least the reserved bounds (no cache discount, no
+  partial invoice actual); UNKNOWN keeps the reservation PENDING. Delivery stays
+  idempotent per ``call_id``; different payloads conflict.
+* Expected route/model are checked against the broker reservation/call link for
+  every delivery; mismatches produce ROUTE_MISMATCH without settlement.
 
 This module does NOT read credentials, does not perform network I/O and does not
 claim that any real provider wire format was verified. Real HTTP/usage evidence
 remains UNVERIFIED/BLOCKED until a genuine authorized Live run exists.
 """
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from decimal import Decimal
 import hashlib
 import json
 import re
 
-from .broker_usage import MAX_COUNTER
+from .broker_usage import MAX_COUNTER, REASONING_POLICIES
 from .pricing import money
 from .usage import Usage
 
@@ -40,40 +46,48 @@ _HASH = re.compile(r"[0-9a-f]{64}\Z", re.ASCII)
 _CALL_ID = re.compile(r"call-[0-9a-f]{48}\Z", re.ASCII)
 _REQUEST_DIGEST = re.compile(r"[0-9a-f]{64}\Z", re.ASCII)
 _DECIMAL = re.compile(r"(?:0|[1-9][0-9]{0,11})(?:\.[0-9]{1,9})?\Z", re.ASCII)
+_TRUSTED_EGRESS_SEAL = object()
 
 
 class ObservationSchemaError(ValueError):
     """Rejected observation/call-identity schema; message never embeds raw payload."""
 
 
-def _bounded_text(value: object, field: str, maximum: int) -> str:
-    if (not isinstance(value, str) or not 1 <= len(value) <= maximum
-            or any(ord(char) < 32 for char in value)):
-        raise ObservationSchemaError(f"invalid {field}")
+def normalize_reasoning_policy(value: object) -> str:
+    """Explicit route billing policy: 'inclusive' or 'additional' (no default)."""
+    if not isinstance(value, str) or value not in REASONING_POLICIES:
+        raise ObservationSchemaError("invalid reasoning_policy")
     return value
 
 
-def _optional_text(value: object, field: str, maximum: int) -> str | None:
+def _bounded_text(value: object, name: str, maximum: int) -> str:
+    if (not isinstance(value, str) or not 1 <= len(value) <= maximum
+            or any(ord(char) < 32 for char in value)):
+        raise ObservationSchemaError(f"invalid {name}")
+    return value
+
+
+def _optional_text(value: object, name: str, maximum: int) -> str | None:
     if value is None:
         return None
     if not isinstance(value, str) or not 1 <= len(value) <= maximum or any(ord(char) < 32 for char in value):
-        raise ObservationSchemaError(f"invalid {field}")
+        raise ObservationSchemaError(f"invalid {name}")
     return value
 
 
-def _optional_counter(value: object, field: str) -> int | None:
+def _optional_counter(value: object, name: str) -> int | None:
     if value is None:
         return None
     if type(value) is not int or value < 0 or value > MAX_COUNTER:
-        raise ObservationSchemaError(f"invalid {field}")
+        raise ObservationSchemaError(f"invalid {name}")
     return value
 
 
-def _optional_hash(value: object, field: str) -> str | None:
+def _optional_hash(value: object, name: str) -> str | None:
     if value is None:
         return None
     if not isinstance(value, str) or not _HASH.fullmatch(value):
-        raise ObservationSchemaError(f"invalid {field}")
+        raise ObservationSchemaError(f"invalid {name}")
     return value
 
 
@@ -115,8 +129,8 @@ class ProviderObservation:
         object.__setattr__(self, "model_reported", _optional_text(self.model_reported, "model_reported", 256))
         object.__setattr__(self, "provider_request_id", _optional_text(self.provider_request_id, "provider_request_id", 256))
         object.__setattr__(self, "usage_raw_hash", _optional_hash(self.usage_raw_hash, "usage_raw_hash"))
-        for field in COUNTER_FIELDS:
-            object.__setattr__(self, field, _optional_counter(getattr(self, field), field))
+        for name in COUNTER_FIELDS:
+            object.__setattr__(self, name, _optional_counter(getattr(self, name), name))
         object.__setattr__(self, "cost_estimate", _optional_cost(self.cost_estimate))
         if self.cost_source not in COST_SOURCES:
             raise ObservationSchemaError("invalid cost_source")
@@ -128,18 +142,18 @@ class ProviderObservation:
 
     def _validate_completeness(self) -> None:
         status = self.complete_or_uncertain
-        counters = {field: getattr(self, field) for field in COUNTER_FIELDS}
-        present = [field for field, value in counters.items() if value is not None]
+        counters = {name: getattr(self, name) for name in COUNTER_FIELDS}
+        present = [name for name, value in counters.items() if value is not None]
         if status == "AUTHORITATIVE":
             if self.error_kind != "none":
                 raise ObservationSchemaError("authoritative observation cannot carry an error")
             if self.usage_raw_hash is None:
                 raise ObservationSchemaError("authoritative observation requires usage_raw_hash")
-            for field in ("input", "cache_read", "cache_write", "output"):
-                if getattr(self, field) is None:
-                    raise ObservationSchemaError(f"authoritative observation requires {field}")
-            if self.reasoning is not None and self.reasoning > self.output:
-                raise ObservationSchemaError("reasoning subset exceeds inclusive output")
+            for name in ("input", "cache_read", "cache_write", "output"):
+                if getattr(self, name) is None:
+                    raise ObservationSchemaError(f"authoritative observation requires {name}")
+            # Policy-dependent reasoning constraints are enforced by
+            # validate_for_policy(), never by an implicit inclusive default.
         elif status == "PARTIAL":
             if not 0 < len(present) < len(COUNTER_FIELDS):
                 raise ObservationSchemaError("partial observation requires some but not all counters")
@@ -153,6 +167,23 @@ class ProviderObservation:
                 raise ObservationSchemaError("unknown observation must not claim counters")
             if self.cost_source != "unknown" or self.cost_estimate is not None:
                 raise ObservationSchemaError("unknown observation must not claim cost")
+
+    def validate_for_policy(self, reasoning_policy: str) -> None:
+        """Enforce the explicit route billing policy on reasoning semantics.
+
+        * inclusive: reasoning is a subset of output; absent reasoning is allowed
+          because total output already contains it.
+        * additional: reasoning is billed separately; an authoritative record
+          must carry an explicit reasoning count (missing is never treated as 0).
+        """
+        policy = normalize_reasoning_policy(reasoning_policy)
+        if self.complete_or_uncertain != "AUTHORITATIVE":
+            return
+        if policy == "inclusive":
+            if self.reasoning is not None and self.reasoning > (self.output or 0):
+                raise ObservationSchemaError("inclusive reasoning exceeds output")
+        elif self.reasoning is None:
+            raise ObservationSchemaError("additional reasoning policy requires reasoning count")
 
     def to_mapping(self) -> dict:
         return {
@@ -205,36 +236,48 @@ class ProviderObservation:
         return "SETTLEMENT_UNCERTAIN"
 
     def to_usage(self, *, reserved_input: int, reserved_output: int, known_fee: object = 0,
-                 reasoning_in_output: bool = True) -> Usage:
+                 reasoning_policy: str, cache_discount_approved: bool,
+                 provider_invoice_authenticated: bool = False) -> Usage:
         """Map to ledger Usage without ever substituting zero for missing usage.
 
-        ``reasoning_in_output`` must come from the verified route billing policy;
-        the caller supplies it explicitly instead of guessing.
+        ``reasoning_policy`` and ``cache_discount_approved`` are explicit route
+        billing policy inputs (no silent defaults). PARTIAL/MISSING never apply a
+        cache discount and never use a partial invoice actual: they always use at
+        least the reserved input/output bounds plus the known fee.
         """
         if type(reserved_input) is not int or reserved_input <= 0:
             raise ValueError("positive reserved input bound required")
         if type(reserved_output) is not int or reserved_output <= 0:
             raise ValueError("positive reserved output bound required")
+        if type(cache_discount_approved) is not bool:
+            raise ObservationSchemaError("cache_discount_approved must be boolean")
+        if type(provider_invoice_authenticated) is not bool:
+            raise ObservationSchemaError("provider_invoice_authenticated must be boolean")
+        policy = normalize_reasoning_policy(reasoning_policy)
+        self.validate_for_policy(policy)
         fee = money(known_fee)
         status = self.complete_or_uncertain
         if status == "AUTHORITATIVE":
             total_input = (self.input or 0) + (self.cache_read or 0) + (self.cache_write or 0)
-            total_output = self.output or 0
-            if not reasoning_in_output:
+            cached = self.cache_read if cache_discount_approved else 0
+            total_output = (self.output or 0)
+            if policy == "additional":
                 total_output += self.reasoning or 0
-            actual = self.cost_estimate if self.cost_source == "provider_invoice" else None
-            return Usage(total_input, total_output, self.cache_read or 0, False, actual, fee)
+            actual = None
+            if self.cost_source == "provider_invoice" and provider_invoice_authenticated:
+                actual = self.cost_estimate
+            return Usage(total_input, total_output, cached, False, actual, fee)
         if status in {"PARTIAL", "MISSING"}:
             input_parts = (self.input, self.cache_read, self.cache_write)
             known_input = sum(part for part in input_parts if part is not None)
-            complete_input = all(part is not None for part in input_parts)
-            total_input = known_input if complete_input else max(reserved_input, known_input)
-            cache_read = self.cache_read if complete_input else 0
-            complete_output = self.output is not None and (reasoning_in_output or self.reasoning is not None)
-            known_output = (self.output or 0) + (0 if reasoning_in_output else (self.reasoning or 0))
-            total_output = known_output if complete_output else max(reserved_output, known_output)
-            actual = self.cost_estimate if self.cost_source == "provider_invoice" else None
-            return Usage(total_input, total_output, cache_read, True, actual, fee)
+            known_output = self.output or 0
+            if policy == "additional":
+                known_output += self.reasoning or 0
+            # Any incomplete observation uses at least the reserved bounds; no
+            # cache discount and no partial-invoice actual can lower this.
+            total_input = max(reserved_input, known_input)
+            total_output = max(reserved_output, known_output)
+            return Usage(total_input, total_output, 0, True, None, fee)
         # UNKNOWN: no trustworthy counters exist; hold the full reserved bounds.
         return Usage(reserved_input, reserved_output, 0, True, None, fee)
 
@@ -276,21 +319,96 @@ def derive_call_id(run_id: str, logical_step: int, attempt_index: int, request_d
     return CallIdentity(run_id, logical_step, attempt_index, request_digest).call_id
 
 
+@dataclass(frozen=True)
+class TrustedEgressProvenance:
+    """Opaque capability the trusted egress/Controller receives (G2 wiring).
+
+    It can only be produced by ``issue_trusted_egress_provenance`` inside this
+    module. A caller that merely constructs an observation cannot fabricate the
+    private seal, so it cannot obtain authoritative settlement in G1 tests.
+    """
+    call_id: str
+    request_digest: str
+    observed_route: str | None = None
+    model_reported: str | None = None
+    _seal: object = field(default=None, repr=False, compare=False)
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.call_id, str) or not _CALL_ID.fullmatch(self.call_id):
+            raise ObservationSchemaError("invalid provenance call_id")
+        if not isinstance(self.request_digest, str) or not _REQUEST_DIGEST.fullmatch(self.request_digest):
+            raise ObservationSchemaError("invalid provenance request_digest")
+        object.__setattr__(self, "observed_route", _optional_text(self.observed_route, "observed_route", 128))
+        object.__setattr__(self, "model_reported", _optional_text(self.model_reported, "model_reported", 256))
+        if self._seal is not _TRUSTED_EGRESS_SEAL:
+            raise ObservationSchemaError("untrusted provenance")
+
+
+def issue_trusted_egress_provenance(*, call_id: str, request_digest: str,
+                                    observed_route: str | None = None,
+                                    model_reported: str | None = None) -> TrustedEgressProvenance:
+    """Issue the G1 trusted-source capability. G2 must call this only from the
+    authenticated trusted egress/Controller boundary, never from candidate code."""
+    return TrustedEgressProvenance(call_id=call_id, request_digest=request_digest,
+                                   observed_route=observed_route, model_reported=model_reported,
+                                   _seal=_TRUSTED_EGRESS_SEAL)
+
+
+class _EvidenceRejected(Exception):
+    def __init__(self, response: dict):
+        self.response = response
+
+
+def _rejected(code: str, *, call_id: str, digest: str, detail: str,
+              reservation_id: str | None = None) -> "_EvidenceRejected":
+    response = {"ok": False, "code": code, "call_id": call_id,
+                "accounting_status": "SETTLEMENT_UNCERTAIN", "reservation_pending": True,
+                "observation_digest": digest, "detail": detail}
+    if reservation_id is not None:
+        response["reservation_id"] = reservation_id
+    return _EvidenceRejected(response)
+
+
 def deliver_observation(ledger, call_id: str, observation: ProviderObservation | dict,
-                        *, reasoning_in_output: bool = True) -> dict:
+                        *, reasoning_policy: str, cache_discount_approved: bool,
+                        provenance: TrustedEgressProvenance | None = None) -> dict:
     """Durably link one observation to its reservation and settle it once.
 
     The caller must bind the call to a reservation first (``ledger.bind_call``),
     which the broker does when a reserve message carries an optional ``call_id``.
+    Explicit route billing policy arguments are mandatory. ``AUTHORITATIVE`` or
+    ``provider_invoice`` delivery requires ``provenance`` from the trusted egress
+    boundary; otherwise the call is rejected without settlement (reservation
+    stays PENDING). Route/model mismatches are rejected without settlement.
     Repeated delivery for the same call_id+payload is idempotent; a different
-    payload for the same call_id is a conflict. UNKNOWN keeps the reservation
-    PENDING (SETTLEMENT_UNCERTAIN) rather than refunding or guessing.
+    payload for the same call_id is a conflict.
     """
     if not isinstance(call_id, str) or not _CALL_ID.fullmatch(call_id):
         raise ObservationSchemaError("invalid call_id")
+    if type(cache_discount_approved) is not bool:
+        raise ObservationSchemaError("cache_discount_approved must be boolean")
+    policy = normalize_reasoning_policy(reasoning_policy)
     if not isinstance(observation, ProviderObservation):
         observation = ProviderObservation.from_mapping(observation)
+    observation.validate_for_policy(policy)
     digest = observation_digest(observation)
+    if provenance is not None:
+        if not isinstance(provenance, TrustedEgressProvenance):
+            raise ObservationSchemaError("untrusted provenance")
+        if provenance.call_id != call_id:
+            raise ObservationSchemaError("provenance call_id mismatch")
+        if (provenance.observed_route is not None and observation.observed_route is not None
+                and provenance.observed_route != observation.observed_route):
+            response = _rejected("ROUTE_MISMATCH", call_id=call_id, digest=digest,
+                                 detail="provenance observed_route differs from observation").response
+            response["duplicate"] = False
+            return response
+        if (provenance.model_reported is not None and observation.model_reported is not None
+                and provenance.model_reported != observation.model_reported):
+            response = _rejected("ROUTE_MISMATCH", call_id=call_id, digest=digest,
+                                 detail="provenance model_reported differs from observation").response
+            response["duplicate"] = False
+            return response
 
     def operation(database):
         link = database.execute("SELECT reservation_id FROM budget_call_links WHERE scope_id=? AND call_id=?",
@@ -309,16 +427,50 @@ def deliver_observation(ledger, call_id: str, observation: ProviderObservation |
             existing = "SETTLED" if row["status"] == "OK" else "WORST_CASE_HELD"
             return {"ok": True, "code": "ALREADY_SETTLED", "call_id": call_id,
                     "reservation_id": reservation_id, "accounting_status": existing}
+        # Route/model expectations come from the durable reservation/link, not
+        # from caller-supplied observation fields (OBS-05).
+        expected_route = row["route_id"]
+        expected_model = row["model"]
+        if observation.requested_route != expected_route:
+            raise _rejected("ROUTE_MISMATCH", call_id=call_id, reservation_id=reservation_id,
+                            digest=digest, detail="requested_route differs from reservation route")
+        if observation.observed_route is not None and observation.observed_route != expected_route:
+            raise _rejected("ROUTE_MISMATCH", call_id=call_id, reservation_id=reservation_id,
+                            digest=digest, detail="observed_route differs from reservation route")
+        if observation.model_reported is not None and observation.model_reported != expected_model:
+            raise _rejected("ROUTE_MISMATCH", call_id=call_id, reservation_id=reservation_id,
+                            digest=digest, detail="model_reported differs from reservation model")
+        trusted = provenance is not None
+        if provenance is not None:
+            if provenance.observed_route is not None and provenance.observed_route != expected_route:
+                raise _rejected("ROUTE_MISMATCH", call_id=call_id, reservation_id=reservation_id,
+                                digest=digest, detail="provenance observed_route differs from reservation route")
+            if provenance.model_reported is not None and provenance.model_reported != expected_model:
+                raise _rejected("ROUTE_MISMATCH", call_id=call_id, reservation_id=reservation_id,
+                                digest=digest, detail="provenance model_reported differs from reservation model")
+        # OBS-06/INT-15: caller-built authoritative or invoice claims never settle.
+        if (observation.complete_or_uncertain == "AUTHORITATIVE"
+                or observation.cost_source == "provider_invoice") and not trusted:
+            raise _rejected("UNAUTHORIZED_OBSERVATION", call_id=call_id, reservation_id=reservation_id,
+                            digest=digest,
+                            detail="authoritative/provider_invoice requires trusted egress provenance")
         if status == "SETTLEMENT_UNCERTAIN":
             return {"ok": False, "code": "SETTLEMENT_UNCERTAIN", "call_id": call_id,
                     "reservation_id": reservation_id, "accounting_status": status,
                     "reservation_pending": True, "observation_digest": digest}
         usage = observation.to_usage(reserved_input=row["input_bound"], reserved_output=row["output_bound"],
-                                     known_fee=Decimal(row["known_fee"]), reasoning_in_output=reasoning_in_output)
+                                     known_fee=Decimal(row["known_fee"]), reasoning_policy=policy,
+                                     cache_discount_approved=cache_discount_approved,
+                                     provider_invoice_authenticated=trusted)
         settlement = ledger.settle(reservation_id, usage, status="OK" if status == "SETTLED" else "FAILED")
         return {"ok": True, "code": status, "call_id": call_id, "reservation_id": reservation_id,
                 "accounting_status": status, "settlement": settlement, "observation_digest": digest}
 
-    response, duplicate = ledger.observation_once(call_id, digest, operation)
+    try:
+        response, duplicate = ledger.observation_once(call_id, digest, operation)
+    except _EvidenceRejected as rejected:
+        response = dict(rejected.response)
+        response["duplicate"] = False
+        return response
     response["duplicate"] = duplicate
     return response
