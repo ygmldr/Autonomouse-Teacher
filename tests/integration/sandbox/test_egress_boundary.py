@@ -8,9 +8,14 @@ import hashlib
 import pytest
 
 from autoteacher_m0.security.egress import (
-    AttemptState, EgressBoundary, EgressPolicy, EgressRequest, EgressViolation,
-    MockEgressTransport, policy_from_json,
+    AttemptState, ClaimResult, EgressBoundary, EgressPolicy, EgressRequest,
+    EgressViolation, MockEgressTransport, TrustedEgressTransport, policy_from_json,
 )
+
+
+class AlwaysClaimer:
+    def claim(self, request):
+        return ClaimResult(True, "CLAIMED", (), {"call_id": request.call_id})
 
 
 DIGEST = "a" * 64
@@ -95,9 +100,19 @@ def test_attempt_limit_denied():
     ("unknown_transport", AttemptState.BILLABLE_UNKNOWN.value),
 ])
 def test_failure_matrix_never_treats_unknown_as_zero(scenario, state):
-    boundary = EgressBoundary()
-    outcome = MockEgressTransport(boundary).dispatch(req(), scenario)
+    boundary = EgressBoundary(claimer=AlwaysClaimer())
+    decision = boundary.claim_dispatch(req())
+    assert decision.allowed and decision.permission is not None
+    result = MockEgressTransport.SCENARIOS[scenario]
+
+    def provider(_request):
+        return result
+
+    transport = TrustedEgressTransport(boundary, provider)
+    outcome = transport.dispatch(req(), decision.permission)
+    assert outcome["dispatched"] is True, outcome
     assert outcome["state"] == state and outcome["retry_attempted"] is False
+    assert transport.provider_calls == 1
     stream = boundary.stream("s1")
     if state == AttemptState.BILLABLE_UNKNOWN.value:
         assert stream.worst_case_held_usd > 0

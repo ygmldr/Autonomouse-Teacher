@@ -289,19 +289,21 @@ def test_int06_sigkill_restart_does_not_replay_dispatch(tmp_path):
     path, ledger = setup(tmp_path)
     call = derive_call_id("run-int06", 0, 0, DIGEST)
     reservation = reserve_call(path, call)["reservation_id"]
-    claimer = StdioBrokerClaimer(path)
     proc = start_broker(path)
     reply = send(proc, {"v": 1, "id": "claim-1", "op": "claim", "call_id": call,
                         "reservation_id": reservation, "request_digest": DIGEST})
     assert reply["ok"] and reply["code"] == "CLAIMED"
     stop(proc, kill=True)
-    claimer.close() if False else None  # keep separate client ownership explicit
-    replay = send(start_broker(path), {"v": 1, "id": "claim-2", "op": "claim",
-                                       "call_id": call, "reservation_id": reservation,
-                                       "request_digest": DIGEST})
-    assert replay["ok"] is False and replay["code"] == "ALREADY_CLAIMED"
-    assert replay["dispatch_allowed"] is False
-    assert snapshot(path)["claims"]["total"] == 1
+    replay_proc = start_broker(path)
+    try:
+        replay = send(replay_proc, {"v": 1, "id": "claim-2", "op": "claim",
+                                    "call_id": call, "reservation_id": reservation,
+                                    "request_digest": DIGEST})
+        assert replay["ok"] is False and replay["code"] == "ALREADY_CLAIMED"
+        assert replay["dispatch_allowed"] is False
+        assert snapshot(path)["claims"]["total"] == 1
+    finally:
+        stop(replay_proc)
 
 
 def test_int07_same_call_different_digest_conflicts(tmp_path):

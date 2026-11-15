@@ -10,11 +10,12 @@ and Live stays BLOCKED.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 
 from autoteacher_m0.security.egress import (
-    AttemptState, EgressBoundary, EgressPolicy, EgressRequest, EgressViolation,
-    MockEgressTransport, policy_from_json,
+    AttemptState, ClaimResult, EgressBoundary, EgressPolicy, EgressRequest,
+    EgressViolation, MockEgressTransport, TrustedEgressTransport, policy_from_json,
 )
 
 CHECKS: list[dict] = []
@@ -27,10 +28,25 @@ def check(name: str, condition: bool, detail: object = None) -> None:
         FAILURES.append(name)
 
 
+CALL_ID = "call-" + "a" * 48
+REQUEST_DIGEST = "a" * 64
+
+
+class AlwaysClaimer:
+    def claim(self, request: EgressRequest) -> ClaimResult:
+        return ClaimResult(True, "CLAIMED", (), {"call_id": request.call_id})
+
+
 def request(**overrides: object) -> EgressRequest:
     base = dict(logical_stream_id="stream-pr4a-1", reservation_id="res-pr4a-1",
-                attempt_ordinal=1, route_id="opencode-go", model="deepseek-v4.1-flash")
+                attempt_ordinal=1, route_id="opencode-go", model="deepseek-v4.1-flash",
+                call_id=CALL_ID, request_digest=REQUEST_DIGEST)
     base.update(overrides)
+    if "call_id" not in overrides:
+        material = "|".join(str(base[key]) for key in
+                            ("logical_stream_id", "reservation_id", "attempt_ordinal",
+                             "route_id", "model", "request_digest"))
+        base["call_id"] = "call-" + hashlib.sha256(material.encode()).hexdigest()[:48]
     return EgressRequest(**base)
 
 
@@ -38,7 +54,7 @@ def main() -> int:
     boundary = EgressBoundary()
 
     allowed = boundary.require(request())
-    check("approved_request_allowed", allowed.allowed and allowed.call_id.startswith("eg-"))
+    check("approved_request_allowed", allowed.allowed and allowed.call_id.startswith("call-"))
     same = boundary.authorize(request())
     check("stable_call_id_is_deterministic", same.call_id == allowed.call_id)
     next_attempt = boundary.authorize(request(attempt_ordinal=2))
@@ -72,11 +88,17 @@ def main() -> int:
 
     matrix = {}
     for scenario in MockEgressTransport.SCENARIOS:
-        cases = EgressBoundary()
-        probe = MockEgressTransport(cases)
+        cases = EgressBoundary(claimer=AlwaysClaimer())
         stream = f"stream-{scenario}"
-        outcome = probe.dispatch(request(logical_stream_id=stream, reservation_id=f"res-{scenario}"),
-                                 scenario)
+        candidate = request(logical_stream_id=stream, reservation_id=f"res-{scenario}")
+        grant = cases.claim_dispatch(candidate)
+        result = MockEgressTransport.SCENARIOS[scenario]
+
+        def provider(_request):
+            return result
+
+        probe = TrustedEgressTransport(cases, provider)
+        outcome = probe.dispatch(candidate, grant.permission)
         state = cases.stream(stream).state.value
         matrix[scenario] = {"dispatched": outcome["dispatched"], "state": state,
                             "retry_attempted": outcome["retry_attempted"],
@@ -94,6 +116,7 @@ def main() -> int:
                   state == AttemptState.BILLABLE_UNKNOWN.value
                   and cases.stream(stream).worst_case_held_usd > 0, state)
         check(f"matrix_no_retry_{scenario}", outcome["retry_attempted"] is False)
+        check(f"matrix_provider_calls_{scenario}", probe.provider_calls == 1)
 
     policy = policy_from_json({"max_tokens": 512, "max_attempts": 2})
     check("policy_json_roundtrip", policy.max_tokens == 512 and policy.max_attempts == 2)

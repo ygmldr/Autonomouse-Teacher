@@ -169,13 +169,24 @@ class BookkeepingBroker:
                 raise ValueError("retry must be boolean")
             return message
         if op == "claim":
-            _keys(message, common | {"call_id", "reservation_id", "request_digest"})
+            _keys(message, common | {"call_id", "reservation_id", "request_digest"},
+                  {"expected_route_id", "expected_model"})
             if not isinstance(message["call_id"], str) or not CALL_ID_PATTERN.fullmatch(message["call_id"]):
                 raise ProtocolError("INVALID_CALL_ID")
             _identifier(message["reservation_id"])
             if (not isinstance(message["request_digest"], str)
                     or not REQUEST_DIGEST_PATTERN.fullmatch(message["request_digest"])):
                 raise ProtocolError("INVALID_REQUEST_DIGEST")
+            has_route = "expected_route_id" in message
+            has_model = "expected_model" in message
+            if has_route != has_model:
+                raise ProtocolError("EXPECTED_BINDING_PAIR_REQUIRED")
+            if has_route:
+                if (not isinstance(message["expected_route_id"], str)
+                        or not message["expected_route_id"]
+                        or not isinstance(message["expected_model"], str)
+                        or not message["expected_model"]):
+                    raise ProtocolError("INVALID_EXPECTED_BINDING")
             return message
         if op in {"settle", "fail"}:
             _keys(message, common | {"reservation_id", "usage"})
@@ -286,10 +297,14 @@ class BookkeepingBroker:
             if request["op"] == "claim":
                 result = self.ledger.claim_dispatch(
                     request["call_id"], request["reservation_id"], request["request_digest"],
-                    allowed_routes=set(self.routes))
+                    allowed_routes=set(self.routes),
+                    expected_route_id=request.get("expected_route_id"),
+                    expected_model=request.get("expected_model"))
                 if result["ok"]:
                     return envelope(identity, ok=True, code="CLAIMED", dispatch_allowed=True,
-                                    claim=result["claim"])
+                                    claim=result["claim"],
+                                    route_id=result.get("route_id"),
+                                    model=result.get("model"))
                 return envelope(identity, ok=False, code=result["code"], dispatch_allowed=False,
                                 duplicate=result.get("duplicate", False), claim=result.get("claim"))
             # F2: a completion repeated with a NEW message id for an already

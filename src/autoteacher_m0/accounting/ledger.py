@@ -197,7 +197,8 @@ class BudgetLedger:
                 "request_digest": row["request_digest"], "status": row["status"]}
 
     def claim_dispatch(self, call_id: str, reservation_id: str, request_digest: str,
-                       *, allowed_routes=None) -> dict:
+                       *, allowed_routes=None, expected_route_id: str | None = None,
+                       expected_model: str | None = None) -> dict:
         """Atomically validate and persist the single M0 dispatch claim.
 
         Validation and INSERT happen in one durable transaction. A duplicate of
@@ -212,6 +213,8 @@ class BudgetLedger:
             return {"ok": False, "code": "INVALID_RESERVATION_ID"}
         if not isinstance(request_digest, str) or not REQUEST_DIGEST_PATTERN.fullmatch(request_digest):
             return {"ok": False, "code": "INVALID_REQUEST_DIGEST"}
+        if (expected_route_id is None) != (expected_model is None):
+            return {"ok": False, "code": "EXPECTED_BINDING_PAIR_REQUIRED"}
         with self._transaction() as database:
             self._ensure_observation_schema(database)
             self._ensure_claim_schema(database)
@@ -227,6 +230,9 @@ class BudgetLedger:
                 return {"ok": False, "code": "UNKNOWN_RESERVATION"}
             if allowed_routes is not None and (row["route_id"], row["model"]) not in allowed_routes:
                 return {"ok": False, "code": "ROUTE_BLOCKED"}
+            if (expected_route_id is not None
+                    and (row["route_id"], row["model"]) != (expected_route_id, expected_model)):
+                return {"ok": False, "code": "ROUTE_MISMATCH"}
             if row["status"] != "PENDING":
                 return {"ok": False, "code": "RESERVATION_NOT_PENDING"}
             if Decimal(row["reserved_cost"]) > self.limits.per_call_usd:
@@ -270,7 +276,8 @@ class BudgetLedger:
                 return {"ok": False, "code": "CALL_ID_CONFLICT", "claim": claim}
             return {"ok": True, "code": "CLAIMED",
                     "claim": {"call_id": call_id, "reservation_id": reservation_id,
-                              "request_digest": request_digest, "status": "CLAIMED"}}
+                              "request_digest": request_digest, "status": "CLAIMED"},
+                    "route_id": row["route_id"], "model": row["model"]}
 
     def claim_for_call(self, call_id: str) -> dict | None:
         with self._transaction() as database:
