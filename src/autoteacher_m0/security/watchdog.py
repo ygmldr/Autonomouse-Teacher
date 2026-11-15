@@ -241,39 +241,82 @@ class ExternalWatchdog:
 
     def supervise(self, process: subprocess.Popen[bytes], *,
                   cleanup: Callable[[], Mapping[str, object]] | None = None) -> WatchdogOutcome:
-        """Poll the root process; on timeout/limit kill the tree and reserve pending."""
+        """Poll the root; on ANY abnormal path kill the tree, run cleanup and fail closed.
+
+        WD-03/WD-04: cleanup is not conditional on a happy path. Any exception,
+        timeout, step/dispatch latch or cleanup failure is turned into a
+        ``WatchdogViolation`` (``SECURITY_BLOCKED``) after the process tree has
+        been killed and absence was attempted; no success outcome is returned and
+        the caller must not start another billable attempt.
+        """
         self.start()
+        status: RunStatus | None = None
+        root_error: BaseException | None = None
         try:
             while True:
-                status = self.exceeded()
-                if status is not None:
+                latch = self.exceeded()
+                if latch is not None:
+                    status = latch
                     break
                 if process.poll() is not None:
                     status = RunStatus.COMPLETED if process.returncode == 0 else RunStatus.FAILED
                     break
                 time.sleep(min(self.policy.poll_interval_seconds,
                                max(0.001, self.remaining())))
-        except BaseException:
-            # Even controller-side crashes must not leave the candidate running.
-            if process.poll() is None:
-                kill_process_tree(process,
-                                  grace_seconds=self.policy.termination_grace_seconds)
-            raise
-        cleanup_evidence: Mapping[str, object] = {}
-        pending: PendingConservative | None = None
+        except BaseException as error:  # controller-side crash must still clean up
+            root_error = error
+
         kill_result: ProcessTreeKillResult | None = None
-        if status is not None and status not in (RunStatus.COMPLETED, RunStatus.FAILED):
-            kill_result = kill_process_tree(
+        pending: PendingConservative | None = None
+        reasons: list[str] = []
+        cleanup_evidence: dict[str, object] = {}
+        try:
+            if root_error is not None:
+                if process.poll() is None:
+                    kill_result = self._kill(process, reasons)
+            elif status not in (RunStatus.COMPLETED, RunStatus.FAILED):
+                kill_result = self._kill(process, reasons)
+                pending = PendingConservative(reason=self.latch_reason or str(status))
+            if cleanup is not None:
+                try:
+                    evidence = cleanup()
+                except WatchdogViolation as error:
+                    reasons.extend(error.reasons)
+                except BaseException as error:  # timeout/absent/failed cleanup: BLOCKED
+                    reasons.append(f"CLEANUP_FAILED:{type(error).__name__}")
+                else:
+                    if not isinstance(evidence, Mapping):
+                        reasons.append("CLEANUP_EVIDENCE_INVALID")
+                    else:
+                        cleanup_evidence = dict(evidence)
+            if reasons:
+                raise WatchdogViolation(tuple(dict.fromkeys(reasons)))
+            if root_error is not None:
+                raise root_error
+            if status is RunStatus.FAILED:
+                pending = PendingConservative(reason="PROCESS_EXIT_NONZERO_UNKNOWN_EFFECTS")
+            return WatchdogOutcome(
+                status=status, elapsed_seconds=self.elapsed(), steps=self.steps,
+                dispatch_attempts=self.dispatch_attempts, kill_result=kill_result,
+                pending=pending, cleanup=cleanup_evidence, detail=self.latch_reason,
+            )
+        finally:
+            # Safety net: never leave a live candidate tree behind any exit path.
+            if process.poll() is None:
+                try:
+                    kill_process_tree(process,
+                                      grace_seconds=self.policy.termination_grace_seconds)
+                except BaseException:
+                    pass
+
+    def _kill(self, process: subprocess.Popen[bytes],
+              reasons: list[str]) -> ProcessTreeKillResult | None:
+        try:
+            result = kill_process_tree(
                 process, grace_seconds=self.policy.termination_grace_seconds)
-            pending = PendingConservative(reason=self.latch_reason or status.value)
-            if not kill_result.confirmed_absent:
-                raise WatchdogViolation(("PROCESS_TREE_NOT_CONFIRMED_ABSENT",))
-        if cleanup is not None:
-            cleanup_evidence = dict(cleanup())
-        if status is RunStatus.FAILED:
-            pending = PendingConservative(reason="PROCESS_EXIT_NONZERO_UNKNOWN_EFFECTS")
-        return WatchdogOutcome(
-            status=status, elapsed_seconds=self.elapsed(), steps=self.steps,
-            dispatch_attempts=self.dispatch_attempts, kill_result=kill_result,
-            pending=pending, cleanup=cleanup_evidence, detail=self.latch_reason,
-        )
+        except BaseException:
+            reasons.append("PROCESS_TREE_KILL_FAILED")
+            return None
+        if not result.confirmed_absent:
+            reasons.append("PROCESS_TREE_NOT_CONFIRMED_ABSENT")
+        return result

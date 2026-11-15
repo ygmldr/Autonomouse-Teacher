@@ -163,11 +163,43 @@ def test_container_cleanup_requires_observed_absence(tmp_path: Path) -> None:
     assert evidence["absence_returncode"] == 0
 
 
-def test_supervise_kills_on_controller_exception() -> None:
+def test_wd03_cleanup_failure_after_exception_is_security_blocked() -> None:
     process = spawn_hung()
-    watchdog = ExternalWatchdog(WatchdogPolicy(total_seconds=5, termination_grace_seconds=0.2))
-    with pytest.raises(RuntimeError):
-        watchdog.supervise(process, cleanup=lambda: (_ for _ in ()).throw(RuntimeError("boom")))
+    watchdog = ExternalWatchdog(WatchdogPolicy(total_seconds=5,
+                                               termination_grace_seconds=0.2))
+    with pytest.raises(WatchdogViolation) as error:
+        watchdog.supervise(process, cleanup=lambda: (_ for _ in ()).throw(
+            RuntimeError("boom")))
+    assert "CLEANUP" in str(error.value) or any(
+        "CLEANUP" in reason for reason in error.value.reasons)
     assert process.poll() is not None
     time.sleep(0.05)
     assert not Path(f"/proc/{process.pid}").exists() or process.poll() is not None
+
+
+def test_wd03_exception_path_still_runs_cleanup_and_kills_tree() -> None:
+    process = spawn_hung()
+    cleanup_calls: list[str] = []
+
+    class ControllerCrash(ExternalWatchdog):
+        def exceeded(self):
+            raise RuntimeError("controller crashed")
+
+    watchdog = ControllerCrash(WatchdogPolicy(total_seconds=5,
+                                              termination_grace_seconds=0.2))
+    with pytest.raises(RuntimeError):
+        watchdog.supervise(process, cleanup=lambda: cleanup_calls.append("cleanup")
+                           or {"container": "at-m0-fake", "confirmed": True})
+    assert cleanup_calls == ["cleanup"], "cleanup must run before re-raising"
+    assert process.poll() is not None
+
+
+def test_wd04_cleanup_failure_on_normal_completion_is_not_success() -> None:
+    process = subprocess.Popen([sys.executable, "-c", "raise SystemExit(0)"],
+                               stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                               stderr=subprocess.DEVNULL, start_new_session=True)
+    watchdog = ExternalWatchdog(WatchdogPolicy(total_seconds=5))
+    with pytest.raises(WatchdogViolation):
+        watchdog.supervise(process, cleanup=lambda: (_ for _ in ()).throw(
+            TimeoutError("cleanup timed out")))
+    assert process.poll() is not None

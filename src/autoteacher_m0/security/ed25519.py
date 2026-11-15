@@ -38,6 +38,7 @@ def _xrecover(y: int) -> int:
 
 _BY = 4 * _inv(5) % _Q
 _B = (_xrecover(_BY) % _Q, _BY)
+_IDENTITY = (0, 1)
 
 
 def _edwards_add(left: tuple[int, int], right: tuple[int, int]) -> tuple[int, int]:
@@ -83,10 +84,37 @@ def _decode_point(encoded: bytes) -> tuple[int, int]:
     x = _xrecover(y)
     if (x & 1) != (encoded[31] >> 7):
         x = _Q - x
+    if x >= _Q:
+        raise ValueError("Ed25519 point has a non-canonical x coordinate")
     point = (x, y)
     if not _is_on_curve(point):
         raise ValueError("Ed25519 point is not on the curve")
+    if _encode_point(point) != encoded:
+        raise ValueError("Ed25519 point encoding is not canonical")
     return point
+
+
+def _is_small_order(point: tuple[int, int]) -> bool:
+    """True for identity and the other low-order points killed by [8]P."""
+    return _scalar_mult(point, 8) == _IDENTITY
+
+
+def _in_prime_order_subgroup(point: tuple[int, int]) -> bool:
+    """Strict admission: P must satisfy [L]P == identity (no torsion component)."""
+    return _scalar_mult(point, _L) == _IDENTITY
+
+
+def is_valid_public_key(public: bytes) -> bool:
+    """True only for canonical, non-small-order, prime-order Ed25519 public keys."""
+    if len(public) != 32:
+        return False
+    try:
+        point = _decode_point(public)
+    except ValueError:
+        return False
+    if _is_small_order(point):
+        return False
+    return _in_prime_order_subgroup(point)
 
 
 def _hash(message: bytes) -> bytes:
@@ -135,6 +163,12 @@ def verify(public: bytes, message: bytes, signature: bytes) -> bool:
             return False
         point_a = _decode_point(public)
     except ValueError:
+        return False
+    # Strict Ed25519: both signature R and public A must be canonical,
+    # non-small-order and in the prime-order subgroup.
+    if _is_small_order(point_r) or not _in_prime_order_subgroup(point_r):
+        return False
+    if _is_small_order(point_a) or not _in_prime_order_subgroup(point_a):
         return False
     challenge = _hash_int(signature[:32] + public + message)
     return _scalar_mult(_B, response) == _edwards_add(point_r, _scalar_mult(point_a, challenge))

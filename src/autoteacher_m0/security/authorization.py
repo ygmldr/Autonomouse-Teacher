@@ -131,6 +131,13 @@ def _require_utc(value: Any, *, field: str) -> datetime:
     return parsed
 
 
+def _require_int(value: Any, *, field: str) -> int:
+    """Strict JSON integer admission: no bool/float/str/Decimal coercion."""
+    if type(value) is not int:
+        raise ValueError(f"{field} must be a JSON integer")
+    return value
+
+
 def _require_usd(value: Any, *, field: str) -> Decimal:
     if not isinstance(value, str) or not _USD.fullmatch(value):
         raise ValueError(f"{field} must be a plain decimal string such as 0.10")
@@ -219,7 +226,10 @@ def _load_trusted_keys(raw: bytes) -> dict[str, bytes]:
             raise ValueError("trusted key id is invalid")
         if not isinstance(encoded, str) or not re.fullmatch(r"[a-f0-9]{64}", encoded):
             raise ValueError("trusted key must be a 32-byte lowercase hex public key")
-        result[key_id] = bytes.fromhex(encoded)
+        public = bytes.fromhex(encoded)
+        if not ed25519.is_valid_public_key(public):
+            raise ValueError("trusted key is not a strict prime-order Ed25519 point")
+        result[key_id] = public
     return result
 
 
@@ -272,8 +282,15 @@ def load_execution_authorization(*, authorization_path: Path, trusted_keys_path:
     if not isinstance(authorization_id, str) or not _IDENTIFIER.fullmatch(authorization_id):
         reasons.append("AUTHORIZATION_ID_INVALID")
         authorization_id = ""
+    # AUTH-06: approver and timestamps are parsed independently so any failure
+    # yields a deny decision instead of leaving an unbound variable to crash later.
+    approver = ""
     try:
         approver = _require_text(payload["approver"], field="approver")
+    except ValueError:
+        reasons.append("APPROVER_INVALID")
+    issued = not_before = expires = moment
+    try:
         issued = _require_utc(payload["issued_utc"], field="issued_utc")
         not_before = _require_utc(payload["not_before_utc"], field="not_before_utc")
         expires = _require_utc(payload["expires_utc"], field="expires_utc")
@@ -342,7 +359,7 @@ def load_execution_authorization(*, authorization_path: Path, trusted_keys_path:
                 _require_text(budget_payload["scope"], field="budget.scope"),
                 _require_usd(budget_payload["per_call_cap_usd"], field="per_call_cap_usd"),
                 _require_usd(budget_payload["total_cap_usd"], field="total_cap_usd"),
-                int(budget_payload["max_calls"]),
+                _require_int(budget_payload["max_calls"], field="max_calls"),
             )
             if budget.scope != budget_scope:
                 reasons.append("BUDGET_SCOPE_MISMATCH")
@@ -364,9 +381,10 @@ def load_execution_authorization(*, authorization_path: Path, trusted_keys_path:
     else:
         try:
             deadline = DeadlineLimits(
-                int(deadline_payload["total_seconds"]),
-                int(deadline_payload["max_steps"]),
-                int(deadline_payload["max_dispatch_attempts"]),
+                _require_int(deadline_payload["total_seconds"], field="total_seconds"),
+                _require_int(deadline_payload["max_steps"], field="max_steps"),
+                _require_int(deadline_payload["max_dispatch_attempts"],
+                             field="max_dispatch_attempts"),
             )
             if not (1 <= deadline.total_seconds <= 3600
                     and 1 <= deadline.max_steps <= 200

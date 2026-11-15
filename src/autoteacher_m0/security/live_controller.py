@@ -24,16 +24,22 @@ from .authorization import (
     load_execution_authorization,
 )
 from .credential_boundary import (
-    OPENCODE_GO_EGRESS,
-    EgressPolicy,
     LauncherOnlySecret,
     assert_candidate_env_clean,
     validate_candidate_argv,
     validate_candidate_mounts,
 )
 from .docker_runner import ContainerRunner
+from .egress import EgressPolicy
 from .gates import LiveGate, SecurityBlocked
 from .watchdog import WatchdogPolicy
+
+EXPECTED_EGRESS_POLICY = EgressPolicy()
+
+EGRESS_POLICY_FIELDS = (
+    "host_ports", "methods", "path_prefix", "approved_routes", "max_tokens",
+    "max_attempts", "require_reservation", "allow_files", "allow_images", "allow_store",
+)
 
 ALWAYS_BLOCKED_REASONS = (
     "EXTERNAL_HUMAN_AUTHORIZATION_BOUNDARY_NOT_DEPLOYED",
@@ -66,7 +72,7 @@ class TrustedLiveController:
                  image: str = "localhost/autoteacher-local-oci@sha256:"
                  "62d3569ec38e27ed16fa3147515c1c78d993bb7df831cc1fe29811f3fe64667b",
                  launcher_secret: LauncherOnlySecret | None = None,
-                 egress: EgressPolicy = OPENCODE_GO_EGRESS,
+                 egress: EgressPolicy | None = None,
                  watchdog_policy: WatchdogPolicy | None = None) -> None:
         if not candidate_stage.is_dir():
             raise ValueError("candidate stage must be a controller-created directory")
@@ -82,7 +88,7 @@ class TrustedLiveController:
         self.candidate_engine = candidate_engine
         self.image = image
         self.launcher_secret = launcher_secret
-        self.egress = egress
+        self.egress = egress or EgressPolicy()
         self.watchdog_policy = watchdog_policy or WatchdogPolicy()
 
     def authorization_decision(self, *, now: datetime | None = None
@@ -121,8 +127,9 @@ class TrustedLiveController:
                 reasons.append("LAUNCHER_SECRET_NAME_IN_CANDIDATE_COMMAND")
             if self.launcher_secret.for_launcher_env()[self.launcher_secret.env_name] in " ".join(command):
                 reasons.append("LAUNCHER_SECRET_VALUE_IN_CANDIDATE_COMMAND")
-        if self.egress.host_ports != OPENCODE_GO_EGRESS.host_ports:
-            reasons.append("EGRESS_POLICY_NOT_RESTRICTED_TO_OPENCODE_GO")
+        for field in EGRESS_POLICY_FIELDS:
+            if getattr(self.egress, field) != getattr(EXPECTED_EGRESS_POLICY, field):
+                reasons.append(f"EGRESS_POLICY_FIELD_MISMATCH:{field}")
         return tuple(dict.fromkeys(reasons))
 
     def inspect(self, *, now: datetime | None = None) -> ControllerDecision:

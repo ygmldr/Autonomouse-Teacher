@@ -290,3 +290,108 @@ def test_agent_editable_markdown_approval_never_used(external: External) -> None
     assert external.load().approved is True  # loader ignores repo markdown entirely
     external.authorization.unlink()
     assert external.load().approved is False
+
+
+# ---- G1-SEC fail-first: AUTH-02 trusted public-key admission ----
+BASE_POINT_ENCODING = bytes.fromhex(
+    "5866666666666666666666666666666666666666666666666666666666666666")
+IDENTITY_PUBLIC_HEX = ("01" + "00" * 31)
+NONCANONICAL_IDENTITY_PUBLIC_HEX = ("01" + "00" * 31)[:-2] + "80"
+LOW_ORDER_PUBLIC_HEX = "00" * 32
+
+
+def _write_custom_trusted_key(external: External, public_hex: str) -> None:
+    external.keys.write_text(json.dumps({
+        "schema": "at-m0/trusted-approver-keys/v1",
+        "keys": {KEY_ID: public_hex}}), encoding="utf-8")
+
+
+def _write_identity_key_signature(external: External) -> None:
+    """Craft an Ed25519 signature that identity/non-canonical identity verifies.
+
+    A = identity => S*B == R + k*A reduces to S*B == R; choose R=B, S=1.
+    """
+    payload = base_payload()
+    signed = copy.deepcopy(payload)
+    crafted = BASE_POINT_ENCODING + (1).to_bytes(32, "little")
+    signed["signature"] = {"algorithm": "ed25519", "key_id": KEY_ID,
+                           "value": crafted.hex()}
+    external.authorization.write_text(json.dumps(signed), encoding="utf-8")
+
+
+def test_auth02_identity_public_key_is_rejected(external: External) -> None:
+    _write_custom_trusted_key(external, IDENTITY_PUBLIC_HEX)
+    _write_identity_key_signature(external)
+    decision = external.load()
+    assert decision.approved is False, "identity public key must never be admitted"
+    assert any(reason.startswith("EXTERNAL_AUTHORIZATION_INVALID")
+               for reason in decision.reasons), decision.reasons
+
+
+def test_auth02_noncanonical_identity_point_is_rejected(external: External) -> None:
+    _write_custom_trusted_key(external, NONCANONICAL_IDENTITY_PUBLIC_HEX)
+    _write_identity_key_signature(external)
+    decision = external.load()
+    assert decision.approved is False, "non-canonical point encoding must be rejected"
+    assert any(reason.startswith("EXTERNAL_AUTHORIZATION_INVALID")
+               for reason in decision.reasons), decision.reasons
+
+
+def test_auth02_low_order_public_key_is_rejected(external: External) -> None:
+    _write_custom_trusted_key(external, LOW_ORDER_PUBLIC_HEX)
+    external.write_signed(base_payload())
+    decision = external.load()
+    assert decision.approved is False, "small-order public key must never be trusted"
+    assert any(reason.startswith("EXTERNAL_AUTHORIZATION_INVALID")
+               for reason in decision.reasons), decision.reasons
+
+
+def test_auth02_rfc8032_positive_vector_still_verifies() -> None:
+    seed = bytes.fromhex("9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60")
+    public = bytes.fromhex("d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a")
+    signature = bytes.fromhex(
+        "e5564300c360ac729086e2cc806e828a84877f1eb8e5d974d873e065224901555fb8821590a33bacc61e39701cf9b46bd25bf5f0595bbe24655141438e7a100b")
+    assert ed25519.verify(public, b"", signature) is True
+    assert ed25519.verify(public, b"x", signature) is False
+    assert ed25519.public_key(seed) == public
+
+
+# ---- G1-SEC fail-first: AUTH-05 strict integer types ----
+@pytest.mark.parametrize("field,bad", [
+    ("max_calls", "10"), ("max_calls", 10.5), ("max_calls", True),
+    ("total_seconds", "120"), ("total_seconds", 120.5), ("total_seconds", True),
+    ("max_steps", "8"), ("max_steps", True),
+    ("max_dispatch_attempts", "8"), ("max_dispatch_attempts", True),
+])
+def test_auth05_integer_coercion_is_rejected(external: External, field: str,
+                                             bad: object) -> None:
+    payload = base_payload()
+    if field == "max_calls":
+        payload["budget"][field] = bad
+    else:
+        payload["deadline"][field] = bad
+    external.write_signed(payload)
+    decision = external.load()
+    assert decision.approved is False, f"{field}={bad!r} must not be coerced"
+    if field == "max_calls":
+        assert "BUDGET_VALUES_INVALID" in decision.reasons, decision.reasons
+    else:
+        assert "DEADLINE_VALUES_INVALID" in decision.reasons, decision.reasons
+
+
+# ---- G1-SEC fail-first: AUTH-06 fail-closed on approver/time exceptions ----
+@pytest.mark.parametrize("field,bad,reason", [
+    ("approver", 123, "APPROVER_INVALID"),
+    ("approver", "", "APPROVER_INVALID"),
+    ("issued_utc", 123, "AUTHORIZATION_TIME_INVALID"),
+    ("not_before_utc", None, "AUTHORIZATION_TIME_INVALID"),
+    ("expires_utc", 12.5, "AUTHORIZATION_TIME_INVALID"),
+])
+def test_auth06_bad_approver_or_time_is_fail_closed(external: External, field: str,
+                                                    bad: object, reason: str) -> None:
+    payload = base_payload()
+    payload[field] = bad
+    external.write_signed(payload)
+    decision = external.load()
+    assert decision.approved is False, field
+    assert reason in decision.reasons, decision.reasons

@@ -7,6 +7,7 @@ and a hung local subprocess; it never contacts a provider, SDK or real key.
 from __future__ import annotations
 
 import copy
+from dataclasses import replace
 from datetime import datetime, timezone
 import json
 import os
@@ -22,6 +23,7 @@ from autoteacher_m0.security.authorization import (
     ApprovedRoute,
     ExpectedBindings,
 )
+from autoteacher_m0.security.egress import EgressPolicy
 from autoteacher_m0.security.credential_boundary import (
     LauncherOnlySecret,
     assert_log_clean,
@@ -96,13 +98,15 @@ def external_fixture(root: Path) -> dict[str, Path]:
 
 
 def controller(fixture: dict[str, Path], *, launcher_secret: LauncherOnlySecret | None = None,
-               repo_root: Path = REPO) -> TrustedLiveController:
+               repo_root: Path = REPO,
+               egress: EgressPolicy | None = None) -> TrustedLiveController:
     return TrustedLiveController(
         repo_root=repo_root, authorization_path=fixture["auth"],
         trusted_keys_path=fixture["keys"], revocation_path=fixture["revoked"],
         expected=ExpectedBindings(**BINDINGS), approved_route=ApprovedRoute(**ROUTE),
         actual_tools=("skill_lookup",), budget_scope=SCOPE,
-        candidate_stage=fixture["stage"], launcher_secret=launcher_secret)
+        candidate_stage=fixture["stage"], launcher_secret=launcher_secret,
+        egress=egress)
 
 
 def test_signed_authorization_is_valid_but_controller_still_blocked() -> None:
@@ -210,3 +214,25 @@ def test_fake_launcher_key_never_reaches_candidate_or_audit_log() -> None:
         assert os.environ.get("OPENCODE_API_KEY") in (None, "")
         assert decision.authorization_approved is True
         assert decision.status == "BLOCKED"
+
+
+# ---- G1-SEC fail-first: AUTH-08 complete Egress/Route policy validation ----
+@pytest.mark.parametrize("replacement", [
+    {"methods": frozenset({"POST", "GET"})},
+    {"path_prefix": "/v1/"},
+    {"approved_routes": frozenset({("opencode-go", "deepseek-flash")})},
+    {"max_tokens": 2048},
+    {"require_reservation": False},
+    {"allow_files": True},
+    {"allow_images": True},
+    {"allow_store": True},
+])
+def test_auth08_complete_egress_policy_mismatch_blocks(replacement) -> None:
+    with tempfile.TemporaryDirectory() as directory:
+        fixture = external_fixture(Path(directory))
+        policy = replace(EgressPolicy(), **replacement)
+        decision = controller(fixture, egress=policy).inspect(now=NOW)
+        assert decision.status == "BLOCKED"
+        assert any(reason.startswith("EGRESS_POLICY_FIELD_MISMATCH")
+                   for reason in decision.reasons), decision.reasons
+        assert decision.boundary_deployed is False
