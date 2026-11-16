@@ -49,7 +49,7 @@ cp -a "$SPIKE/config/bridge.patch.yml" "$SPIKE/config/broker.policy.template.jso
       "$SPIKE/config/admission.template.json" "$SPIKE/config/controller.template.json" \
       "$SPIKE/config/guard-precheck.patch.template.yml" \
       "$SPIKE/config/guard-broker-policy.json" "$SPIKE/config/guard.precheck.patch.yml" \
-      "$SPIKE/config/guard.reserve.patch.yml" "$STAGE3/config/"
+      "$SPIKE/config/guard.reserve.patch.yml" "$SPIKE/config/guard.invalid.patch.yml" "$STAGE3/config/"
 cp -a "$G3A/native/skill-lookup/lib/." "$STAGE3/runtime/skill/lib/"
 cp -a "$ROOT/plugins/runtime-budget-guard/lib/." "$STAGE3/native/guard/lib/"
 cp -a "$G3A/runtime/node_modules/." "$STAGE3/node_modules/"

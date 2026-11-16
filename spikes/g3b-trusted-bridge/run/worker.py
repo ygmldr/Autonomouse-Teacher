@@ -70,18 +70,21 @@ def process_snapshot() -> list[dict]:
 
 def run_dsh(*, prompt: str = "G3B_B3PREP_ECHO", session_id: str = "g3b-b3prep-session-001",
             resume: bool = False, scenario: str = "ok_usage", guard: bool = False,
-            controller_required: bool = True) -> dict:
+            controller_required: bool = True, bad_admission: bool = False,
+            guard_invalid: bool = False) -> dict:
     assert os.getuid() == 65534, os.getuid()
     assert not [name for name in os.environ if any(token in name.upper() for token in ("KEY", "TOKEN", "SECRET"))]
     common.write_configs(run_id="g3b-b3prep-" + session_id,
                          scenario=scenario,
                          tool_schemas=captured_tool_schemas())
+    if bad_admission:
+        (common.BASE / "admission.json").unlink(missing_ok=True)
     (BASE / "dsh-home").mkdir(parents=True, exist_ok=True)
     (BASE / "workspace").mkdir(parents=True, exist_ok=True)
     controller = common.start_controller() if controller_required else None
     started = common.utc()
     try:
-        if controller is not None:
+        if controller is not None and not bad_admission:
             common.wait_socket()
         from deepseek_harness import DeepSeekHarness  # noqa: E402
         harness = DeepSeekHarness(
@@ -89,8 +92,10 @@ def run_dsh(*, prompt: str = "G3B_B3PREP_ECHO", session_id: str = "g3b-b3prep-se
             model="fixture-bridge-v1",
             max_tokens=256,
             profile="sdk-minimal",
-            patches=(("/probe/config/bridge.patch.yml", "/probe/config/guard.precheck.patch.yml")
-                     if guard else ("/probe/config/bridge.patch.yml",)),
+            patches=(("/probe/config/bridge.patch.yml", "/probe/config/guard.invalid.patch.yml")
+                     if guard_invalid else
+                     (("/probe/config/bridge.patch.yml", "/probe/config/guard.precheck.patch.yml")
+                      if guard else ("/probe/config/bridge.patch.yml",))),
             dsh_home=str(BASE / "dsh-home"),
             cwd=str(BASE / "workspace"),
             runtime_cwd=str(BASE / "workspace"),
@@ -120,6 +125,7 @@ def run_dsh(*, prompt: str = "G3B_B3PREP_ECHO", session_id: str = "g3b-b3prep-se
         broker_processes = process_snapshot()
         summary = {
             "controller_required": controller_required,
+            "bad_admission": bad_admission,
             "stderr_markers": stderr_lines,
             "broker_processes": broker_processes,
             "controller_pid": None if controller is None else controller.pid,
@@ -146,6 +152,8 @@ def main() -> int:
     session = "g3b-b3prep-session-001"
     guard = False
     controller_required = True
+    bad_admission = False
+    guard_invalid = False
     args = sys.argv[1:]
     while args:
         arg = args.pop(0)
@@ -164,12 +172,16 @@ def main() -> int:
             guard = True
         elif arg == "--no-controller":
             controller_required = False
+        elif arg == "--bad-admission":
+            bad_admission = True
+        elif arg == "--guard-invalid":
+            guard_invalid = True
         else:
             raise SystemExit(f"UNKNOWN_ARG:{arg}")
     EVIDENCE.mkdir(parents=True, exist_ok=True)
     if mode != "dsh":
         raise SystemExit("worker supports only --mode dsh")
-    result = run_dsh(prompt=prompt, session_id=session, scenario=scenario, guard=guard, controller_required=controller_required)
+    result = run_dsh(prompt=prompt, session_id=session, scenario=scenario, guard=guard, controller_required=controller_required, bad_admission=bad_admission, guard_invalid=guard_invalid)
     (EVIDENCE / "dsh-result.json").write_text(json.dumps(result, indent=2, sort_keys=True) + "\n")
     emit("result", **result)
     return 0 if result.get("error") is None and result.get("final_response") else 1
