@@ -239,3 +239,30 @@ def test_crash_after_fake_receive_before_response_receipt_persisted(tmp_path: Pa
     receipts = list((tmp_path / "receipts").glob("rcpt-*.json"))
     assert len(receipts) == 1
     assert json.loads(receipts[0].read_text())["raw_sha256"]
+
+
+def test_b2_reconcile_after_fake_receive_settles_without_resend(tmp_path: Path) -> None:
+    proc = _crash_run(tmp_path, "after_fake_receive_before_response")
+    assert proc.returncode == 97, (proc.stdout, proc.stderr)
+    admission = load_admission(tmp_path / "admission.json", expected_uid=65534)
+    broker = BrokerClient(config_path=str(tmp_path / "broker.json"), python=sys.executable)
+    broker.start()
+    fake = FakeBackend(script=str(FAKE), receipt_dir=str(tmp_path / "receipts"),
+                       python=sys.executable, mode="ok_usage")
+    journal = AttemptJournal(tmp_path / "attempts.sqlite3")
+    controller = TrustedController(admission, broker=broker, fake=fake, attempts=journal,
+                                   expected_uid=65534, register_admission=False)
+    try:
+        controller.reconcile_on_startup(str(tmp_path / "receipts"))
+        state = journal.conn.execute("SELECT state FROM g3b_attempts").fetchone()[0]
+        assert state in {"SETTLED", "WORST_CASE_HELD"}
+        assert fake.received_count() == 1
+        snapshot = broker.snapshot()["snapshot"]
+        assert snapshot["claims"]["total"] == 1
+        controller.reconcile_on_startup(str(tmp_path / "receipts"))
+        assert fake.received_count() == 1
+        assert journal.conn.execute("SELECT state FROM g3b_attempts").fetchone()[0] == state
+    finally:
+        broker.close()
+        fake.close()
+        journal.close()

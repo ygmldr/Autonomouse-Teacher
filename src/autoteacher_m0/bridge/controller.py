@@ -67,7 +67,7 @@ class _BoundClaimer:
 class TrustedController:
     def __init__(self, admission: Admission, *, broker: BrokerClient,
                  fake: FakeBackend, attempts: AttemptJournal,
-                 expected_uid: int = 65534):
+                 expected_uid: int = 65534, register_admission: bool = True):
         self.admission = admission
         self.broker = broker
         self.fake = fake
@@ -75,8 +75,9 @@ class TrustedController:
         self.expected_uid = expected_uid
         self.instance_id = "ctl-" + uuid.uuid4().hex[:16]
         self.calls = 0
-        self.attempts.register_admission(admission.admission_id, admission.sha256,
-                                          admission.run_id, self.instance_id)
+        if register_admission:
+            self.attempts.register_admission(admission.admission_id, admission.sha256,
+                                              admission.run_id, self.instance_id)
         self.boundary = EgressBoundary(EgressPolicy(
             host_ports={"g3b-fake.local": frozenset({9000})},
             methods=frozenset({"POST"}), path_prefix="/v1/g3b/",
@@ -94,13 +95,35 @@ class TrustedController:
     def reconcile_on_startup(self, receipt_dir: str | None = None) -> list[dict]:
         pending = self.attempts.reconcile_on_startup(receipt_dir)
         for row in pending:
-            if row.get("state") in {"ATTEMPT_STARTED", "RESPONSE_OBSERVED"}:
-                if not row.get("receipt_id"):
-                    self.attempts.mark_settlement_uncertain(row["attempt_id"],
-                                                             reason="NO_RECEIPT_AFTER_CRASH")
+            if row.get("state") in {"SETTLED", "WORST_CASE_HELD"}:
+                continue
+            attempt_id = row["attempt_id"]
+            receipt_json = row.get("receipt_json")
+            if row.get("state") == "ATTEMPT_STARTED" or not receipt_json:
+                self.attempts.mark_settlement_uncertain(attempt_id,
+                                                        reason="NO_RECEIPT_AFTER_CRASH")
+                continue
+            try:
+                receipt = json.loads(receipt_json)
+                usage = receipt.get("usage")
+                usage_map = usage if isinstance(usage, Mapping) else {}
+                complete = all(type(usage_map.get(k)) is int for k in
+                               ("inputTokens", "cacheReadTokens", "cacheWriteTokens", "outputTokens"))
+                camel = {k: usage_map[k] for k in
+                         ("inputTokens", "cacheReadTokens", "cacheWriteTokens",
+                          "outputTokens", "reasoningTokens", "totalTokens") if k in usage_map}
+                reply = (self.broker.settle(reservation_id=row["reservation_id"], usage=camel)
+                         if complete else self.broker.fail(reservation_id=row["reservation_id"],
+                                                           usage=camel or None))
+                if reply.get("ok") or reply.get("code") in {"ALREADY_SETTLED", "ALREADY_FAILED"}:
+                    if complete:
+                        self.attempts.mark_settled(attempt_id, settlement_json=json.dumps(reply, sort_keys=True))
+                    else:
+                        self.attempts.mark_worst_case(attempt_id, reason="RECONCILED_NON_AUTHORITATIVE")
                 else:
-                    self.attempts.mark_worst_case(row["attempt_id"],
-                                                   reason="RECEIPT_RECONCILED_NO_RESEND")
+                    self.attempts.mark_settlement_uncertain(attempt_id, reason="RECONCILE_SETTLE_REJECTED")
+            except Exception:
+                self.attempts.mark_settlement_uncertain(attempt_id, reason="RECONCILE_ERROR")
         return self.attempts.reconcile_on_startup()
 
     def _prepare(self, payload: Mapping[str, object], step: int) -> tuple[PreparedProviderRequest, EgressRequest]:
@@ -199,6 +222,7 @@ class TrustedController:
             mode = self.admission.fake_scenario
             if mode == "tool":
                 mode = "tool_once" if step == 0 else "tool_final"
+            nonce = os.urandom(16).hex()
             fake_payload = {
                 "schema": "m0.g3b.fake.v1", "call_id": prepared.call_id,
                 "prepared_digest": prepared.request_digest, "route_id": ROUTE,
@@ -206,7 +230,7 @@ class TrustedController:
                 "tools": list(prepared.tools), "system": prepared.system,
                 "max_output_tokens": prepared.max_output_tokens, "stream": True,
                 "mode": mode,
-                "nonce": self.admission.admission_nonce,
+                "nonce": nonce,
             }
             payload_bytes = canonical_json(fake_payload).encode("utf-8")
             payload_digest = hashlib.sha256(payload_bytes).hexdigest()
@@ -236,7 +260,7 @@ class TrustedController:
             def provider(_req):
                 if hashlib.sha256(payload_bytes).hexdigest() != payload_digest:
                     raise ValueError("FAKE_RECEIPT_MISMATCH")
-                rec = self.fake.send_exact_bytes(payload_bytes)
+                rec = self.fake.send_exact_bytes(payload_bytes, nonce)
                 holder["receipt"] = rec
                 holder["sent"] = self.fake.sent_payload_digest
                 mapped_usage = rec.usage if isinstance(rec.usage, Mapping) else None
@@ -251,7 +275,7 @@ class TrustedController:
             if (receipt.raw_sha256 != payload_digest
                     or holder.get("sent") != payload_digest
                     or receipt.raw_length != len(payload_bytes)
-                    or receipt.nonce != self.admission.admission_nonce):
+                    or receipt.nonce != nonce):
                 self.attempts.mark_settlement_uncertain(attempt_id, reason="FAKE_RECEIPT_MISMATCH")
                 raise BridgeError("FAKE_RECEIPT_MISMATCH")
             usage = receipt.usage
@@ -319,6 +343,21 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--config", required=True)
     args = parser.parse_args(argv)
     config = json.loads(Path(args.config).read_text())
+    required = {"admission_path", "broker_config_path", "fake_script", "receipt_dir",
+                "attempt_db", "socket_path", "python", "expected_uid"}
+    if not isinstance(config, dict) or set(config) - (required | {"fake_python"}):
+        raise SystemExit("CONFIG_INVALID")
+    if required - set(config):
+        raise SystemExit("CONFIG_INVALID")
+    for key in ("admission_path", "broker_config_path", "fake_script", "receipt_dir",
+                "attempt_db", "socket_path"):
+        value = config[key]
+        if not isinstance(value, str) or not value.startswith("/") or ".." in Path(value).parts:
+            raise SystemExit("CONFIG_INVALID")
+    Path("/work/g3b").mkdir(mode=0o700, parents=True, exist_ok=True)
+    socket_path = Path(config["socket_path"])
+    if os.path.lexists(socket_path):
+        socket_path.unlink()
     admission = load_admission(config["admission_path"], expected_uid=config.get("expected_uid", 65534))
     broker = BrokerClient(config_path=config["broker_config_path"], python=config["python"])
     broker.start()

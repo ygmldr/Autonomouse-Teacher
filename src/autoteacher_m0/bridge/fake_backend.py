@@ -39,30 +39,26 @@ class FakeBackend:
         except (OSError, ValueError, KeyError, json.JSONDecodeError):
             return 0
 
-    def send_exact_bytes(self, payload_bytes: bytes) -> FakeReceipt:
+    def send_exact_bytes(self, payload_bytes: bytes, nonce: str) -> FakeReceipt:
         import hashlib
         if len(payload_bytes) > 256 * 1024:
-            raise ValueError("FAKE_PAYLOAD_TOO_LARGE")
+            raise ValueError("FRAME_TOO_LARGE")
+        if not isinstance(nonce, str) or len(nonce) != 32:
+            raise ValueError("FAKE_NONCE_INVALID")
         self.receipt_dir.mkdir(parents=True, exist_ok=True)
-        env = {"PATH": "/usr/bin:/bin", "HOME": str(self.receipt_dir),
-               "G3B_RECEIPT_DIR": str(self.receipt_dir),
-               "G3B_FAKE_MODE": self.mode}
+        env = {"PATH": "/usr/bin:/bin", "G3B_RECEIPT_DIR": str(self.receipt_dir)}
         proc = subprocess.run([self.python, "-B", self.script], input=payload_bytes + b"\n",
                               stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                               env=env, timeout=self.timeout_s, check=False)
         if proc.returncode != 0:
             raise ValueError("FAKE_IO_ERROR")
         self.sent_payload_digest = hashlib.sha256(payload_bytes).hexdigest()
-        receipt_path = None
-        for path in sorted(self.receipt_dir.glob("rcpt-*.json"), key=lambda p: p.stat().st_mtime):
-            try:
-                doc = json.loads(path.read_text())
-            except Exception:
-                continue
-            if doc.get("raw_sha256") == self.sent_payload_digest:
-                receipt_path = path
-                break
-        if receipt_path is None:
+        receipt_path = self.receipt_dir / f"rcpt-{nonce}.json"
+        if not receipt_path.exists():
+            raise ValueError("FAKE_RECEIPT_MISMATCH")
+        doc = json.loads(receipt_path.read_text())
+        if (doc.get("raw_sha256") != self.sent_payload_digest
+                or doc.get("nonce") != nonce):
             raise ValueError("FAKE_RECEIPT_MISMATCH")
         doc = json.loads(receipt_path.read_text())
         frames = [json.loads(line) for line in proc.stdout.splitlines() if line.strip()]

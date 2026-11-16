@@ -47,7 +47,9 @@ def main() -> int:
         "nonce": nonce, "utc_start": utc(), "utc_end": utc(), "pid": os.getpid(),
         "synthetic": True, "real_model_calls": 0, "http_calls": 0, "network_used": False,
     }
-    path = RECEIPT_DIR / f"{receipt['receipt_id']}.json"
+    if not isinstance(nonce, str) or len(nonce) != 32 or any(c not in "0123456789abcdef" for c in nonce):
+        return 2
+    path = RECEIPT_DIR / f"rcpt-{nonce}.json"
     tmp = path.with_suffix(".tmp")
     with open(tmp, "w", encoding="utf-8") as handle:
         json.dump(receipt, handle, sort_keys=True, separators=(",", ":"))
