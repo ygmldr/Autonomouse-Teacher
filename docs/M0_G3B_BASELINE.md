@@ -6,6 +6,7 @@
 > 任务书：`docs/Autonomous_Teacher_M0_G3B_Trusted_Bridge_Agent_Execution_Plan_v1.0.md`（699 行）
 > 证据矩阵：`docs/Autonomous_Teacher_M0_G3B_Review_Evidence_Matrix_v1.0.csv`（实际 33 个 case_id）
 > 性质：**B0 基线记录**，不是 G3-B 测试 PASS、不是 OS 信任边界证明、不是 Live 授权。
+> **v1.1 修订**：2026-11-16 Lead B0 审计后同步目录名/Fake 所有权（`spikes/g3b-trusted-bridge`；Fake 归 B2）；本文件仍只记录基线事实。
 
 ## 0. 结论
 
@@ -157,8 +158,8 @@ podman run --rm --rootfs --network none --http-proxy=false --unsetenv-all \
 | CallIdentity / Prepared / Bound Claim / Egress | G2 已提供；`claim_dispatch_for_request` 强制 expected binding；旧 unbound 仍在 | **复用**；生产路径禁用 `claim_dispatch()`/`require_claim()` legacy；B2 只调用 bound 路径 |
 | Broker/ledger 持久预算与 reservation | G2 已提供 5 op，真实 SQLite/stdio；completion precheck 已同事务 | **复用**，不新增协议 op（见设计冻结 §6 兼容性） |
 | Attempt 持久化 | 不存在；G2 仅内存诊断 | **新增** Controller-owned SQLite attempt journal（WAL+FULL），begin 先 commit 再发送 |
-| 可信 Controller / IPC / Admission | 不存在（G3-A 插件自己 spawn Fake） | **新增** `src/autoteacher_m0/bridge/*` + `spikes/g3b-provider-bridge/*`；Launcher 固定 admission |
-| Fake Provider | G3-A Python fake 由插件 spawn，收据只证明 stdio | **新增** Controller-owned FakeBackend（固定路径、stdin 精确字节、独立 receipt/counter） |
+| 可信 Controller / IPC / Admission | 不存在（G3-A 插件自己 spawn Fake） | **新增** `src/autoteacher_m0/bridge/*` + `spikes/g3b-trusted-bridge/*`；Launcher 固定 admission |
+| Fake Provider | G3-A Python fake 由插件 spawn，收据只证明 stdio | **新增** B2-owned `spikes/g3b-trusted-bridge/fake/fake_provider.py` + Controller-owned FakeBackend（固定路径、stdin 精确字节、独立 receipt/counter） |
 | Guard + Bridge 组合 | G3-A Profile 未加载 Guard；Guard 已独立 15/15 | B3 组合测试；Broker 唯一预算权威，Guard 仅预检/不二次 Reserve（Lead 决策） |
 | Observation → Ledger settle | `to_usage()` 返回 `Usage` dataclass，与 Broker `settle` JSON usage **形状不兼容**；但 Controller 从原始字段映射后语义一致（B0 容器 probe 验证 AUTH/PARTIAL/MISSING 的 `Usage` 完全相等） | B2 Controller 原始字段映射；不新增 broker op（见设计冻结 §1.3） |
 | OS 信任边界（B0-02） | 同容器同 uid；UDS/DB/Policy 可被同 uid 进程访问 | **BLOCKED**；G3-B 仅结构闭环，G3-D 做不同主体/namespace/UID |

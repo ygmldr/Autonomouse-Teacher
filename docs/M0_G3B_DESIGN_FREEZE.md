@@ -3,6 +3,7 @@
 > Gate：**G3-B / B0-01..B0-04**；Owner：broker-docs（B0）；实现者：B1/B2/B3/B4 独立 Agent
 > 基线：`docs/M0_G3B_BASELINE.md`（HEAD `a507e25`，父 `64b057b`）；本文件**不是**测试 PASS、不是 OS 信任边界证明、不是 Live 授权。
 > 任务书：`docs/Autonomous_Teacher_M0_G3B_Trusted_Bridge_Agent_Execution_Plan_v1.0.md`；证据矩阵：`docs/Autonomous_Teacher_M0_G3B_Review_Evidence_Matrix_v1.0.csv`（实际 33 个 ID）。
+> **v1.1 修订**：2026-11-16 Lead B0 审计后修订（目录名/Fake 所有权/Admission 路径与重放/ack/nonce/§5.9 settle 语义/签核结果）；本文件为 B1/B2 唯一冻结依据。
 > **B1/B2 只能按本文件的接口/状态机/错误码/字节定义实现；任何变更回到 Lead 重新冻结。**
 
 ## 0. 签核状态与边界
@@ -24,7 +25,7 @@
 | `StreamChunk` | `src/types.ts:496-508` | `block-start`/`text-delta`/`reasoning-delta`/`tool-call-delta`/`block-end`/`usage`/`finish`；usage 在 finish 前；finish 终结 | G3-A 已用 | B1 规范化后只向 DSH 产生白名单 chunk；Controller 不直接注入 DSH 内部事件 |
 | `providerRetryPolicy` | `src/index.ts:238` | 返回 `ResolvedRetryPolicy`；G3-A 返回 `maxRetries:0` | G3-A 已用 | B1 固定 `mode:'normal', maxRetries:0, retryableCodes:[]`；禁隐式 retry |
 | `resolveModel` | `spikes/g3a-provider-bridge/src/index.ts:260-271` | 返回 provider/model/context/maxTokens 等 | G3-A 已用 | B1 仅接受 `offline-test-only-g3b/fixture-bridge-v1`；拒绝其他 route/model |
-| G3-A Adapter 注册/stream/spawn | `spikes/g3a-provider-bridge/src/index.ts:247-497` | 真实 `stream` 入口；当前 `spawn(python, [fake])` at `:323` | G3-A PASS（限定） | **必须改**：G3-B adapter 不 spawn、不读 DB/Key；仅连接固定 UDS `/work/g3b/bridge.sock`；新增独立副本 `spikes/g3b-provider-bridge/` |
+| G3-A Adapter 注册/stream/spawn | `spikes/g3a-provider-bridge/src/index.ts:247-497` | 真实 `stream` 入口；当前 `spawn(python, [fake])` at `:323` | G3-A PASS（限定） | **必须改**：G3-B adapter 不 spawn、不读 DB/Key；仅连接固定 UDS `/work/g3b/bridge.sock`；新增独立副本 `spikes/g3b-trusted-bridge/` |
 
 ### 1.2 Egress / Prepared / Claim / Transport（当前 HEAD）
 
@@ -45,7 +46,7 @@
 | `TrustedEgressTransport.dispatch` | `egress.py:704-810` | 先 `consume_permission`；无 permission/无 provider → `PRE_DISPATCH_DENIED`；进入 provider 前先 `mark_dispatch_attempt_started`，异常返回 `ATTEMPT_STARTED`/`BILLABLE_UNKNOWN`；返回 `call_id,dispatched,classification,attempt_started,provider_invoked,claim,http_status,state,usage_known,worst_case_conservative,retry_attempted,provider_calls,provider_invocations,http_attempts,scenario` | G2-L1.2（T1 FIXED） | B2 用它执行唯一发送；**当前返回值不含 `sent_payload_digest`/receipt**（见 §1.3） |
 | `_permission_matches` | `egress.py:671-683` | 校验 claim claimed + call/request/reservation/attempt/route_model 全匹配 | G2-L1 | B2 不绕过 |
 
-**Trusted transport 的 payload 证据缺口（B0 明示）**：当前 `TrustedEgressTransport.dispatch` 返回字段（`:799-810`）**没有** `sent_payload_digest`/`raw_length`/`receipt`，它只接收 `EgressRequest` 与 provider callable，不能携带精确发送字节。G3-B 的 Controller 仍可用该 transport 完成 permission 单次消费与 attempt-start 语义：provider callable 必须绑定**发送前固定的 `payload_bytes`**（Controller 闭包），`FakeBackend.send_exact_bytes` 在写 stdin 前记录 `sent_payload_digest` 并返回 receipt；Controller 再把 `approved_payload_digest`、该 `sent_payload_digest`、receipt 的 `raw_sha256` 做三方等值断言（B2-06）。若 Lead/Reviewer 要求 digest 由 transport 返回/校验，则需 additive 扩展 `dispatch`（O-2 选项②，修改 `security/egress.py`，需批准）。
+**Trusted transport 的 payload 证据缺口（B0 明示）**：当前 `TrustedEgressTransport.dispatch` 返回字段（`:799-810`）**没有** `sent_payload_digest`/`raw_length`/`receipt`，它只接收 `EgressRequest` 与 provider callable，不能携带精确发送字节。G3-B 的 Controller 仍可用该 transport 完成 permission 单次消费与 attempt-start 语义：provider callable 必须绑定**发送前固定的 `payload_bytes`**（Controller 闭包），`FakeBackend.send_exact_bytes` 在写 stdin 前记录 `sent_payload_digest` 并返回 receipt；Controller 再把 `approved_payload_digest`、该 `sent_payload_digest`、receipt 的 `raw_sha256` 做三方等值断言（B2-06）。O-2 已批准选项①（不改 `security/egress.py`）；若 Reviewer 后续要求 digest 由 transport 返回/校验，则 additive 扩展 `dispatch` 需 Lead 另行批准。
 
 ### 1.3 Broker 5 op / Ledger / Observation / Usage 兼容性（关键）
 
@@ -74,7 +75,7 @@ Ledger 真实 API：`bind_call` `ledger.py:135`、`claim_dispatch` `:199`、`cla
   - `reasoningTokens = obs.reasoning`（inclusive 策略可省略；additional 必须保留）
   - 不发送 `actual_cost_usd`（synthetic；provider_invoice 在 G3-B 禁止）
   - `complete_or_uncertain != AUTHORITATIVE` → 使用 `fail` 而不是 `settle`；UNKNOWN 可传 `usage:null`/`{}`，Broker 会走 reserved bounds；空/部分不得填 0。
-- **替代方案（仅作为 Lead 待签核 O-3）**：如果 B2 需要单一 `to_usage` 输出/新增 broker op（如 `settle_observation`），必须先由 Lead 批准；本设计默认 **Option A（Controller raw mapping，无协议变更）**。
+- **替代方案（O-3 已批准选项①；本项不再待签核）**：如果 B2 需要单一 `to_usage` 输出/新增 broker op（如 `settle_observation`），必须先由 Lead 另行批准；本设计默认 **Option A（Controller raw mapping，无协议变更）**。
 
 `deliver_observation`（`observation.py:339-…`）需要 in-process `BudgetLedger` 与 trusted provenance；G3-B 为保持 Broker 唯一账本权威，**不采用**它作为主路径（可只用于 Controller 内部交叉验证/测试），除非 Lead 另行批准。
 
@@ -88,7 +89,7 @@ Ledger 真实 API：`bind_call` `ledger.py:135`、`claim_dispatch` `:199`、`cla
 | SDK spawn | `artifacts/foundation/deps/deepseek_harness/client.py:89-99` | `subprocess.Popen(args, stdin/out/err=PIPE,…)`，**无 `pass_fds`**；不继承额外 FD | G3-A | **继承 FD/pipe 不可行**；UDS 是唯一可行候选传输 |
 | SDK API | `api.py:102-108` | `DeepSeekHarness` 拥有 runtime 子进程；`run/resume_session` | G3-A | B1/B3 复用；不传 Key/env 授权 |
 | G3-A fake receipt | `fake/fake_provider.py:125-161` | raw stdin SHA256、mode、usage、nonce?（现版本无 nonce）、UTC、pid | G3-A | B2 新 G3-B fake 契约（§5.6）；nonce/raw_length/received-counter 必须新增 |
-| G3-A worker/suite | `run/worker.py:122-180`、`run/suite.py:200-338` | 真实 harness、resume、tool、EOF/error/cancel、merged config | G3-A 6 cases | B1/B3 复制为 `spikes/g3b-provider-bridge/run/*`；移除插件 spawn fake；新增 G3-B 场景 |
+| G3-A worker/suite | `run/worker.py:122-180`、`run/suite.py:200-338` | 真实 harness、resume、tool、EOF/error/cancel、merged config | G3-A 6 cases | B1/B3 复制为 `spikes/g3b-trusted-bridge/run/*`；移除插件 spawn fake；新增 G3-B 场景 |
 
 ## 2. 三层 Route/Model 统一（B0-03）
 
@@ -124,8 +125,8 @@ fake target= host "g3b-fake.local", port 9000, method POST, path "/v1/g3b/chat"
 
 ### 3.1 文件与所有权
 
-- 固定路径（**编译期常量，不接受 env 覆盖**）：`/run/g3b/admission.json`（root:root, `0444`；目录 `/run/g3b` root:root `0555`）。
-- 由 **trusted Launcher** 在候选 DSH 启动前写入；Controller 只读打开一次并校验；候选不能写该路径，不能通过请求字段/env 自授权。
+- 固定路径（**编译期常量，不接受 env 覆盖**）：`/work/g3b/admission.json`。`/work` 是可写 tmpfs（容器 `--read-only` 不可写 `/run`）；Launcher 在候选启动前创建该文件（mode `0600`）。同 uid 下该文件只作结构约定，**不是** OS 边界；B0-02 仍 BLOCKED。
+- 由 **trusted Launcher** 在候选 DSH 启动前写入；Controller 只读打开一次并校验。设计上候选请求字段/env 不能自我授权；但同 uid 下**不能证明**候选无法写 `/work/g3b/admission.json`，故仅作结构约定（OS 边界 BLOCKED）。
 - 如 Launcher 与候选同 uid/同写权限（当前容器）→ 该文件只能作为**结构约定**；OS 强制隔离 `BLOCKED`，B0-02 仍不可 PASS。
 
 ### 3.2 精确 JSON Schema（严格，未知字段拒绝）
@@ -168,7 +169,7 @@ Controller 固定错误码（Envelope error）：`ADMISSION_MISSING`、`ADMISSIO
 
 - 文件缺失/不可读/parse 失败/未知字段/类型不符 → 拒绝，Fake 0。
 - `expiry_utc` 早于 Controller 当前 UTC → 拒绝。
-- `admission_id` 在 Controller 的 trusted SQLite `g3b_admissions` 中已消费 → `ADMISSION_REPLAYED`（新容器/新 admission 由 Launcher 生成）。
+- **重放语义（P0 修正）**：Controller **启动时一次性**读取并校验 admission，并在 `g3b_admissions` 记录 `(admission_id)`；**同一 Controller 实例内**允许最多 `limits.max_calls` 次模型调用（tool turn 的两轮 `stream()` 不得因 admission_id 被拒）。`ADMISSION_REPLAYED` **仅用于第二个 Controller 实例**尝试消费同一 `admission_id`（候选试图复用/重放准入）；session resume 必须由 Launcher 生成**新 admission**（新 `admission_id`/`nonce`）。
 - 请求 payload 中出现 `authorized/admission/scope_id/provider/model override` 等字段 → 未知字段拒绝；Adapter 请求 Schema 不允许这些字段。
 - 候选进程 env 中的 `G3B_*`/`AUTOTEACHER_*` 变量全部忽略；Controller 只读固定路径 + 固定编译常量。
 - `launcher.uid` 必须等于实际 Controller 期望 uid（容器内 65534）；若 Launcher 无法提供 root-owned 文件 → 只记结构证据，OS 边界 BLOCKED。
@@ -179,7 +180,7 @@ Controller 固定错误码（Envelope error）：`ADMISSION_MISSING`、`ADMISSIO
 
 ```text
 Host / trusted Launcher (outside candidate control)
-  ├─ creates fixed container rootfs mounts, /run/g3b/admission.json (root 0444), /work/g3b dir
+  ├─ creates fixed container rootfs mounts, /work/g3b/admission.json (tmpfs mode 0600, launcher-created; structural only), /work/g3b dir
   ├─ starts Broker (stdio, SQLite /work/g3b/broker.sqlite3) as trusted process
   ├─ starts Controller (trusted Python) as trusted process; Controller binds UDS /work/g3b/bridge.sock
   │    └─ Controller starts Fake Provider child (fixed path, stdin/stdout, receipt dir /work/g3b/receipts)
@@ -229,7 +230,7 @@ src/autoteacher_m0/bridge/ipc_server.py
 
 src/autoteacher_m0/bridge/admission.py
   @dataclass(frozen=True) Admission
-  load_admission(path="/run/g3b/admission.json") -> Admission
+  load_admission(path="/work/g3b/admission.json") -> Admission
   validate_admission(admission, *, now_utc, expected_uid) -> None
 
 src/autoteacher_m0/bridge/attempts.py
@@ -241,9 +242,10 @@ src/autoteacher_m0/bridge/attempts.py
       def mark_response_observed(self, attempt_id, *, receipt_id, receipt_json) -> None
       def mark_settled(self, attempt_id, *, settlement_json) -> None
       def mark_worst_case(self, attempt_id, *, reason) -> None
+      def mark_settlement_uncertain(self, attempt_id, *, reason) -> None
       def state_for_call(self, call_id) -> str | None
 
-src/autoteacher_m0/bridge/fake_backend.py
+src/autoteacher_m0/bridge/fake_backend.py   # B2-owned
   @dataclass(frozen=True) FakeReceipt: receipt_id; raw_sha256; raw_length; mode; usage; nonce; utc; path
   class FakeBackend:
       def __init__(self, python="/opt/python/bin/python3.11", script="/probe/fake/fake_provider.py",
@@ -265,22 +267,25 @@ src/autoteacher_m0/bridge/controller.py
       def _settle_or_hold(self, observation, reservation_id) -> dict
 ```
 
-Adapter/Spike (B1，独立可审查副本)：
+Adapter/Spike 与 Fake 所有权（v1.1）：
 
 ```text
-spikes/g3b-provider-bridge/src/index.ts
+# B1-owned（adapter/协议/ipc_server；不得修改 fake 文件）
+spikes/g3b-trusted-bridge/src/index.ts
   export const provider = 'offline-test-only-g3b'; export const model = 'fixture-bridge-v1'
   class BridgeAdapter extends LlmAdapter:
       stream(options): AsyncGenerator<StreamChunk>   # net.connect('/work/g3b/bridge.sock'); no spawn
       resolveModel(provider, model)                   # only frozen tuple
       providerRetryPolicy()                           # maxRetries 0
   apply(ctx): ctx.llm.registerAdapter([provider], new BridgeAdapter())
-spikes/g3b-provider-bridge/fake/fake_provider.py   # G3-B receipt contract (§5.6)
-spikes/g3b-provider-bridge/run/worker.py            # real harness worker; no spawn fake
-spikes/g3b-provider-bridge/run/suite.py             # B3 scenarios
+spikes/g3b-trusted-bridge/run/worker.py            # real harness worker; no spawn fake
+spikes/g3b-trusted-bridge/run/suite.py             # B3 scenarios
+
+# B2-owned（Fake 契约/收据/counter；B1 不得修改）
+spikes/g3b-trusted-bridge/fake/fake_provider.py   # G3-B receipt/counter contract（§5.6）
 ```
 
-B1/B2 **不得**修改 DSH 核心、`gates.py`、`dsh_adapter.py`、`run_live.sh`；不得在 adapter 中 `spawn`。
+B1/B2 **不得**修改 DSH 核心、`gates.py`、`dsh_adapter.py`、`run_live.sh`；不得在 adapter 中 `spawn`。Fake Provider 归 B2；B1 只能引用 §5.6 契约。
 
 ### 5.2 Envelope Schema（`at-m0/g3b-bridge/v1`）
 
@@ -293,8 +298,8 @@ B1/B2 **不得**修改 DSH 核心、`gates.py`、`dsh_adapter.py`、`run_live.sh
 
 | kind | payload 精确字段（全部必填除标注） |
 |---|---|
-| request | `sessionId`(str 1..128), `provider`(str), `model`(str), `messages`(array), `tools`(array), `system`(str|null), `maxTokens`(int 1..1024), `stream`(bool true), `attemptOrdinal`(int 1..), `purpose`(null/conversation)；**禁止** call_id/reservation_id/digest/authorized/admission 字段 |
-| ack | `request_id`(str), `accepted`(bool), `code`(enum or null) |
+| request | `sessionId`(str 1..512), `provider`(str), `model`(str), `messages`(array), `tools`(array), `system`(str|null), `maxTokens`(int 1..1024), `stream`(bool true), `purpose`(null/conversation)；**没有 `attemptOrdinal`**；`logical_step/attempt_index` 必须由受信 Controller 分配（候选不得自报）；**禁止** call_id/reservation_id/digest/authorized/admission 字段 |
+| ack | `request_id`(str), `accepted`(必须 `true`，见 §5.2 时序), `code`(null) |
 | chunk | `chunk` object = 精确 `StreamChunk` 白名单；`usage` 只能在 `finish` 前 |
 | finish | `reason` object = 精确 FinishReason（`kind` 白名单 `stop/tool-calls/max-tokens/error/aborted/blocked`）；只一次 |
 | error | `code` enum, `message`(安全短字符串，不含原文), `retryable`(false) |
@@ -305,7 +310,8 @@ B1/B2 **不得**修改 DSH 核心、`gates.py`、`dsh_adapter.py`、`run_live.sh
 
 **时序语义（冻结）**：
 
-- `ack` 只表示受信端收到并完成基本解析，**不等于** Budget 获准、Claim 成功或已发送；`request` 后允许 Controller 先 `ack{accepted:false}`（admission/schema 拒绝）或 `ack{accepted:true}` 再进入 reserve/claim；真正的发送许可只能由 Broker claim + durable attempt 决定。
+- `ack`（v1.1 冻结）：一旦 Envelope/framing/JSON/seq/request payload schema 成功解析，Controller **一律先回 `ack{accepted:true}`**；ack 只表示收到，**不等于** Budget 获准、Claim 成功或已发送。
+- 所有 admission/route/budget/claim/prepared/tool 拒绝在 ack 之后以 `error` 帧表达；**不得** `ack{accepted:false}`。framing/JSON/未知字段/seq 失败不回 ack，直接 `error`（能写则写）并关闭连接。真正的发送许可只能由 Broker claim + durable attempt 决定。
 - `chunk.seq` 在单 request 内严格递增（从 0）；只允许 §5.2 白名单 chunk；`usage`（如果有）必须在 `finish` 之前；`finish` 每 request 恰好一次且为终帧。
 - EOF/超时/进程异常：尚未进入发送边界 → `error` + Fake 0；已进入发送边界/unknown → 不得报成功 finish，Controller 必须在 attempt journal 标保守状态并在响应中 `error`（`BILLABLE_UNKNOWN`/`SETTLEMENT_UNCERTAIN`）。
 - `cancel` 是 best-effort：收到 cancel 不等于 Provider 停止或免费；跨发送边界后的 cancel 必须保守处理；不得自动重试。
@@ -315,6 +321,7 @@ B1/B2 **不得**修改 DSH 核心、`gates.py`、`dsh_adapter.py`、`run_live.sh
 
 | 限制 | 初值 | 执行位置 |
 |---|---:|---|
+| Controller→Fake payload | 256 KiB（独立于 Envelope） | FakeBackend 写 stdin 前检查；见 §5.5 |
 | 单个 request frame | 256 KiB | ipc_server 先按字节截断，再 JSON 解析；超限 `FRAME_TOO_LARGE` |
 | 单个 response frame | 64 KiB | ipc_server 写出前检查；超限 error/关闭 |
 | 单请求总 IPC 字节 | 1 MiB | Controller per-request counter |
@@ -358,8 +365,9 @@ controller.approved_payload_digest
 
 ### 5.6 Fake Provider 契约
 
-- 可执行固定路径 `/probe/fake/fake_provider.py`（只读挂载）；由 **Controller** 启动（不是 DSH Adapter）；`argv = [FIXED_PYTHON,'-B',FIXED_FAKE]`；env 只允许固定 `G3B_RECEIPT_DIR=/work/g3b/receipts`、`G3B_FAKE_NONCE=<hex>`、`PATH`/`HOME`；无 Key/网络。
-- stdin 只读**一行**（≤1 MiB），超限拒绝并以 exit 2 结束；写 receipt 前计算 `raw_sha256/raw_length`；收据原子写：`tmp -> fsync -> os.replace -> fsync(dir)`；receipt 固定字段：
+- **B2 拥有**的源文件 `spikes/g3b-trusted-bridge/fake/fake_provider.py`（构建后固定为 `/probe/fake/fake_provider.py`，只读挂载）；由 Controller 启动（不是 DSH Adapter）；`argv = [FIXED_PYTHON,'-B',FIXED_FAKE]`；env 只允许 `G3B_RECEIPT_DIR=/work/g3b/receipts`、`PATH`、`HOME`；无 Key/网络。
+- **nonce 单一来源**：nonce 只由 Controller 在 `fake_payload.nonce` 生成（32 hex）；Fake 必须把 payload nonce **原样回显**到 receipt。`G3B_FAKE_NONCE` 不再作为来源；若测试额外传入 env nonce，必须与 payload nonce 相等，否则 Fake 拒收（exit 非 0、Fake receipt 0）。
+- stdin 只读**一行**（**≤256 KiB**，与 §5.3 Controller→Fake payload 上限一致），超限拒绝并以 exit 2 结束；写 receipt 前计算 `raw_sha256/raw_length`；收据原子写：`tmp -> fsync -> os.replace -> fsync(dir)`；receipt 固定字段：
 
 ```json
 {"schema":"m0.g3b.fake.receipt.v1","receipt_id":"rcpt-<32hex>","raw_sha256":"<64hex>",
@@ -369,6 +377,7 @@ controller.approved_payload_digest
  "real_model_calls":0,"http_calls":0,"network_used":false}
 ```
 
+- **收据时序（P0）**：Fake 在输出**任何** chunk/finish 之前，先原子写 receipt 并 `fsync`（tmp→fsync→`os.replace`→fsync dir），再更新 received-counter；保证 crash hook `after_fake_receive_before_response` 下 receipt 已持久。receipt 写失败不得输出成功 chunk，必须直接退出/error。
 - 独立 received-counter：`/work/g3b/receipts/received-count.json`，每次收到一行先文件锁/原子递增并 fsync；B3 的“Fake 0/1”必须读该 counter + receipt，不以 Controller/DSH 自报为准。
 - 模式（由 admission 固定，不由候选文本选择）：`ok_usage`（block-start+2 text-delta+block-end+usage+finish stop）、`partial_usage`（usage 只有 inputTokens，finish stop）、`no_usage`（无 usage，finish stop）、`tool_once`（tool-call delta）、`tool_final`（最终结果，含 tool 消息）、`eof`（无 finish 退出）、`error`（finish error）、`timeout`（延迟超过 deadline）、`cancel`（慢流，等 cancel）。
 - Fake 不解析业务内容、不访问文件系统（除 receipt/counter 固定目录）；不写 Ledger；不签发 claim。
@@ -387,7 +396,7 @@ CREATE TABLE IF NOT EXISTS g3b_attempts (
   payload_digest TEXT NOT NULL,
   payload_length INTEGER NOT NULL,
   state TEXT NOT NULL CHECK(state IN
-    ('RESERVED','CLAIMED','ATTEMPT_STARTED','RESPONSE_OBSERVED','SETTLED','WORST_CASE_HELD')),
+    ('RESERVED','CLAIMED','ATTEMPT_STARTED','RESPONSE_OBSERVED','SETTLED','WORST_CASE_HELD','SETTLEMENT_UNCERTAIN')),
   receipt_id TEXT, receipt_json TEXT, settlement_json TEXT, reason TEXT,
   created_utc TEXT NOT NULL, updated_utc TEXT NOT NULL,
   UNIQUE(scope_id, call_id), UNIQUE(scope_id, reservation_id)
@@ -395,13 +404,14 @@ CREATE TABLE IF NOT EXISTS g3b_attempts (
 CREATE INDEX IF NOT EXISTS g3b_attempts_state ON g3b_attempts(scope_id,state);
 CREATE TABLE IF NOT EXISTS g3b_admissions (
   admission_id TEXT PRIMARY KEY, admission_sha256 TEXT NOT NULL,
-  consumed_utc TEXT NOT NULL, run_id TEXT NOT NULL
+  consumed_utc TEXT NOT NULL, run_id TEXT NOT NULL, controller_instance_id TEXT NOT NULL
 );
+-- 仅 Controller 启动时插入一次；第二实例同 admission_id → ADMISSION_REPLAYED
 ```
 
 - `begin_attempt()`：写/更新为 `ATTEMPT_STARTED`，提交并 fsync 后才允许进入发送边界；**先 commit 后 send**；失败不得发送。
-- 状态转换：`RESERVED`（Broker reserve 后）→ `CLAIMED`（Broker claim 后）→ `ATTEMPT_STARTED`（发送前，durable）→ `RESPONSE_OBSERVED`（receipt 持久）→ `SETTLED`/`WORST_CASE_HELD`；无合法转换则 `ATTEMPT_ALREADY_STARTED` 拒绝，不重发。
-- `reconcile_on_startup()`：读取同一 DB；`ATTEMPT_STARTED`/`RESPONSE_OBSERVED` 不自动发送；有 receipt 的可幂等结算（Broker `settle`/`fail`，不改已结算）；无 receipt 保持保守并报告 `SETTLEMENT_UNCERTAIN`；`RESERVED/CLAIMED` 不自动 Claim/Dispatch。
+- 状态转换：`RESERVED`（Broker reserve 后）→ `CLAIMED`（Broker claim 后）→ `ATTEMPT_STARTED`（发送前，durable）→ `RESPONSE_OBSERVED`（receipt 持久）→ `SETTLED`/`WORST_CASE_HELD`；无 receipt/发送未知 → `SETTLEMENT_UNCERTAIN`（Broker 仍 PENDING）。无合法转换则 `ATTEMPT_ALREADY_STARTED` 拒绝，不重发。
+- `reconcile_on_startup()`（v1.1）：读取同一 DB；`ATTEMPT_STARTED`/`RESPONSE_OBSERVED` 不自动发送；**仅当有持久 receipt** 才可幂等调用 Broker `settle`/`fail`（已 SETTLED 不重复）；无 receipt 保持 Broker **PENDING** + journal `SETTLEMENT_UNCERTAIN`，绝不自动重发；`RESERVED/CLAIMED` 不自动 Claim/Dispatch。
 - 迁移声明：新增表，不动 Broker `budget_*`；旧 DB 打开时只 CREATE IF NOT EXISTS；回退只需不读取新表。
 
 ### 5.8 崩溃 Hook（仅测试/Launcher 启用）
@@ -412,7 +422,11 @@ CREATE TABLE IF NOT EXISTS g3b_admissions (
 
 - `reserve`：`task_id="g3b-"+sha256(run_id)[:32]`（Broker `_ID` 限制）；`route_id/provider/model` 为冻结 Tuple；`input_tokens` = Controller 保守输入上界（admission limits/min of canonical byte bound），`output_tokens` = `prepared.max_output_tokens`；`retry=false`；`call_id=prepared_call_id`。
 - `claim`：`call_id,reservation_id,prepared.request_digest,expected_route_id=prepared.route_id,expected_model=prepared.model`；仅此路径，禁 legacy。
-- `settle/fail`：按 §1.3 映射；完全 complete 且可信 synthetic → `settle`；任何 PARTIAL/MISSING/UNKNOWN → `fail`（`usage` 映射含已知维度；UNKNOWN 可 `None`/{}），Broker 保守 floor；不发送 `actual_cost_usd`。
+- `settle/fail`（v1.1 精确；与 O-3 配套）：
+  - (a) AUTHORITATIVE + 完整 + 可信 synthetic receipt → `settle`；
+  - (b) PARTIAL/MISSING/非法 usage 且**已有持久 receipt** → `fail`（已知维度；Broker 以 reserved bound 保守 floor；journal `WORST_CASE_HELD`；报告写明“估算上限记账，区别于 PENDING”）；
+  - (c) 非法到无法映射 / 无 receipt / 发送是否发生未知 → **不调用 settle/fail**，Broker 保持 PENDING，journal `SETTLEMENT_UNCERTAIN`；不填 0、不释放、不重试；
+  - (d) 已 SETTLED 的 replay 幂等，冲突 observation 拒绝；不发送 `actual_cost_usd`。
 - `snapshot`：只读对账；不用于授权。
 - Adapter 场景：Adapter 只上报 GenerateOptions（messages/tools/provider/model/maxTokens/sessionId）；Fake mode 来自 **admission.fake_scenario**（Launcher/测试固定），不得从 prompt 文本或候选字段选择；重复 Attempt 由 Controller/Broker 拒绝。Tool 两轮由真实 DSH 产生两个 `stream()`，Controller 各分配新 `logical_step/attempt_index`（step+1）与新的 call/reservation/claim/attempt。
 
@@ -429,7 +443,7 @@ CREATE TABLE IF NOT EXISTS g3b_admissions (
 | B1-01 | B1 `tests/integration/g3_bridge/test_b1_protocol.py` | 真实 DSH adapter→UDS controller echo；真实进程 |
 | B1-02 | B1 同上 | 真实 UDS 超长/坏帧/重复 key；Controller 解析计数 |
 | B1-03 | B1 同上 | 错误 v/kind/seq/finish 乱序；无成功 finish |
-| B1-04 | B1/B3 | Fake EOF/error/delay/cancel；真实子进程/Fake receipt |
+| B1-04 | B2（Fake 实现；B1 提供协议 harness） | Fake EOF/error/delay/cancel；真实子进程/Fake receipt；Fake 归 B2 |
 | B2-01 | B2 `test_b2_ledger_chain.py` | 真实 SQLite Broker + Fake receipt；5 个计数 |
 | B2-02 | B2 同上 | Prepared 篡改前后 claim；Fake counter 0/不二次 |
 | B2-03 | B2 同上 | Route A/B 均 allowlist；Broker ROUTE_MISMATCH，Fake 0 |
@@ -438,7 +452,7 @@ CREATE TABLE IF NOT EXISTS g3b_admissions (
 | B2-06 | B2 同上 | 三方 payload digest 等值 + prepared digest 独立 |
 | B2-07 | B2 同上 | 无 durable attempt 即发送 → 拒绝，Fake 0 |
 | B2-08 | B2 同上 | 成功 observation 与真实 ledger settle；来源/费用/route 一致 |
-| B2-09 | B2 同上 | Missing/Partial/Invalid usage；pending/hold，不填 0 |
+| B2-09 | B2（Fake receipt/usage） | Missing/Partial/Invalid usage；pending/hold，不填 0/不重试 |
 | B2-10 | B2 同上 | 相同 observation 幂等/冲突；账本不回退 |
 | B3-01 | B3 `test_b3_tool_guard.py` | 真实 skill_lookup 两轮；2 套 reservation/claim/receipt |
 | B3-02 | B3 同上 | 新进程 resume；不重发旧 pending |
@@ -458,15 +472,16 @@ CREATE TABLE IF NOT EXISTS g3b_admissions (
 
 P0 不得 mock 的项：B1-01/02、B2-01/02/03/04/06/07、B3-01/03/04/05/06/07/09、B4-01/03；至少真实进程/真实 SQLite/Fake counter 证据。
 
-## 7. 待 Lead 签核开放决策（5 条，未自决）
+## 7. Lead 签核结果（v1.1，B1/B2 直接依据，不再待决）
 
-| ID | 决策 | 选项 | 推荐 |
-|---|---|---|---|
-| O-1 | 主传输 | UDS fixed `/work/g3b/bridge.sock` vs Adapter spawn controller stdio fallback | **UDS**（B0 探针 Node/Python 均 AF_UNIX OK；fallback 仅环境拒绝时经批准，标 weaker/BLOCKED） |
-| O-2 | 精确字节/`sent_payload_digest` | ① B2 用 `TrustedEgressTransport.dispatch` + FakeBackend 闭包/外部 receipt（不改 egress）；② additive 扩展 `dispatch` 接收 payload/返回 digest（改 security/egress.py） | **① 最小**（B2-06 用 receipt 三方相等）；若 Reviewer 要求 transport 内建 digest → ② 需 Lead 另行批准 |
-| O-3 | Observation→settle | ① Controller 原始字段映射到现有 `settle/fail`（B0 实测三种形状等值，无新 op）；② 新增 broker `settle_observation` op | **①**（不改 Broker 协议；`to_usage` 仅交叉校验） |
-| O-4 | Guard+Bridge 预算 | ① Guard 仅无副作用预检，Controller/Broker 唯一 Reserve；② Guard 发起 Reserve 且 Controller 绑定校验（不二次扣账）；③ Guard-must-present 策略 | **①**（最简单、单一账本权威；Guard 仍可在缺失时由 Controller 拒绝） |
-| O-5 | OS 边界裁定 | ① 接受同 uid 结构闭环，B0-02/G3-B trust 标 BLOCKED，G3-D 再补；② G3-B 内扩为不同 uid/namespace/多容器（显著扩大） | **①**（本轮范围；不得写 PASS_FOR_G3B_TRUST_BOUNDARY_SCOPE） |
+| ID | Lead 决定 | 实现约束 |
+|---|---|---|
+| O-1 | **批准** UDS primary（`/work/g3b/bridge.sock`） | fallback 仅 B1 实测 UDS 失败且 Lead **书面同意**时启用；标 `weaker/BLOCKED`，不得 silent 切换 |
+| O-2 | **批准选项①**：不改 `security/egress.py` | B2 用固定 payload 闭包 + FakeBackend `sent_payload_digest` + Fake receipt `raw_sha256` 做三方等值；`dispatch` 返回值不含 digest 属已接受缺口，B2 报告必须明示 |
+| O-3 | **批准选项①**：Controller 原始 observation 字段映射 → 现有 `settle/fail`；**不新增 broker op** | `to_usage()` 仅交叉校验；settle/fail 分支必须按 §5.9 (a)-(d)，不得在“发送未知”时调用 fail 结算 |
+| O-4 | **批准：单一 Reserve 权威 + Guard 最小 additive**：Broker 唯一预算权威，Controller 唯一 Reserve 发起者；禁止 Guard 与 Controller 对同一 model attempt 双预留 | 现有 Guard（`plugins/runtime-budget-guard/src/index.ts:787-789` 在 `next()` 前必 reserve）没有 precheck 模式；B3 先向 Lead 提交最小 additive 配置 `reserveMode: "precheck"`（默认 `"reserve"`，保持原生 15/15 行为）的设计与 diff，经 Lead 书面批准后实现；precheck 模式仍执行全部 policy 检查与 boot/registry trace，但不 reserve/settle。另需在真实 DSH + 一个无 Controller 的合成 adapter 上单独跑 Guard 正常 reserve 模式的 hook-order 证据（**不得**冒充 Guard+Bridge 组合 PASS）；组合运行用同一 tool turn 的 Ledger 行数证明只有 Controller 产生 2 个 Reservation/Claim/Attempt |
+| O-5 | **批准选项①**：同 uid 结构闭环 | B0-02/OS Trust Boundary **一律 BLOCKED**；本轮最高裁定上限 `PASS_FOR_G3B_NO_KEY_INTEGRATION_SCOPE`，**禁止** `PASS_FOR_G3B_TRUST_BOUNDARY_SCOPE` |
+| 附加 | **批准 Broker/Fake 子进程由受信侧启动**（launcher 或 Controller；固定绝对路径/固定 config；候选请求与 env 不得指定路径） | 若由 Controller spawn Broker，报告注明“launcher-ownership 弱化，但仍是受信侧启动，不构成 OS 边界证据” |
 
 ## 8. 风险清单
 
@@ -481,8 +496,8 @@ P0 不得 mock 的项：B1-01/02、B2-01/02/03/04/06/07、B3-01/03/04/05/06/07/0
 
 ## 9. B1/B2 并行边界与 STOP
 
-- **B1**：`bridge/protocol.py`、`bridge/ipc_server.py`、`spikes/g3b-provider-bridge/src/index.ts`、`fake/fake_provider.py`（wire/receipt 契约）、`run/worker.py`、`run/suite.py` skeleton；只按 §5.2/§5.5/§5.6 实现；不写 Broker/Controller 状态机。
-- **B2**：`bridge/controller.py`、`admission.py`、`attempts.py`、`fake_backend.py`、Broker client mapping/observation adapter；只按 §3/§4/§5.7/§5.9 实现；不修改 B1 文件/协议字段。
+- **B1**：`bridge/protocol.py`、`bridge/ipc_server.py`、`spikes/g3b-trusted-bridge/src/index.ts`、`run/worker.py`、`run/suite.py` skeleton；只按 §5.2/§5.5 实现；**不写/不修改 Fake 文件**（Fake 归 B2），不写 Broker/Controller 状态机。
+- **B2**：`bridge/controller.py`、`admission.py`、`attempts.py`、`fake_backend.py`、`spikes/g3b-trusted-bridge/fake/fake_provider.py`（Fake receipt/counter，B2-owned）、Broker client mapping/observation adapter；只按 §3/§4/§5.6/§5.7/§5.9 实现；不修改 B1 协议字段/文件。
 - **B3**：integration/chaos；**B4**：Packet/regression；B3 必须等 B1+B2 最小链路合并；B4 只读冻结字节。
 - 任一接口变更 → Lead 重新签核；完成 B0 文档并提交后 **STOP**，不进入 B1/B2 实现（由 Lead 另行派发）。
 
