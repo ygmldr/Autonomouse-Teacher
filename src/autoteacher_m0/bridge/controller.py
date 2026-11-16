@@ -136,6 +136,19 @@ class TrustedController:
         max_tokens = payload.get("maxTokens")
         if type(max_tokens) is not int or not 1 <= max_tokens <= 1024:
             raise BridgeError("REQUEST_INVALID")
+        # B3-12: reject image/file/attachment-shaped message blocks before reserve.
+        # Malformed message shapes remain the responsibility of the existing
+        # PreparedProviderRequest schema validation below (so diagnostics stay stable).
+        messages = payload.get("messages", [])
+        if isinstance(messages, list):
+            for message in messages:
+                content = message.get("content") if isinstance(message, Mapping) else None
+                if not isinstance(content, list):
+                    continue
+                for block in content:
+                    if isinstance(block, Mapping) and block.get("type") in {
+                            "image", "file", "attachment", "store"}:
+                        raise BridgeError("REQUEST_INVALID")
         tool_hashes = []
         admission_tools = dict(self.admission.tool_schemas)
         tools = payload.get("tools", [])
@@ -323,6 +336,7 @@ class TrustedController:
                                          "raw_sha256": receipt.raw_sha256,
                                          "raw_length": receipt.raw_length,
                                          "mode": receipt.mode,
+                                         "sent_payload_digest": holder.get("sent"),
                                          "observation_digest": observation_digest}, sort_keys=True))
             self._crash("after_response_before_settlement")
             camel = None

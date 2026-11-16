@@ -72,6 +72,12 @@ def main() -> int:
     tmpc = counter.with_suffix(".tmp")
     tmpc.write_text(json.dumps({"count": count}), encoding="utf-8")
     os.replace(tmpc, counter)
+    if mode == "eof":
+        return 0
+    if mode == "timeout":
+        import time as _time
+        _time.sleep(35)
+        return 2
     frames = []
     if mode == "ok_usage":
         frames = [{"kind": "chunk", "chunk": {"type": "text-delta", "index": 0, "text": "ok"}},

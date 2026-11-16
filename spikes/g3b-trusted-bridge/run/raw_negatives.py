@@ -48,9 +48,12 @@ def send_raw(raw: bytes, *, newline: bool = True) -> dict:
             buffer += part
             while b"\n" in buffer:
                 line, _, buffer = buffer.partition(b"\n")
-                if line:
-                    try: lines.append(parse_envelope(line + b"\n").kind)
-                    except Exception as exc: lines.append({"parse_error": getattr(exc, "code", str(exc))})
+                if not line:
+                    continue
+                try:
+                    lines.append(parse_envelope(line + b"\n").kind)
+                except Exception as exc:
+                    lines.append({"parse_error": getattr(exc, "code", str(exc))})
         return {"frames": lines, "closed": not part if 'part' in locals() else False}
     finally:
         sock.close()
@@ -80,6 +83,10 @@ def main() -> int:
             "B2-03-route-B": lambda: send_raw(valid(payload(provider="route-b", model="model-b"))),
             "B2-02-tools": lambda: send_raw(valid(payload(tools=[{"name": "shell", "parameters": {}}]))),
             "B3-12-unapproved-tool": lambda: send_raw(valid(payload(tools=[{"name": "shell", "description": "x", "parameters": {}}]))),
+            "B3-12-image-block": lambda: send_raw(valid(payload(messages=[{"role": "user", "content": [{"type": "image", "mimeType": "image/png", "data": "x"}]}]))),
+            "B3-12-file-block": lambda: send_raw(valid(payload(messages=[{"role": "user", "content": [{"type": "file", "name": "x"}]}]))),
+            "B3-12-attachment-block": lambda: send_raw(valid(payload(messages=[{"role": "user", "content": [{"type": "attachment", "name": "x"}]}]))),
+            "B3-12-store-field": lambda: send_raw(valid(payload(store=True))),
         }
         for name, fn in cases.items():
             try:
@@ -96,11 +103,16 @@ def main() -> int:
     claims = []
     reservations = []
     if broker.exists():
-        con = sqlite3.connect(f"file:{broker}?mode=ro", uri=True); con.row_factory = sqlite3.Row
-        try: claims = [dict(r) for r in con.execute("select * from budget_dispatch_claims")]
-        except Exception: pass
-        try: reservations = [dict(r) for r in con.execute("select * from budget_reservations")]
-        except Exception: pass
+        con = sqlite3.connect(f"file:{broker}?mode=ro", uri=True)
+        con.row_factory = sqlite3.Row
+        try:
+            claims = [dict(r) for r in con.execute("select * from budget_dispatch_claims")]
+        except Exception:
+            pass
+        try:
+            reservations = [dict(r) for r in con.execute("select * from budget_reservations")]
+        except Exception:
+            pass
         con.close()
     no_success = all(not (isinstance(v.get("frames"), list) and "finish" in v["frames"]) for v in results.values())
     output = {"utc": common.utc(), "cases": results, "counter": counter,
