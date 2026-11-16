@@ -20,7 +20,7 @@
 
 ## 2. RED → GREEN
 
-- RED（旧代码 `76f1c52` stage + 新 L11 测试）：**10 failed / 14 passed**，exit 1；日志 `artifacts/g2l11/logs/red.stdout.log`。失败覆盖 T1 provider after-entry、T2 Unicode call-id、T3 schema、T4 journal、T5 descriptors。
+- RED（精确基线 `76f1c52` + 当前已提交测试）：**8 failed / 16 passed**，exit 1；日志 `artifacts/g2l11/logs/red2.stdout.log`（旧 `red.stdout.log` 10/14 已 superseded，见 `M0_G2L11_ERRATA.md`）。行为 RED：T1 provider after-entry、T2 Unicode call-id、T4 journal、T5 descriptors；API-shape RED 另记。
 - GREEN（实现 commit `bf1e84d` git-archive stage）：L11 定向 **24 passed**；全量 **625 passed, 1 skipped**；verify script **PASS**；Ruff repo-wide **All checks passed!**；日志 `artifacts/g2l11/logs/{green2,impl-full,impl-script,impl-ruff}.stdout.log`。
 
 ## 3. T1 — Provider after-entry 异常归因（P1）
@@ -83,3 +83,5 @@ G2-L1.1 实现与 RED/GREEN 已完成；**G3 未启动**；提交仅实现/测�
 > 证据勘误：RED 日志已按精确基线重跑，见 `docs/M0_G2L11_ERRATA.md`（旧 red 日志作历史保留）。
 
 > 语义澄清：`dispatch_count` 是 provider callable 进入/attempt 开始次数（含 after-entry 抛异常），非 confirmed HTTP/completed 次数；`provider_calls` 为函数进入次数；after-entry 异常的 `dispatched=True` 表示“可能已发送”，状态 BILLABLE_UNKNOWN。
+
+> G2-L1.2 R-06 修正：RED2 为 8 failed / 16 passed；旧 10/14 已 superseded。详见 `docs/M0_G2L12_HARDENING_REPORT.md`。
