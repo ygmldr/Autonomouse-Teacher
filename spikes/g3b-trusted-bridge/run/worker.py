@@ -71,10 +71,18 @@ def process_snapshot() -> list[dict]:
 def run_dsh(*, prompt: str = "G3B_B3PREP_ECHO", session_id: str = "g3b-b3prep-session-001",
             resume: bool = False, scenario: str = "ok_usage", guard: bool = False,
             controller_required: bool = True, bad_admission: bool = False,
-            guard_invalid: bool = False) -> dict:
+            guard_invalid: bool = False, seed: str | None = None,
+            run_id: str | None = None) -> dict:
     assert os.getuid() == 65534, os.getuid()
     assert not [name for name in os.environ if any(token in name.upper() for token in ("KEY", "TOKEN", "SECRET"))]
-    common.write_configs(run_id="g3b-b3prep-" + session_id,
+    if seed:
+        seed_path = Path(seed)
+        for path in seed_path.rglob("*"):
+            if path.is_file():
+                target = common.BASE / path.relative_to(seed_path)
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes(path.read_bytes())
+    common.write_configs(run_id=run_id or "g3b-b3prep-" + session_id,
                          scenario=scenario,
                          tool_schemas=captured_tool_schemas())
     if bad_admission:
@@ -154,6 +162,9 @@ def main() -> int:
     controller_required = True
     bad_admission = False
     guard_invalid = False
+    seed = None
+    resume = False
+    run_id = None
     args = sys.argv[1:]
     while args:
         arg = args.pop(0)
@@ -176,12 +187,18 @@ def main() -> int:
             bad_admission = True
         elif arg == "--guard-invalid":
             guard_invalid = True
+        elif arg == "--seed":
+            seed = args.pop(0)
+        elif arg == "--resume":
+            resume = True
+        elif arg == "--run-id":
+            run_id = args.pop(0)
         else:
             raise SystemExit(f"UNKNOWN_ARG:{arg}")
     EVIDENCE.mkdir(parents=True, exist_ok=True)
     if mode != "dsh":
         raise SystemExit("worker supports only --mode dsh")
-    result = run_dsh(prompt=prompt, session_id=session, scenario=scenario, guard=guard, controller_required=controller_required, bad_admission=bad_admission, guard_invalid=guard_invalid)
+    result = run_dsh(prompt=prompt, session_id=session, scenario=scenario, guard=guard, controller_required=controller_required, bad_admission=bad_admission, guard_invalid=guard_invalid, seed=seed, resume=resume, run_id=run_id)
     (EVIDENCE / "dsh-result.json").write_text(json.dumps(result, indent=2, sort_keys=True) + "\n")
     emit("result", **result)
     return 0 if result.get("error") is None and result.get("final_response") else 1
