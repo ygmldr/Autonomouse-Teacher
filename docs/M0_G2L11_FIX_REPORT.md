@@ -81,3 +81,5 @@
 G2-L1.1 实现与 RED/GREEN 已完成；**G3 未启动**；提交仅实现/测试与随后 docs；等待 Lead 审阅 Review Packet 后决定是否派独立 Reviewer。不得据此签发 Live/GO。
 
 > 证据勘误：RED 日志已按精确基线重跑，见 `docs/M0_G2L11_ERRATA.md`（旧 red 日志作历史保留）。
+
+> 语义澄清：`dispatch_count` 是 provider callable 进入/attempt 开始次数（含 after-entry 抛异常），非 confirmed HTTP/completed 次数；`provider_calls` 为函数进入次数；after-entry 异常的 `dispatched=True` 表示“可能已发送”，状态 BILLABLE_UNKNOWN。

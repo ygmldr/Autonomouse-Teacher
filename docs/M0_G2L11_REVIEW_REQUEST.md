@@ -21,7 +21,7 @@
 
 ## Contract/API/schema migration and compatibility
 - No DB migration; claim table unchanged. v1 ops unchanged; additive behavior only for invalid completion precheck and diagnostics.
-- `provider_calls` is provider callable entry count, not HTTP attempts; `dispatched=True` on ambiguous after-entry means "may have been sent", state BILLABLE_UNKNOWN.
+- `dispatch_count` means **provider callable entry/attempt-start count (including calls that raise after entry)**; it is NOT confirmed HTTP/completed-response count. `provider_calls` is function-entry count. `dispatched=True` on after-entry exception means "may have been sent" with state BILLABLE_UNKNOWN; local bookkeeping is not remote exactly-once.
 - `attempts` legacy snapshot remains successful-claim count; `attempts_detail` is authoritative.
 - T2 canonicalization now single implementation in `call_identity.py`; ASCII IDs unchanged (same canonical JSON formatting for ASCII), legacy IDs are not rewritten.
 
@@ -43,7 +43,7 @@
 - NOT RUN: any G3/G4/G5/G6, real provider/Key/HTTP/usage.
 
 ## Raw trace index and provider call count proof
-- RED: `artifacts/g2l11/logs/red.stdout.log` (10 failed, 14 passed on base `76f1c52`).
+- RED (exact base `76f1c52` + tests from `bf1e84d`): **8 failed / 16 passed** (`artifacts/g2l11/logs/red2.stdout.log`; behavior RED 6: ATT-03/04/06, ID-02, JRN-01, DIAG-01; API-shape RED 2: ATT-01, DIAG-02). The old `artifacts/g2l11/logs/red.stdout.log` (10 failed / 14 passed) used an earlier test version and is **superseded**, retained only as history; see `docs/M0_G2L11_ERRATA.md` and packet `logs/red2.stdout.log`.
 - GREEN: `artifacts/g2l11/logs/green2.stdout.log` (24 passed).
 - Full: `artifacts/g2l11/logs/impl-full.stdout.log` (625 passed, 1 skipped).
 - Script/Ruff: `impl-script.stdout.log` (PASS), `impl-ruff.stdout.log` (All checks passed!).
