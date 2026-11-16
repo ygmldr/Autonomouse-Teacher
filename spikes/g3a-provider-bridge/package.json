@@ -1,0 +1,26 @@
+{
+  "name": "autoteacher-g3a-provider-bridge",
+  "version": "0.1.0",
+  "description": "G3-A spike: public Cordis LlmAdapter that forwards a canonical DSH model request over stdio to an independent Python fake-provider process and relays its synthetic response.",
+  "private": true,
+  "type": "module",
+  "main": "./lib/index.js",
+  "types": "./lib/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/index.d.ts",
+      "default": "./lib/index.js"
+    }
+  },
+  "engines": {
+    "node": ">=22",
+    "dsh": "0.2.2-rc.2"
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "4.1.0",
+    "@deepseek-ai/dsh-llm": "0.2.2-rc.2"
+  }
+}
