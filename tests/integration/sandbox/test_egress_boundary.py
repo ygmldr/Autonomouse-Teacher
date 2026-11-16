@@ -79,10 +79,15 @@ def test_unapproved_requests_denied_before_dispatch(overrides, reason):
 
 
 def test_attempt_limit_denied():
-    boundary = EgressBoundary(EgressPolicy(max_attempts=2))
-    boundary.require(req())
-    boundary.require(req(attempt_ordinal=2))
-    decision = boundary.authorize(req(attempt_ordinal=3))
+    # G2-L1.1/T5: descriptor diagnostics do not consume the send-attempt quota;
+    # the quota is bounded by trusted claims, not policy-only evaluate calls.
+    boundary = EgressBoundary(EgressPolicy(max_attempts=2), claimer=AlwaysClaimer())
+    for _ in range(5):
+        boundary.evaluate_descriptor(req())
+    assert boundary.claim_dispatch(req()).allowed
+    assert boundary.claim_dispatch(req(attempt_ordinal=2)).allowed
+    decision = boundary.claim_dispatch(req(attempt_ordinal=3))
+    assert decision.allowed is False
     assert "ATTEMPT_LIMIT_EXCEEDED" in decision.reasons
 
 

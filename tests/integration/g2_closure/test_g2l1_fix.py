@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import signal
+import sqlite3
 import subprocess
 import sys
 from dataclasses import replace
@@ -16,7 +17,7 @@ import pytest
 
 from autoteacher_m0.accounting import BudgetLedger, BudgetLimits, derive_call_id
 from autoteacher_m0.security.egress import (
-    BROKER_CLAIMER_UNAVAILABLE, OPENCODE_GO_HOST, OPENCODE_GO_PATH_PREFIX,
+    AttemptState, BROKER_CLAIMER_UNAVAILABLE, OPENCODE_GO_HOST, OPENCODE_GO_PATH_PREFIX,
     OPENCODE_GO_PORT, ClaimResult, DispatchPermission, EgressBoundary,
     EgressPolicy, EgressRequest, EgressViolation, PolicyEvaluation,
     PreparedProviderRequest, TrustedEgressTransport, policy_from_json,
@@ -43,20 +44,21 @@ def _route_entry(route: str, model: str) -> dict:
                              "reasoning": "included_in_output"}}
 
 
-def make_config(tmp_path: Path, *, two_routes: bool = False) -> dict:
+def make_config(tmp_path: Path, *, two_routes: bool = False,
+                max_messages: int = 32) -> dict:
     routes = [_route_entry(ROUTE, MODEL)]
     if two_routes:
         routes.append(_route_entry(ROUTE_B, MODEL_B))
     return {"v": 1, "synthetic": True, "db_path": str(tmp_path / "ledger.sqlite3"),
-            "scope_id": SCOPE, "max_messages": 32,
+            "scope_id": SCOPE, "max_messages": max_messages,
             "limits": {"soft_usd": "3", "hard_usd": "10", "per_call_usd": "0.20",
                        "max_requests": 50, "max_input_tokens": 2500000,
                        "max_output_tokens": 600000, "max_steps": 8, "max_retries": 1},
             "routes": routes}
 
 
-def setup(tmp_path: Path, *, two_routes: bool = False):
-    config = make_config(tmp_path, two_routes=two_routes)
+def setup(tmp_path: Path, *, two_routes: bool = False, max_messages: int = 32):
+    config = make_config(tmp_path, two_routes=two_routes, max_messages=max_messages)
     path = tmp_path / "startup.json"
     path.write_text(json.dumps(config), encoding="utf-8")
     limits = BudgetLimits(soft_usd="3", hard_usd="10", per_call_usd="0.20",
@@ -642,3 +644,300 @@ def test_proc01_stdiabroker_client_is_closed(tmp_path: Path) -> None:
         if process.poll() is None:
             stop(process, kill=True)
     assert process.poll() is not None
+
+# ---------------------------------------------------------------- G2-L1.1 L11 tests
+class L11CountingProvider:
+    def __init__(self, behavior: str = "raise"):
+        self.behavior = behavior
+        self.calls = 0
+
+    def __call__(self, request: EgressRequest):
+        self.calls += 1
+        if self.behavior == "raise":
+            raise RuntimeError("after-entry synthetic failure")
+        if self.behavior == "interrupt":
+            raise KeyboardInterrupt()
+        if self.behavior == "nonmapping":
+            return "not-a-mapping"
+        return {"status": 200, "usage": None, "error": None}
+
+
+class L11CountingBoundClaimer:
+    def __init__(self):
+        self.calls = 0
+
+    def claim_bound(self, request: EgressRequest, *, expected_route_id: str,
+                    expected_model: str) -> ClaimResult:
+        self.calls += 1
+        return ClaimResult(True, "CLAIMED", (), {"call_id": request.call_id})
+
+
+def _permission(boundary: EgressBoundary, request_value: EgressRequest):
+    decision = boundary.claim_dispatch(request_value)
+    assert decision.allowed and decision.permission is not None
+    return decision.permission
+
+
+def test_l11_att_01_no_permission_zero_provider() -> None:
+    provider = L11CountingProvider("raise")
+    transport = TrustedEgressTransport(boundary_with(AlwaysClaimer()), provider)
+    outcome = transport.dispatch(request(), None)
+    assert outcome["dispatched"] is False
+    assert outcome["classification"] == "PRE_DISPATCH_DENIED"
+    assert outcome["state"] == AttemptState.NOT_DISPATCHED.value
+    assert provider.calls == 0 and transport.provider_calls == 0
+
+
+def test_l11_att_02_after_claim_before_provider_zero_calls() -> None:
+    provider = L11CountingProvider("raise")
+    boundary = boundary_with(AlwaysClaimer())
+    permission = _permission(boundary, request())
+    transport = TrustedEgressTransport(boundary, provider)
+    outcome = transport.dispatch(request(reservation_id="different"), permission)
+    assert outcome["state"] == AttemptState.NOT_DISPATCHED.value
+    assert provider.calls == 0 and transport.provider_calls == 0
+
+
+def test_l11_att_03_provider_entry_then_runtimeerror_is_billable_unknown() -> None:
+    provider = L11CountingProvider("raise")
+    boundary = boundary_with(AlwaysClaimer())
+    request_value = request()
+    permission = _permission(boundary, request_value)
+    transport = TrustedEgressTransport(boundary, provider)
+    outcome = transport.dispatch(request_value, permission)
+    assert provider.calls == 1 and transport.provider_calls == 1
+    assert outcome["attempt_started"] is True and outcome["provider_invoked"] is True
+    assert outcome["state"] == AttemptState.BILLABLE_UNKNOWN.value
+    assert outcome["provider_calls"] == 1
+    assert outcome["retry_attempted"] is False
+    assert boundary.stream("g2l1-fix-stream").worst_case_held_usd > 0
+
+
+def test_l11_att_04_invalid_result_is_unknown_not_not_dispatched() -> None:
+    provider = L11CountingProvider("nonmapping")
+    boundary = boundary_with(AlwaysClaimer())
+    request_value = request()
+    permission = _permission(boundary, request_value)
+    transport = TrustedEgressTransport(boundary, provider)
+    outcome = transport.dispatch(request_value, permission)
+    assert provider.calls == 1
+    assert outcome["state"] == AttemptState.BILLABLE_UNKNOWN.value
+    assert outcome["classification"] == "ATTEMPT_STARTED"
+    assert outcome["retry_attempted"] is False
+
+
+def test_l11_att_05_permission_single_use() -> None:
+    provider = L11CountingProvider("nonmapping")
+    boundary = boundary_with(AlwaysClaimer())
+    request_value = request()
+    permission = _permission(boundary, request_value)
+    transport = TrustedEgressTransport(boundary, provider)
+    transport.dispatch(request_value, permission)
+    calls = provider.calls
+    second = transport.dispatch(request_value, permission)
+    assert second["state"] == AttemptState.NOT_DISPATCHED.value
+    assert provider.calls == calls
+
+
+def test_l11_att_06_keyboardinterrupt_preserved_and_unknown() -> None:
+    provider = L11CountingProvider("interrupt")
+    boundary = boundary_with(AlwaysClaimer())
+    request_value = request()
+    permission = _permission(boundary, request_value)
+    transport = TrustedEgressTransport(boundary, provider)
+    with pytest.raises(KeyboardInterrupt):
+        transport.dispatch(request_value, permission)
+    assert provider.calls == 1
+    assert boundary.stream("g2l1-fix-stream").state is AttemptState.BILLABLE_UNKNOWN
+
+
+def test_l11_id_01_ascii_accounting_egress_match() -> None:
+    prepared, _request = prepared_pair()
+    digest = prepared_request_digest(prepared)
+    assert prepared_call_id(prepared) == derive_call_id(prepared.run_id, prepared.logical_step,
+                                                         prepared.attempt_index, digest)
+
+
+def test_l11_id_02_unicode_run_id_accounting_egress_match() -> None:
+    prepared, _request = prepared_pair()
+    prepared = replace(prepared, run_id="运行-中文-α")
+    digest = prepared_request_digest(prepared)
+    prepared = replace(prepared, request_digest=digest, call_id=prepared_call_id(prepared))
+    assert prepared_call_id(prepared) == derive_call_id(prepared.run_id, prepared.logical_step,
+                                                         prepared.attempt_index, digest)
+
+
+def test_l11_id_03_cross_process_ascii_and_unicode() -> None:
+    code = ("from autoteacher_m0.accounting.call_identity import derive_call_id;"
+            "print(derive_call_id('运行-中文',0,0,'a'*64))")
+    proc = subprocess.run([sys.executable, "-c", code], text=True, capture_output=True, check=True)
+    expected = derive_call_id("运行-中文", 0, 0, "a" * 64)
+    assert proc.stdout.strip() == expected
+
+
+def test_l11_id_04_single_field_changes_identity() -> None:
+    base = derive_call_id("run", 0, 0, "a" * 64)
+    assert derive_call_id("run", 1, 0, "a" * 64) != base
+    assert derive_call_id("run", 0, 1, "a" * 64) != base
+    assert derive_call_id("run", 0, 0, "b" * 64) != base
+
+
+def test_l11_id_05_bool_nan_and_invalid_types_rejected() -> None:
+    from autoteacher_m0.accounting.call_identity import IdentitySchemaError
+    with pytest.raises(IdentitySchemaError):
+        derive_call_id("run", True, 0, "a" * 64)
+    with pytest.raises(IdentitySchemaError):
+        derive_call_id("run", True, 0, "a" * 64)
+    prepared, _ = prepared_pair()
+    with pytest.raises((TypeError, ValueError)):
+        prepared_request_digest(replace(prepared, messages=({"x": float("nan")},)))
+
+
+def test_l11_id_06_legacy_ascii_id_is_stable() -> None:
+    first = derive_call_id("legacy-run", 2, 1, "c" * 64)
+    assert first == derive_call_id("legacy-run", 2, 1, "c" * 64)
+    assert first.startswith("call-") and len(first) == 53
+
+
+def test_l11_prep_01_unknown_schema_version_denied() -> None:
+    prepared, actual = prepared_pair()
+    claimer = L11CountingBoundClaimer()
+    bad = replace(prepared, schema_version="m0.prepared.v0")
+    decision = boundary_with(claimer).claim_dispatch_for_request(
+        bad, actual, expected_reservation_route_model=(ROUTE, MODEL))
+    assert decision.allowed is False and decision.permission is None
+    assert claimer.calls == 0
+
+
+def test_l11_prep_02_bool_as_int_denied() -> None:
+    prepared, actual = prepared_pair()
+    prepared = replace(prepared, logical_step=True)
+    claimer = L11CountingBoundClaimer()
+    decision = boundary_with(claimer).claim_dispatch_for_request(prepared, actual)
+    assert decision.allowed is False and decision.permission is None
+    assert claimer.calls == 0
+
+
+def test_l11_prep_03_message_change_changes_digest() -> None:
+    prepared, _ = prepared_pair()
+    changed = replace(prepared, messages=({"role": "user", "content": "changed"},))
+    assert prepared_request_digest(prepared) != prepared_request_digest(changed)
+
+
+def test_l11_prep_04_mutated_nested_mapping_denied() -> None:
+    prepared, actual = prepared_pair()
+    mutable = {"role": "user", "content": "literal"}
+    prepared = replace(prepared, messages=(mutable,))
+    prepared = replace(prepared, request_digest=prepared_request_digest(prepared),
+                       call_id=prepared_call_id(prepared))
+    mutable["content"] = "mutated"
+    claimer = L11CountingBoundClaimer()
+    decision = boundary_with(claimer).claim_dispatch_for_request(prepared, actual)
+    assert decision.allowed is False and claimer.calls == 0
+
+
+def test_l11_prep_05_route_method_path_host_change_denied() -> None:
+    prepared, actual = prepared_pair()
+    claimer = L11CountingBoundClaimer()
+    for changes in ({"max_output_tokens": 512}, {"method": "GET"},
+                    {"path": "/v1/chat/completions"}, {"host": "api.deepseek.com"}):
+        changed = replace(prepared, **changes)
+        decision = boundary_with(claimer).claim_dispatch_for_request(changed, actual)
+        assert decision.allowed is False and decision.permission is None
+        assert claimer.calls == 0
+
+
+def test_l11_jrn_01_unknown_reservation_completions_do_not_grow_journal(tmp_path: Path) -> None:
+    path, _ledger = setup(tmp_path)
+    for index in range(6):
+        reply = run(path, [{"v": 1, "id": f"unknown-{index}", "op": "settle",
+                            "reservation_id": "missing-reservation",
+                            "usage": {"inputTokens": 1, "outputTokens": 1}}])[0]
+        assert reply["ok"] is False and reply["code"] == "UNKNOWN_RESERVATION"
+    with sqlite3.connect(tmp_path / "ledger.sqlite3") as database:
+        count = database.execute("SELECT COUNT(*) FROM budget_broker_messages").fetchone()[0]
+    assert count == 0
+
+
+def test_l11_jrn_02_valid_pending_settle_and_fail_remain_available(tmp_path: Path) -> None:
+    path, _ledger = setup(tmp_path, max_messages=8)
+    first = derive_call_id("run-jrn2-a", 0, 0, DIGEST)
+    second = derive_call_id("run-jrn2-b", 0, 0, DIGEST)
+    first_res = reserve_call(path, first, identity="reserve-jrn2-a")["reservation_id"]
+    second_res = reserve_call(path, second, identity="reserve-jrn2-b")["reservation_id"]
+    settled = run(path, [{"v": 1, "id": "settle-jrn2", "op": "settle",
+                          "reservation_id": first_res,
+                          "usage": {"inputTokens": 1, "outputTokens": 1}}])[0]
+    failed = run(path, [{"v": 1, "id": "fail-jrn2", "op": "fail",
+                         "reservation_id": second_res,
+                         "usage": {"inputTokens": 1, "outputTokens": 1}}])[0]
+    assert settled["ok"] and settled["code"] == "SETTLED"
+    assert failed["ok"] and failed["code"] == "FAILED"
+
+
+def test_l11_jrn_03_same_message_id_idempotent(tmp_path: Path) -> None:
+    path, _ledger = setup(tmp_path)
+    call = derive_call_id("run-jrn3", 0, 0, DIGEST)
+    reservation = reserve_call(path, call)["reservation_id"]
+    message = {"v": 1, "id": "settle-jrn3", "op": "settle", "reservation_id": reservation,
+               "usage": {"inputTokens": 1, "outputTokens": 1}}
+    first = run(path, [message])[0]
+    second = run(path, [message])[0]
+    assert first["ok"] and second["ok"] and second["code"] == "SETTLED"
+
+
+def test_l11_jrn_04_new_id_for_settled_reservation_does_not_grow_journal(tmp_path: Path) -> None:
+    path, _ledger = setup(tmp_path)
+    call = derive_call_id("run-jrn4", 0, 0, DIGEST)
+    reservation = reserve_call(path, call)["reservation_id"]
+    run(path, [{"v": 1, "id": "settle-jrn4-a", "op": "settle",
+                "reservation_id": reservation,
+                "usage": {"inputTokens": 1, "outputTokens": 1}}])
+    with sqlite3.connect(tmp_path / "ledger.sqlite3") as database:
+        before = database.execute("SELECT COUNT(*) FROM budget_broker_messages").fetchone()[0]
+    reply = run(path, [{"v": 1, "id": "settle-jrn4-b", "op": "settle",
+                        "reservation_id": reservation,
+                        "usage": {"inputTokens": 1, "outputTokens": 1}}])[0]
+    with sqlite3.connect(tmp_path / "ledger.sqlite3") as database:
+        after = database.execute("SELECT COUNT(*) FROM budget_broker_messages").fetchone()[0]
+    assert reply["ok"] is False and after == before
+
+
+def test_l11_diag_01_descriptor_diagnostics_do_not_consume_attempt_quota() -> None:
+    boundary = EgressBoundary(
+        EgressPolicy(approved_routes=frozenset({(ROUTE, MODEL)}), max_attempts=1),
+        claimer=AlwaysClaimer())
+    for _ in range(5):
+        assert boundary.evaluate_descriptor(request()).allowed
+    decision = boundary.claim_dispatch(request())
+    assert decision.allowed and decision.permission is not None
+    stream = boundary.stream("g2l1-fix-stream")
+    assert stream.policy_checks == 6  # 5 diagnostics + 1 claim admission check
+    assert stream.claims_granted == 1
+
+
+def test_l11_diag_02_claim_and_dispatch_counters() -> None:
+    provider = L11CountingProvider("nonmapping")
+    boundary = boundary_with(AlwaysClaimer())
+    request_value = request()
+    permission = _permission(boundary, request_value)
+    TrustedEgressTransport(boundary, provider).dispatch(request_value, permission)
+    stream = boundary.stream("g2l1-fix-stream")
+    assert stream.policy_checks == 1
+    assert stream.policy_allowed == 1
+    assert stream.claims_granted == 1
+    assert stream.dispatch_attempted == 1
+    assert stream.provider_invocations == 1
+    assert stream.attempts == 1  # legacy successful-claim compatibility only
+
+
+def test_l11_diag_03_attempts_detail_multi_reservation() -> None:
+    boundary = boundary_with(AlwaysClaimer())
+    first = boundary.claim_dispatch(request(reservation_id="reservation-a", call_id=CALL_A))
+    second = boundary.claim_dispatch(request(reservation_id="reservation-b", call_id=CALL_B,
+                                             attempt_ordinal=2))
+    assert first.allowed and second.allowed
+    stream = boundary.stream("g2l1-fix-stream")
+    assert stream.attempts_detail[0]["reservation_id"] == "reservation-a"
+    assert stream.attempts_detail[1]["reservation_id"] == "reservation-b"
+    assert stream.attempts_detail[0]["claim_granted"] is True

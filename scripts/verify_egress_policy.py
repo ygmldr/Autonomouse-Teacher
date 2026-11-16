@@ -80,10 +80,13 @@ def main() -> int:
             check(f"require_raises_{name}", False)
         except EgressViolation:
             check(f"require_raises_{name}", True)
-    boundary.require(request())  # keep stream alive for limit check
-    limited = EgressBoundary(EgressPolicy(max_attempts=1))
-    limited.require(request())
-    decision = limited.authorize(request(attempt_ordinal=2))
+    boundary.require(request())  # descriptor diagnostic does not consume quota
+    limited = EgressBoundary(EgressPolicy(max_attempts=1), claimer=AlwaysClaimer())
+    for _ in range(5):
+        limited.evaluate_descriptor(request())
+    check("attempt_limit_diagnostics_do_not_consume_quota",
+          limited.claim_dispatch(request()).allowed)
+    decision = limited.claim_dispatch(request(attempt_ordinal=2))
     check("attempt_limit_denied", not decision.allowed and "ATTEMPT_LIMIT_EXCEEDED" in decision.reasons)
 
     matrix = {}

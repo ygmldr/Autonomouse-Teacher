@@ -12,12 +12,39 @@ from dataclasses import dataclass
 import hashlib
 import json
 import re
+from typing import Mapping
 
 from .broker_usage import MAX_COUNTER
 
 CALL_ID_PATTERN = re.compile(r"call-[0-9a-f]{48}\Z", re.ASCII)
 REQUEST_DIGEST_PATTERN = re.compile(r"[0-9a-f]{64}\Z", re.ASCII)
 MAX_ID_LEN = 96
+
+
+def _canonical_value(value: object) -> object:
+    """Strict JSON-compatible recursion: reject NaN/Inf/non-string mapping keys."""
+    if value is None or type(value) in (str, int, bool):
+        return value
+    if type(value) is float:
+        if value != value or value in (float("inf"), float("-inf")):
+            raise ValueError("non-finite float")
+        return value
+    if isinstance(value, Mapping):
+        result = {}
+        for key, item in value.items():
+            if not isinstance(key, str):
+                raise ValueError("non-string mapping key")
+            result[key] = _canonical_value(item)
+        return result
+    if isinstance(value, (list, tuple)):
+        return [_canonical_value(item) for item in value]
+    raise TypeError(f"non-canonical JSON value: {type(value).__name__}")
+
+
+def canonical_json(value: object) -> str:
+    """Single canonical JSON implementation (UTF-8, sorted keys, compact, no NaN)."""
+    return json.dumps(_canonical_value(value), sort_keys=True,
+                      separators=(",", ":"), ensure_ascii=False, allow_nan=False)
 
 
 class ObservationSchemaError(ValueError):
@@ -77,7 +104,7 @@ class CallIdentity:
 
     @property
     def call_id(self) -> str:
-        material = json.dumps(self.canonical(), sort_keys=True, separators=(",", ":"), allow_nan=False)
+        material = canonical_json(self.canonical())
         return "call-" + hashlib.sha256(material.encode("utf-8")).hexdigest()[:48]
 
 
