@@ -1,0 +1,18 @@
+{
+  "name": "autoteacher-g3b-trusted-bridge",
+  "version": "0.1.0",
+  "description": "G3-B B1: public Cordis LlmAdapter that forwards one assembled DSH request over the fixed AF_UNIX bridge socket and rebuilds only validated StreamChunks.",
+  "private": true,
+  "type": "module",
+  "main": "./lib/index.js",
+  "types": "./lib/index.d.ts",
+  "exports": {
+    ".": { "types": "./lib/index.d.ts", "default": "./lib/index.js" }
+  },
+  "engines": { "node": ">=22", "dsh": "0.2.2-rc.2" },
+  "scripts": { "build": "node scripts/build.mjs" },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "4.1.0",
+    "@deepseek-ai/dsh-llm": "0.2.2-rc.2"
+  }
+}

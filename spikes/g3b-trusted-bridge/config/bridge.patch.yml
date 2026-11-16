@@ -1,0 +1,39 @@
+# G3-B experimental overlay: all real providers/tools disabled; NO network,
+# NO Key. The only model route is the public Cordis LlmAdapter bridge under
+# /probe, which sends one assembled request over the fixed AF_UNIX socket
+# /work/g3b/bridge.sock. This is NOT a production profile and grants no Live
+# permission. B3 must add the Guard precheck overlay separately.
+- id: llm-deepseek
+  disabled: true
+- id: session-log-deepseek
+  config:
+    enabled: false
+- id: plugin-package-inventory-deepseek
+  disabled: true
+- id: compaction-basic
+  disabled: true
+- id: image-offload
+  disabled: true
+- id: tool-fs
+  disabled: true
+- id: tool-working-directory
+  disabled: true
+- id: persistent-bash
+  disabled: true
+- id: persistent-pwsh
+  disabled: true
+- id: terminal-bash
+  disabled: true
+- id: terminal-pwsh
+  disabled: true
+- id: pty
+  disabled: true
+- id: subprocess
+  disabled: true
+- id: jobs
+  disabled: true
+- insert:
+    - id: g3b-trusted-bridge-provider
+      name: /probe/runtime/bridge/lib/index.js
+    - id: offline-public-skill
+      name: /probe/runtime/skill/lib/index.js
