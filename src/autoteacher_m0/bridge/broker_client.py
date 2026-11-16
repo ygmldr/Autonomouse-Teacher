@@ -2,6 +2,7 @@
 from __future__ import annotations
 import json
 import subprocess
+import threading
 
 
 class BrokerClientError(RuntimeError):
@@ -16,21 +17,29 @@ class BrokerClient:
         self.timeout_s = timeout_s
         self.proc: subprocess.Popen | None = None
         self._seq = 0
+        self._lock = threading.RLock()
 
     def start(self) -> None:
-        if self.proc is not None:
-            return
-        self.proc = subprocess.Popen(
-            [self.python, "-B", "-m", "autoteacher_m0.accounting.broker",
-             "--config", self.config_path],
-            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            text=True, close_fds=True)
+        with self._lock:
+            if self.proc is not None:
+                return
+            self.proc = subprocess.Popen(
+                [self.python, "-B", "-m", "autoteacher_m0.accounting.broker",
+                 "--config", self.config_path],
+                stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                text=True, close_fds=True)
 
     def _request(self, op: str, **fields) -> dict:
+        with self._lock:
+            return self._request_locked(op, **fields)
+
+    def _request_locked(self, op: str, **fields) -> dict:
         if self.proc is None:
             raise BrokerClientError("BROKER_UNAVAILABLE")
         self._seq += 1
         message = {"v": 1, "id": f"b2-{op}-{self._seq}", "op": op, **fields}
+        if self.proc.poll() is not None:
+            raise BrokerClientError("BROKER_EXITED")
         try:
             self.proc.stdin.write(json.dumps(message, separators=(",", ":")) + "\n")
             self.proc.stdin.flush()
@@ -71,18 +80,19 @@ class BrokerClient:
         return self._request("snapshot")
 
     def close(self) -> None:
-        if self.proc is None:
-            return
-        proc = self.proc
-        self.proc = None
-        try:
-            if proc.stdin:
-                proc.stdin.close()
-            proc.wait(timeout=5)
-        except BaseException:
-            proc.kill()
-            proc.wait(timeout=5)
-        finally:
-            for stream in (proc.stdout, proc.stderr):
-                if stream:
-                    stream.close()
+        with self._lock:
+            if self.proc is None:
+                return
+            proc = self.proc
+            self.proc = None
+            try:
+                if proc.stdin:
+                    proc.stdin.close()
+                proc.wait(timeout=5)
+            except BaseException:
+                proc.kill()
+                proc.wait(timeout=5)
+            finally:
+                for stream in (proc.stdout, proc.stderr):
+                    if stream:
+                        stream.close()

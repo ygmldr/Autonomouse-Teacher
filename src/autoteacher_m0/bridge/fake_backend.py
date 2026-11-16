@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Mapping
@@ -31,8 +32,13 @@ class FakeBackend:
         self.frames: list[dict] = []
         self.sent_payload_digest: str | None = None
         self.last_receipt: FakeReceipt | None = None
+        self._lock = threading.RLock()
 
     def received_count(self) -> int:
+        with self._lock:
+            return self._received_count_locked()
+
+    def _received_count_locked(self) -> int:
         path = self.receipt_dir / "received-count.json"
         try:
             return int(json.loads(path.read_text())["count"])
@@ -40,6 +46,10 @@ class FakeBackend:
             return 0
 
     def send_exact_bytes(self, payload_bytes: bytes, nonce: str) -> FakeReceipt:
+        with self._lock:
+            return self._send_exact_bytes_locked(payload_bytes, nonce)
+
+    def _send_exact_bytes_locked(self, payload_bytes: bytes, nonce: str) -> FakeReceipt:
         import hashlib
         if len(payload_bytes) > 256 * 1024:
             raise ValueError("FRAME_TOO_LARGE")
@@ -70,4 +80,5 @@ class FakeBackend:
         return receipt
 
     def close(self) -> None:
-        self.frames = []
+        with self._lock:
+            self.frames = []

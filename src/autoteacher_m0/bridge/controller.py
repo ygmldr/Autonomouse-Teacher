@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 import sys
+import threading
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
@@ -75,6 +76,8 @@ class TrustedController:
         self.expected_uid = expected_uid
         self.instance_id = "ctl-" + uuid.uuid4().hex[:16]
         self.calls = 0
+        self._lock = threading.RLock()
+        self._cancel = threading.Event()
         if register_admission:
             self.attempts.register_admission(admission.admission_id, admission.sha256,
                                               admission.run_id, self.instance_id)
@@ -168,7 +171,14 @@ class TrustedController:
             call_id=prepared.call_id, request_digest=prepared.request_digest)
         return prepared, request
 
+    def cancel(self) -> None:
+        self._cancel.set()
+
     def handle_envelope(self, env: Envelope):
+        with self._lock:
+            yield from self._handle_envelope_unlocked(env)
+
+    def _handle_envelope_unlocked(self, env: Envelope):
         if not isinstance(env, Envelope):
             raise BridgeError("BAD_TYPE")
         try:

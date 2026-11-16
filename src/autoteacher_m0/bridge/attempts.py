@@ -1,12 +1,22 @@
 """Controller-owned durable attempt journal (G3-B, SQLite WAL/FULL)."""
 from __future__ import annotations
+import functools
 import json
 import sqlite3
+import threading
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
 ATTEMPTS_PATH = Path("/work/g3b/attempts.sqlite3")
+
+
+def _locked(method):
+    @functools.wraps(method)
+    def wrapper(self, *args, **kwargs):
+        with self._lock:
+            return method(self, *args, **kwargs)
+    return wrapper
 STATES = frozenset({"RESERVED", "CLAIMED", "ATTEMPT_STARTED", "RESPONSE_OBSERVED",
                     "SETTLED", "WORST_CASE_HELD", "SETTLEMENT_UNCERTAIN"})
 
@@ -19,7 +29,9 @@ class AttemptJournal:
     def __init__(self, sqlite_path: str | Path = ATTEMPTS_PATH):
         self.path = Path(sqlite_path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.conn = sqlite3.connect(str(self.path), timeout=10, isolation_level=None)
+        self._lock = threading.RLock()
+        self.conn = sqlite3.connect(str(self.path), timeout=10, isolation_level=None,
+                                    check_same_thread=False)
         self.conn.row_factory = sqlite3.Row
         self.conn.execute("PRAGMA journal_mode=WAL")
         self.conn.execute("PRAGMA synchronous=FULL")
@@ -45,6 +57,7 @@ CREATE TABLE IF NOT EXISTS g3b_admissions (
   controller_instance_id TEXT NOT NULL);
 """)
 
+    @_locked
     def register_admission(self, admission_id: str, admission_sha256: str,
                            run_id: str, controller_instance_id: str) -> None:
         try:
@@ -54,6 +67,7 @@ CREATE TABLE IF NOT EXISTS g3b_admissions (
         except sqlite3.IntegrityError as exc:
             raise ValueError("ADMISSION_REPLAYED") from exc
 
+    @_locked
     def begin_attempt(self, *, scope_id: str, call_id: str, reservation_id: str,
                       prepared_digest: str, payload_digest: str,
                       payload_length: int) -> str:
@@ -77,6 +91,7 @@ CREATE TABLE IF NOT EXISTS g3b_admissions (
             raise
         return attempt_id
 
+    @_locked
     def _update(self, attempt_id: str, state: str, **values) -> None:
         if state not in STATES:
             raise ValueError("invalid attempt state")
@@ -108,17 +123,20 @@ CREATE TABLE IF NOT EXISTS g3b_admissions (
     def mark_settlement_uncertain(self, attempt_id: str, *, reason: str) -> None:
         self._update(attempt_id, "SETTLEMENT_UNCERTAIN", reason=reason)
 
+    @_locked
     def state_for_call(self, call_id: str) -> str | None:
         row = self.conn.execute("SELECT state FROM g3b_attempts WHERE call_id=?",
                                 (call_id,)).fetchone()
         return None if row is None else row[0]
 
+    @_locked
     def next_logical_step(self, run_id: str) -> int:
         row = self.conn.execute(
             "SELECT COUNT(*) FROM g3b_attempts WHERE call_id IN "
             "(SELECT call_id FROM g3b_attempts)").fetchone()
         return int(row[0])
 
+    @_locked
     def reconcile_on_startup(self, receipt_dir: str | Path | None = None) -> list[dict]:
         rows = self.conn.execute(
             "SELECT * FROM g3b_attempts WHERE state IN "
@@ -143,5 +161,6 @@ CREATE TABLE IF NOT EXISTS g3b_admissions (
             "('ATTEMPT_STARTED','RESPONSE_OBSERVED','SETTLEMENT_UNCERTAIN')").fetchall()
         return [dict(row) for row in rows]
 
+    @_locked
     def close(self) -> None:
         self.conn.close()
