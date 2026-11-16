@@ -1,0 +1,22 @@
+# G3-B guard precheck patch (O-4 / task-96)
+- insert:
+    - id: runtime-budget-guard
+      name: /probe/native/guard/lib/index.js
+      config:
+        reserveMode: "precheck"
+        policy:
+          provider: offline-test-only-g3b
+          model: fixture-bridge-v1
+          brokerScopeId: fixed-offline-scope
+          maxOutputTokens: 1024
+          maxInputTokens: 2500000
+          maxProviderRetries: 0
+          purposes: [conversation]
+        broker:
+          python: /opt/python/bin/python3.11
+          pythonPath: /probe/src:/deps
+          configPath: /probe/config/guard-broker-policy.json
+          configSha256: "f19b541e03bb2aa635d98b72a0e7d294a9edee82070d40802122772d0e7e91f7"
+          cwd: /work
+          requestTimeoutMs: 5000
+          startupTimeoutMs: 8000

@@ -47,9 +47,11 @@ cp -a "$SPIKE/fake/fake_provider.py" "$STAGE3/fake/"
 cp -a "$SPIKE/run/." "$STAGE3/run/"
 cp -a "$SPIKE/config/bridge.patch.yml" "$SPIKE/config/broker.policy.template.json" \
       "$SPIKE/config/admission.template.json" "$SPIKE/config/controller.template.json" \
-      "$SPIKE/config/guard-precheck.patch.template.yml" "$STAGE3/config/"
+      "$SPIKE/config/guard-precheck.patch.template.yml" \
+      "$SPIKE/config/guard-broker-policy.json" "$SPIKE/config/guard.precheck.patch.yml" \
+      "$SPIKE/config/guard.reserve.patch.yml" "$STAGE3/config/"
 cp -a "$G3A/native/skill-lookup/lib/." "$STAGE3/runtime/skill/lib/"
-cp -a "$G3A/native/guard/lib/." "$STAGE3/native/guard/lib/"
+cp -a "$ROOT/plugins/runtime-budget-guard/lib/." "$STAGE3/native/guard/lib/"
 cp -a "$G3A/runtime/node_modules/." "$STAGE3/node_modules/"
 cp -a "$G3A/native-cache/." "$STAGE3/native-cache/"
 cp -a "$G3A/pkg-cache/." "$STAGE3/pkg-cache/"
