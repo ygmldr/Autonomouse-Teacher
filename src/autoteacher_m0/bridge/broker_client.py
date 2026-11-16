@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import subprocess
 import threading
+import uuid
 
 
 class BrokerClientError(RuntimeError):
@@ -17,6 +18,11 @@ class BrokerClient:
         self.timeout_s = timeout_s
         self.proc: subprocess.Popen | None = None
         self._seq = 0
+        # Durable broker journal outlives one controller process. Sequence-only
+        # ids (b2-reserve-1) collide with an earlier process's journal row and
+        # produce IDEMPOTENCY_CONFLICT on resume/restart; instance-scoped ids
+        # keep idempotency semantics without weakening broker checks.
+        self._instance = uuid.uuid4().hex[:16]
         self._lock = threading.RLock()
 
     def start(self) -> None:
@@ -37,7 +43,7 @@ class BrokerClient:
         if self.proc is None:
             raise BrokerClientError("BROKER_UNAVAILABLE")
         self._seq += 1
-        message = {"v": 1, "id": f"b2-{op}-{self._seq}", "op": op, **fields}
+        message = {"v": 1, "id": f"b2-{op}-{self._instance}-{self._seq}", "op": op, **fields}
         if self.proc.poll() is not None:
             raise BrokerClientError("BROKER_EXITED")
         try:
