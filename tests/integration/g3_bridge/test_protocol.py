@@ -359,3 +359,13 @@ def test_server_rejects_nonzero_request_seq():
         assert frame.payload["code"] == "SEQ_OUT_OF_ORDER"
     finally:
         running.close()
+
+
+def test_escaped_newlines_in_messages_are_allowed():
+    payload = request_payload()
+    payload["messages"] = [
+        {"role": "user", "content": [{"type": "text", "text": "line1\nline2\ttabbed"}]},
+    ]
+    validate_request_payload(payload)
+    env = request_env(payload=payload)
+    assert parse_envelope(encode_envelope(env) + b"\n").payload["messages"][0]["content"][0]["text"].endswith("tabbed")

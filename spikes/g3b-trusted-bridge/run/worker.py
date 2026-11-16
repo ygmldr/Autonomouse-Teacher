@@ -1,0 +1,146 @@
+"""G3-B real-DSH worker skeleton (container only; B1-01 path).
+
+Launcher-side ordering: generate fixed configs -> start B2 Controller -> wait
+fixed UDS -> start DeepSeekHarness(profile=sdk-minimal, patches=G3-B bridge
+config) -> run/resume -> collect SDK events/stderr + Controller/Fake/Broker
+evidence. No Key, no HTTP, no model.
+"""
+from __future__ import annotations
+import json
+import os
+from pathlib import Path
+import sys
+from typing import Any
+
+sys.path.insert(0, "/probe/src")
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import common  # noqa: E402
+
+EVIDENCE = Path("/evidence")
+BASE = Path("/work/g3b")
+
+
+def emit(kind: str, **data: Any) -> None:
+    print(json.dumps({"kind": kind, **data}, sort_keys=True), flush=True)
+
+
+def dsh_env() -> dict:
+    return {
+        "PATH": "/opt/python/bin:/usr/bin",
+        "HOME": str(BASE / "dsh-home"),
+        "PYTHONPATH": "/deps",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "TMPDIR": "/tmp",
+        "DSH_RUNTIME_MODE": "exe",
+        "DSH_RESOURCE_CACHE": "/work/resources",
+        "NARB_NATIVE_CACHE_DIR": "/probe/native-cache",
+        "PKG_NATIVE_CACHE_PATH": "/probe/pkg-cache",
+        "NO_COLOR": "1",
+    }
+
+
+def captured_tool_schemas() -> list[dict]:
+    path = EVIDENCE / "capture-tools.json"
+    if not path.exists():
+        return []
+    try:
+        doc = json.loads(path.read_text())
+    except Exception:
+        return []
+    return [{"name": item["name"], "sha256": item["sha256"]}
+            for item in doc.get("tools", []) if item.get("name") and item.get("sha256")]
+
+
+def run_dsh(*, prompt: str = "G3B_B3PREP_ECHO", session_id: str = "g3b-b3prep-session-001",
+            resume: bool = False, scenario: str = "ok_usage") -> dict:
+    assert os.getuid() == 65534, os.getuid()
+    assert not [name for name in os.environ if any(token in name.upper() for token in ("KEY", "TOKEN", "SECRET"))]
+    common.write_configs(run_id="g3b-b3prep-" + session_id,
+                         scenario=scenario,
+                         tool_schemas=captured_tool_schemas())
+    (BASE / "dsh-home").mkdir(parents=True, exist_ok=True)
+    (BASE / "workspace").mkdir(parents=True, exist_ok=True)
+    controller = common.start_controller()
+    started = common.utc()
+    try:
+        common.wait_socket()
+        from deepseek_harness import DeepSeekHarness  # noqa: E402
+        harness = DeepSeekHarness(
+            provider="offline-test-only-g3b",
+            model="fixture-bridge-v1",
+            max_tokens=256,
+            profile="sdk-minimal",
+            patches=("/probe/config/bridge.patch.yml",),
+            dsh_home=str(BASE / "dsh-home"),
+            cwd=str(BASE / "workspace"),
+            runtime_cwd=str(BASE / "workspace"),
+            env=dsh_env(),
+            initialize_timeout_seconds=20,
+            request_timeout_seconds=30,
+            shutdown_timeout_seconds=3,
+        )
+        result = None
+        error = None
+        try:
+            harness.start()
+            if resume:
+                session = harness.resume_session(session_id)
+                result = session.run(prompt)
+            else:
+                result = harness.run(prompt, session_id=session_id)
+        except Exception as exc:  # noqa: BLE001
+            error = {"type": type(exc).__name__, "message": str(exc)}
+        finally:
+            try:
+                harness.close()
+            except Exception as exc:  # noqa: BLE001
+                if error is None:
+                    error = {"type": type(exc).__name__, "message": str(exc)}
+        summary = {
+            "final_response": None if result is None else result.final_response,
+            "finish_reason": None if result is None else result.finish_reason,
+            "session_id": None if result is None else result.session_id,
+            "events": [] if result is None else result.events,
+            "error": error,
+            "started_utc": started,
+            "finished_utc": common.utc(),
+        }
+        evidence = common.collect_evidence(EVIDENCE, label="b3prep-dsh")
+        summary["evidence"] = evidence
+        return summary
+    finally:
+        common.stop_controller(controller)
+
+
+def main() -> int:
+    mode = "dsh"
+    prompt = "G3B_B3PREP_ECHO"
+    scenario = "ok_usage"
+    session = "g3b-b3prep-session-001"
+    args = sys.argv[1:]
+    while args:
+        arg = args.pop(0)
+        if arg == "--mode":
+            mode = args.pop(0)
+        elif arg == "--evidence":
+            global EVIDENCE
+            EVIDENCE = Path(args.pop(0))
+        elif arg == "--prompt":
+            prompt = args.pop(0)
+        elif arg == "--scenario":
+            scenario = args.pop(0)
+        elif arg == "--session":
+            session = args.pop(0)
+        else:
+            raise SystemExit(f"UNKNOWN_ARG:{arg}")
+    EVIDENCE.mkdir(parents=True, exist_ok=True)
+    if mode != "dsh":
+        raise SystemExit("worker supports only --mode dsh")
+    result = run_dsh(prompt=prompt, session_id=session, scenario=scenario)
+    (EVIDENCE / "dsh-result.json").write_text(json.dumps(result, indent=2, sort_keys=True) + "\n")
+    emit("result", **result)
+    return 0 if result.get("error") is None and result.get("final_response") else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

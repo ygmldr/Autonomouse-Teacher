@@ -1,0 +1,11 @@
+{
+  "admission_path": "/work/g3b/admission.json",
+  "broker_config_path": "/work/g3b/broker.json",
+  "python": "/opt/python/bin/python3.11",
+  "fake_script": "/probe/fake/fake_provider.py",
+  "fake_python": "/opt/python/bin/python3.11",
+  "receipt_dir": "/work/g3b/receipts",
+  "attempt_db": "/work/g3b/attempts.sqlite3",
+  "socket_path": "/work/g3b/bridge.sock",
+  "expected_uid": 65534
+}

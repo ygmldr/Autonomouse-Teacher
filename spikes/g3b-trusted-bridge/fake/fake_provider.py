@@ -18,7 +18,7 @@ def utc() -> str:
 
 
 def usage_for(mode: str) -> dict | None:
-    if mode == "ok_usage":
+    if mode in {"ok_usage", "tool_once", "tool_final"}:
         return {"inputTokens": 11, "cacheReadTokens": 2, "cacheWriteTokens": 0,
                 "outputTokens": 5, "reasoningTokens": 0, "totalTokens": 18}
     if mode == "partial_usage":
@@ -83,13 +83,28 @@ def main() -> int:
     elif mode == "no_usage":
         frames = [{"kind": "finish", "reason": {"kind": "stop"}}]
     elif mode == "tool_once":
-        frames = [{"kind": "chunk", "chunk": {"type": "tool-call-delta",
-                  "toolName": "skill_lookup", "arguments": "{}"}},
-                  {"kind": "finish", "reason": {"kind": "tool-calls"}}]
+        # Same public StreamChunk ordering as the G3-A tool-turn fixture: an
+        # explicit tool-call block is required for DSH to execute the tool.
+        call_id = "call-skill-lookup-1"
+        arguments = '{"skill_id":"binary_search"}'
+        frames = [
+            {"kind": "chunk", "chunk": {"type": "block-start", "index": 0,
+                                        "blockType": "tool-call"}},
+            {"kind": "chunk", "chunk": {"type": "tool-call-delta", "index": 0,
+                                        "id": call_id, "name": "skill_lookup",
+                                        "argumentsDelta": arguments}},
+            {"kind": "chunk", "chunk": {"type": "block-end", "index": 0,
+                                        "block": {"type": "tool-call", "id": call_id,
+                                                  "name": "skill_lookup",
+                                                  "arguments": arguments}}},
+            {"kind": "usage", "usage": receipt["usage"]},
+            {"kind": "finish", "reason": {"kind": "tool-calls"}},
+        ]
     elif mode == "error":
         frames = [{"kind": "finish", "reason": {"kind": "error"}}]
     else:
-        frames = [{"kind": "finish", "reason": {"kind": "stop"}}]
+        frames = [{"kind": "usage", "usage": receipt["usage"]},
+                  {"kind": "finish", "reason": {"kind": "stop"}}]
     for frame in frames:
         print(json.dumps(frame, sort_keys=True, separators=(",", ":")), flush=True)
     return 0

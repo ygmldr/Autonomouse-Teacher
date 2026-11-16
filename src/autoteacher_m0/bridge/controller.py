@@ -255,8 +255,13 @@ class TrustedController:
             self._crash("after_reserve_before_claim")
             request = EgressRequest(**{**request.__dict__, "reservation_id": reservation_id,
                                        "estimated_cost_usd": "0.001"})
+            # Each request tool has already been hash-checked against the
+            # launcher admission above; feed those exact verified tools to the
+            # EgressBoundary second allowlist (it cannot see admission hashes).
+            approved_tools = frozenset(canonical_json(tool) for tool in prepared.tools)
             decision = self.boundary.claim_dispatch_for_request(
-                prepared, request, expected_reservation_route_model=(ROUTE, MODEL))
+                prepared, request, expected_reservation_route_model=(ROUTE, MODEL),
+                approved_tool_schemas=approved_tools)
             if not decision.allowed or decision.permission is None:
                 raise BridgeError("CLAIM_DENIED")
             self._crash("after_claim_before_attempt_start")
@@ -377,6 +382,9 @@ def main(argv: list[str] | None = None) -> int:
     attempts = AttemptJournal(config["attempt_db"])
     controller = TrustedController(admission, broker=broker, fake=fake, attempts=attempts,
                                    expected_uid=config.get("expected_uid", 65534))
+    # B3 crash-reconcile: the Controller is the recovery authority. A restarted
+    # process must close persisted crash windows before serving new requests.
+    controller.reconcile_on_startup(config.get("receipt_dir"))
     server = BridgeServer(controller, config["socket_path"])
     try:
         server.serve_forever()

@@ -90,9 +90,13 @@ export interface GuardPolicyConfig {
   purposes: Purpose[]
 }
 
+export type ReserveMode = 'reserve' | 'precheck'
+
 export interface GuardConfig {
   policy: GuardPolicyConfig
   broker: BrokerPolicyConfig
+  /** O-4 approved additive mode; default reserve preserves PR1 bytes. */
+  reserveMode: ReserveMode
 }
 
 interface BrokerLimits {
@@ -190,7 +194,16 @@ function decimalString(value: unknown, where: string): string {
 
 function parseConfig(raw: unknown): { config: GuardConfig; fixed: FixedBrokerPolicy } {
   const top = object(raw, 'config')
-  exactKeys(top, ['policy', 'broker'], 'config')
+  const topKeys = Object.keys(top).sort()
+  if (topKeys.some(key => key !== 'policy' && key !== 'broker' && key !== 'reserveMode')
+      || !Object.hasOwn(top, 'policy') || !Object.hasOwn(top, 'broker')) {
+    fail('config must contain policy,broker and optional reserveMode')
+  }
+  const reserveModeRaw = top['reserveMode'] === undefined ? 'reserve' : top['reserveMode']
+  if (reserveModeRaw !== 'reserve' && reserveModeRaw !== 'precheck') {
+    fail('config.reserveMode must be "reserve" or "precheck"')
+  }
+  const reserveMode: ReserveMode = reserveModeRaw
   const policyRaw = object(top['policy'], 'config.policy')
   exactKeys(policyRaw, ['provider', 'model', 'brokerScopeId', 'maxOutputTokens', 'maxInputTokens', 'maxProviderRetries', 'purposes'], 'config.policy')
   const brokerRaw = object(top['broker'], 'config.broker')
@@ -230,7 +243,7 @@ function parseConfig(raw: unknown): { config: GuardConfig; fixed: FixedBrokerPol
   if (!HEX64.test(broker.configSha256)) fail('config.broker.configSha256 must be lowercase sha256')
   if (!broker.pythonPath.split(':').every(part => part.startsWith('/'))) fail('config.broker.pythonPath must be absolute colon-separated paths')
   const fixed = readFixedBrokerPolicy(broker.configPath, broker.configSha256, policy)
-  return { config: { policy, broker }, fixed }
+  return { config: { policy, broker, reserveMode }, fixed }
 }
 
 /** Read and validate the trusted broker startup policy file; it is never client text. */
@@ -752,8 +765,78 @@ export function apply(ctx: Context, rawConfig: unknown): void {
     return
   }
   const { config, fixed } = parsed
-  const broker = new BrokerClient(config.broker, fixed, config.policy)
-  ctx.effect(() => () => broker.shutdown(), 'runtime-budget-guard: broker child shutdown')
+  const precheck = config.reserveMode === 'precheck'
+  const broker = precheck ? null : new BrokerClient(config.broker, fixed, config.policy)
+  if (broker !== null) {
+    const reserveBroker = broker
+    ctx.effect(() => () => reserveBroker.shutdown(), 'runtime-budget-guard: broker child shutdown')
+  }
+  const bootBase = {
+    provider: config.policy.provider, model: config.policy.model,
+    broker_scope: fixed.scopeId,
+    broker_policy_sha256: config.broker.configSha256,
+    broker_python_hash: hashId(config.broker.python),
+    broker_config_hash: hashId(config.broker.configPath),
+    cwd_hash: hashId(config.broker.cwd),
+    max_input_bound: config.policy.maxInputTokens, max_output_bound: config.policy.maxOutputTokens,
+    max_provider_retries: config.policy.maxProviderRetries,
+    provider_auto_retry: 'disabled',
+    logical_stream_slots: 'every stream = one request + one step',
+    retry_field_semantics: 'attribution-only; no provider-internal retry quota',
+    task_id_scheme: 'rbg-' + 'sha256(NFC sessionId)[0:64]',
+    public_log_contract: 'allowlisted codes/numbers/booleans/hashed IDs only',
+    purposes: config.policy.purposes,
+  }
+  if (precheck) {
+    log('BOOT', {
+      provider: config.policy.provider, model: config.policy.model,
+      broker_scope: fixed.scopeId,
+      broker_db_path_hash: hashId(fixed.dbPath),
+      broker_policy_sha256: config.broker.configSha256,
+      broker_python_hash: hashId(config.broker.python),
+      broker_config_hash: hashId(config.broker.configPath),
+      cwd_hash: hashId(config.broker.cwd),
+      max_input_bound: config.policy.maxInputTokens, max_output_bound: config.policy.maxOutputTokens,
+      max_provider_retries: config.policy.maxProviderRetries,
+      provider_auto_retry: 'disabled',
+      logical_stream_slots: 'every stream = one request + one step',
+      retry_field_semantics: 'attribution-only; no provider-internal retry quota',
+      task_id_scheme: 'rbg-' + 'sha256(NFC sessionId)[0:64]',
+      public_log_contract: 'allowlisted codes/numbers/booleans/hashed IDs only',
+      purposes: config.policy.purposes,
+      reserve_mode: 'precheck',
+      broker_child: 'disabled',
+    })
+    ctx.on('llm/stream', async function* (options: GenerateOptions, next: () => AsyncIterable<StreamChunk>): AsyncIterable<StreamChunk> {
+      const providers = ctx.llm.listProviders().map(provider => provider.id)
+      const retryPolicy = ctx.llm.providerRetryPolicy(config.policy.provider)
+      let admission: Admission
+      try {
+        admission = admit(options, config, providers, retryPolicy)
+      } catch (error) {
+        log('STREAM_REFUSED', { phase: 'BEFORE_DISPATCH', code: safeErrorCode(error), reserve_mode: 'precheck' })
+        throw error
+      }
+      log('PRECHECK', {
+        session_id_hash: hashId(admission.sessionId), task_id: admission.taskId,
+        provider: config.policy.provider, model: config.policy.model,
+        input_bound: admission.inputBound, output_bound: admission.outputBound,
+        purpose: admission.purpose, reserve_mode: 'precheck',
+        broker_child: 'disabled',
+      })
+      try {
+        yield* next()
+      } finally {
+        log('ACCOUNTING_DELEGATED_TO_CONTROLLER', {
+          session_id_hash: hashId(admission.sessionId), task_id: admission.taskId,
+          reserve_mode: 'precheck', guard_reserved: false, guard_settled: false,
+          authority: 'controller-broker',
+        })
+      }
+    }, { prepend: true })
+    return
+  }
+  const reserveBroker = broker as BrokerClient
   log('BOOT', {
     provider: config.policy.provider, model: config.policy.model,
     broker_scope: fixed.scopeId,
@@ -785,7 +868,7 @@ export function apply(ctx: Context, rawConfig: unknown): void {
     let accountingStatus: AccountingStatus = 'RESERVED'
     let settlementError: Error | null = null
     try {
-      reservation = await broker.reserve(admission)
+      reservation = await reserveBroker.reserve(admission)
       const stream = next()
       for await (const chunk of stream) {
         if (chunk.type === 'usage') usage = chunk.usage
@@ -829,11 +912,11 @@ export function apply(ctx: Context, rawConfig: unknown): void {
     } finally {
       if (reservation !== null) {
         try {
-          const result = await broker.settle(admission, reservation.reservationId, usage, finish, failed)
+          const result = await reserveBroker.settle(admission, reservation.reservationId, usage, finish, failed)
           accountingStatus = result.accountingStatus
         } catch {
           accountingStatus = 'SETTLEMENT_UNCERTAIN'
-          broker.latchSettlementUncertain()
+          reserveBroker.latchSettlementUncertain()
           settlementError = new GuardUnavailable('RBG_SETTLEMENT_UNCERTAIN')
         }
       }

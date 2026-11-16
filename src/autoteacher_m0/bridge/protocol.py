@@ -104,14 +104,19 @@ def _check_tree(value: object, depth: int = 0) -> None:
         for key, item in value.items():
             if not isinstance(key, str):
                 _fail("BAD_TYPE", "non-string object key")
-            if any(ord(char) < 0x20 or ord(char) == 0x7F for char in key):
+            if any(ord(char) < 0x20 and char not in "\t\n\r" or ord(char) == 0x7F
+                   for char in key):
                 _fail("BAD_TYPE", "control character in key")
             _check_tree(item, depth + 1)
     elif isinstance(value, list):
         for item in value:
             _check_tree(item, depth + 1)
     elif isinstance(value, str):
-        if any(ord(char) < 0x20 or ord(char) == 0x7F for char in value):
+        # JSON framing is one physical line; escaped tab/LF/CR inside a JSON
+        # string are legal payload (DSH system-reminders contain newlines) and
+        # cannot break the wire frame. NUL/other C0 controls stay rejected.
+        if any((ord(char) < 0x20 and char not in "\t\n\r") or ord(char) == 0x7F
+               for char in value):
             _fail("BAD_TYPE", "control character in string")
     elif isinstance(value, (int, float, bool)) or value is None:
         if isinstance(value, float) and (value != value or value in (float("inf"), float("-inf"))):

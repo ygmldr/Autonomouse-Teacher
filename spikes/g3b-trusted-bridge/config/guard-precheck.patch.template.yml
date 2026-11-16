@@ -1,0 +1,9 @@
+# G3-B guard-precheck overlay template (NOT implemented by B3-prep).
+# Per design freeze O-4: B3 must first submit a minimal additive
+# `reserveMode: "precheck"` design/diff to Lead and obtain written approval.
+# This file is only a placeholder for the future patch; no Guard code changes
+# are made by B3-prep. The base bridge patch remains config/bridge.patch.yml.
+- id: runtime-budget-guard
+  config:
+    reserveMode: "precheck"   # REQUIRES Lead approval before activation
+    maxProviderRetries: 0
