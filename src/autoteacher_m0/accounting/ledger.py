@@ -304,7 +304,8 @@ class BudgetLedger:
                                    (self.scope_id,)).fetchone()[0]
         return {"total": total, "pending": pending, "completed": total - pending}
 
-    def journal_once(self, message_id: str, digest: str, operation) -> tuple[dict, bool]:
+    def journal_once(self, message_id: str, digest: str, operation,
+                     precheck=None) -> tuple[dict, bool]:
         """Atomically commit a trusted in-process operation plus its reply.
 
         No protocol accepts callbacks. A lost acknowledgement never reruns the
@@ -318,6 +319,12 @@ class BudgetLedger:
                 if previous[0] != digest:
                     raise ValueError("idempotency conflict")
                 return json.loads(previous[1]), True
+            if precheck is not None:
+                rejected = precheck(database)
+                if rejected is not None:
+                    # Rejection is returned without inserting a journal row; the
+                    # precheck and the decision are in the same transaction.
+                    return rejected, False
             response = operation(database)
             encoded = json.dumps(response, allow_nan=False, sort_keys=True, separators=(",", ":"))
             database.execute("INSERT INTO budget_broker_messages VALUES (?,?,?,?)",

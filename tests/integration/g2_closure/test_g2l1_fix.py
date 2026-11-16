@@ -5,6 +5,7 @@ synthetic providers elsewhere. No sockets, keys, real models or network.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import signal
 import sqlite3
@@ -941,3 +942,98 @@ def test_l11_diag_03_attempts_detail_multi_reservation() -> None:
     assert stream.attempts_detail[0]["reservation_id"] == "reservation-a"
     assert stream.attempts_detail[1]["reservation_id"] == "reservation-b"
     assert stream.attempts_detail[0]["claim_granted"] is True
+
+# ---------------------------------------------------------------- G2-L1.2 R-03..R-06
+class L11InterruptingClaimer:
+    def __init__(self, error: BaseException):
+        self.error = error
+        self.calls = 0
+
+    def claim_bound(self, request: EgressRequest, *, expected_route_id: str,
+                    expected_model: str) -> ClaimResult:
+        self.calls += 1
+        raise self.error
+
+
+class L11AsyncCancelledProvider:
+    def __init__(self):
+        self.calls = 0
+
+    def __call__(self, request: EgressRequest):
+        self.calls += 1
+        raise asyncio.CancelledError()
+
+
+def test_l11_r03_provider_cancelled_error_reclassified_then_raised() -> None:
+    provider = L11AsyncCancelledProvider()
+    boundary = boundary_with(AlwaysClaimer())
+    request_value = request()
+    permission = _permission(boundary, request_value)
+    transport = TrustedEgressTransport(boundary, provider)
+    with pytest.raises(asyncio.CancelledError):
+        transport.dispatch(request_value, permission)
+    assert provider.calls == 1
+    assert boundary.stream("g2l1-fix-stream").state is AttemptState.BILLABLE_UNKNOWN
+
+
+@pytest.mark.parametrize("error", [KeyboardInterrupt(), SystemExit(1), asyncio.CancelledError()])
+def test_l11_r03_claimer_interrupt_fail_closed_then_raised(error: BaseException) -> None:
+    prepared, actual = prepared_pair()
+    claimer = L11InterruptingClaimer(error)
+    boundary = boundary_with(claimer)
+    with pytest.raises(type(error)):
+        boundary.claim_dispatch_for_request(prepared, actual)
+    assert claimer.calls == 1
+
+
+def test_l11_r04_run_id_200_chars_rejected_before_claimer() -> None:
+    prepared, actual = prepared_pair()
+    long_prepared, long_actual = rebind(prepared, actual, run_id="x" * 200)
+    claimer = L11CountingBoundClaimer()
+    decision = boundary_with(claimer).claim_dispatch_for_request(long_prepared, long_actual)
+    assert decision.allowed is False and decision.permission is None
+    assert claimer.calls == 0
+
+
+def test_l11_r04_unicode_run_id_accepted() -> None:
+    prepared, actual = prepared_pair()
+    unicode_prepared, unicode_actual = rebind(prepared, actual, run_id="运行-中文-α")
+    claimer = L11CountingBoundClaimer()
+    decision = boundary_with(claimer).claim_dispatch_for_request(unicode_prepared, unicode_actual)
+    assert decision.allowed and decision.permission is not None
+    assert claimer.calls == 1
+
+
+@pytest.mark.parametrize("version", ["m0.prepared.v0", "m0.prepared.v999"])
+def test_l11_prep_06_self_consistent_unknown_schema_denied(version: str) -> None:
+    prepared, actual = prepared_pair()
+    bad, bad_actual = rebind(prepared, actual, schema_version=version)
+    # Ensure the request/digest/call id are self-consistent with the bad schema;
+    # only the schema version itself is wrong.
+    assert bad.request_digest == prepared_request_digest(bad)
+    assert bad_actual.request_digest == bad.request_digest
+    claimer = L11CountingBoundClaimer()
+    decision = boundary_with(claimer).claim_dispatch_for_request(bad, bad_actual)
+    assert decision.allowed is False and decision.permission is None
+    assert claimer.calls == 0
+
+
+def test_l11_jrn_05_concurrent_invalid_completions_do_not_grow_journal(tmp_path: Path) -> None:
+    path, _ledger = setup(tmp_path)
+    first, second = start_broker(path), start_broker(path)
+    try:
+        replies = [
+            send(first, {"v": 1, "id": "bad-concurrent-a", "op": "settle",
+                         "reservation_id": "missing-a",
+                         "usage": {"inputTokens": 1, "outputTokens": 1}}),
+            send(second, {"v": 1, "id": "bad-concurrent-b", "op": "settle",
+                          "reservation_id": "missing-b",
+                          "usage": {"inputTokens": 1, "outputTokens": 1}}),
+        ]
+        assert all(reply["code"] == "UNKNOWN_RESERVATION" for reply in replies)
+    finally:
+        stop(first)
+        stop(second)
+    with sqlite3.connect(tmp_path / "ledger.sqlite3") as database:
+        count = database.execute("SELECT COUNT(*) FROM budget_broker_messages").fetchone()[0]
+    assert count == 0

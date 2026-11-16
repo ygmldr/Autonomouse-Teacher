@@ -277,6 +277,29 @@ class BookkeepingBroker:
         return envelope(identity, ok=True, code="FAILED" if op == "fail" else "SETTLED",
                         reservation_id=request["reservation_id"], settlement=settlement, usage_mapping=mapping)
 
+    def _completion_precheck(self, database, request: dict) -> dict | None:
+        """Return an envelope to reject, or None; runs in journal transaction."""
+        row = database.execute(
+            "SELECT status,route_id,model,input_bound,output_bound,known_fee "
+            "FROM budget_reservations WHERE scope_id=? AND reservation_id=?",
+            (self.ledger.scope_id, request["reservation_id"])).fetchone()
+        identity = request["id"]
+        if row is None:
+            return envelope(identity, code="UNKNOWN_RESERVATION")
+        if row["status"] != "PENDING":
+            return envelope(identity, code="ALREADY_SETTLED")
+        policy = self.routes.get((row["route_id"], row["model"]))
+        if policy is None:
+            return envelope(identity, code="ROUTE_BLOCKED")
+        try:
+            official_usage(request["usage"], input_bound=row["input_bound"],
+                           output_bound=row["output_bound"],
+                           policy=policy.usage,
+                           known_fee=Decimal(row["known_fee"]))
+        except ValueError:
+            return envelope(identity, code="INVALID_USAGE")
+        return None
+
     def handle(self, message: object) -> dict:
         identity = None
         if isinstance(message, dict) and isinstance(message.get("id"), str) and _ID.fullmatch(message["id"]):
@@ -311,38 +334,14 @@ class BookkeepingBroker:
             # settled reservation is idempotent and must not add another journal
             # row/storage. Exact same-id replays still fall through to journal_once
             # so the original stored response (and duplicate flag) is preserved.
+            precheck = None
             if request["op"] in {"settle", "fail"}:
-                with self.ledger._transaction() as database:
-                    seen = database.execute(
-                        "SELECT digest,response_json FROM budget_broker_messages "
-                        "WHERE scope_id=? AND message_id=?",
-                        (self.ledger.scope_id, request["id"])).fetchone()
-                    if seen is None:
-                        # Reject unknown/invalid completions BEFORE journaling so
-                        # arbitrary new message ids cannot grow the journal without
-                        # bound. Exact same-id replays still go through journal_once
-                        # below to preserve the original stored response.
-                        row = database.execute(
-                            "SELECT status,route_id,model,input_bound,output_bound,known_fee "
-                            "FROM budget_reservations WHERE scope_id=? AND reservation_id=?",
-                            (self.ledger.scope_id, request["reservation_id"])).fetchone()
-                        if row is None:
-                            return envelope(identity, code="UNKNOWN_RESERVATION")
-                        if row["status"] != "PENDING":
-                            return envelope(identity, code="ALREADY_SETTLED")
-                        policy = self.routes.get((row["route_id"], row["model"]))
-                        if policy is None:
-                            return envelope(identity, code="ROUTE_BLOCKED")
-                        try:
-                            official_usage(request["usage"], input_bound=row["input_bound"],
-                                           output_bound=row["output_bound"],
-                                           policy=policy.usage,
-                                           known_fee=Decimal(row["known_fee"]))
-                        except ValueError:
-                            return envelope(identity, code="INVALID_USAGE")
+                def precheck(database):
+                    return self._completion_precheck(database, request)
             digest = hashlib.sha256(canonical(request).encode("utf-8")).hexdigest()
-            response, duplicate = self.ledger.journal_once(request["id"], digest,
-                                                          lambda db: self._operate(db, request))
+            response, duplicate = self.ledger.journal_once(
+                request["id"], digest, lambda db: self._operate(db, request),
+                precheck=precheck)
             if duplicate:
                 response["duplicate"] = True
                 if response["dispatch_allowed"]:

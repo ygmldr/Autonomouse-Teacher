@@ -9,6 +9,7 @@ may consume that permission and invoke the injected provider.
 """
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass, field
 from decimal import Decimal
 from enum import StrEnum
@@ -16,7 +17,9 @@ import hashlib
 import re
 from typing import Callable, Iterable, Mapping, Protocol, Sequence
 
-from autoteacher_m0.accounting.call_identity import canonical_json
+from autoteacher_m0.accounting.call_identity import (
+    IdentitySchemaError, canonical_json, validate_run_id,
+)
 from autoteacher_m0.contracts import ErrorCode, RuntimeFailure
 
 OPENCODE_GO_HOST = "opencode.ai"
@@ -176,6 +179,10 @@ def prepared_schema_error(prepared: PreparedProviderRequest) -> str | None:
             return PREPARED_SCHEMA_INVALID
         if name not in ("system",) and (not value or value != value.strip()):
             return PREPARED_SCHEMA_INVALID
+    try:
+        validate_run_id(prepared.run_id)
+    except IdentitySchemaError:
+        return PREPARED_SCHEMA_INVALID
     path = prepared.path
     if not isinstance(path, str) or not path.startswith("/") or "\\" in path or ".." in path or "%2e" in path.casefold():
         return PREPARED_SCHEMA_INVALID
@@ -491,6 +498,11 @@ class EgressBoundary:
                         evaluation, (BROKER_CLAIMER_BOUND_UNSUPPORTED,))
                 claim = bound(request, expected_route_id=expected_binding[0],
                               expected_model=expected_binding[1])
+        except (KeyboardInterrupt, SystemExit, asyncio.CancelledError):
+            # Fail closed and preserve cancellation/interrupt semantics; do not
+            # convert these into a normal BROKER_CLAIMER_ERROR response.
+            self._denied_decision(evaluation, ("CLAIM_INTERRUPTED",))
+            raise
         except BaseException as error:  # includes timeout/EOF/transport failures
             return self._denied_decision(
                 evaluation, (BROKER_CLAIMER_ERROR, f"CLAIM_ERROR:{type(error).__name__}"))
@@ -702,7 +714,7 @@ class TrustedEgressTransport:
         self.boundary = boundary
         self.provider = provider
         self.provider_calls = 0          # provider callable entry count (not HTTP attempts)
-        self.dispatch_count = 0          # confirmed completed provider returns
+        self.dispatch_count = 0          # provider callable entry/attempt-start count (including after-entry failures); not confirmed HTTP/completed returns
         self.attempt_started_count = 0
         self.denied_count = 0
         self.worst_case_usd = "0.003933"
@@ -750,7 +762,7 @@ class TrustedEgressTransport:
         self.provider_calls += 1
         try:
             result = selected(request)
-        except (KeyboardInterrupt, SystemExit):
+        except (KeyboardInterrupt, SystemExit, asyncio.CancelledError):
             self._started_failure(request, permission, "PROVIDER_INTERRUPTED",
                                   "provider_interrupted", worst_case_usd)
             raise

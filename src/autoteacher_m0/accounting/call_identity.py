@@ -62,6 +62,11 @@ def _bounded_text(value: object, name: str, maximum: int = 128) -> str:
     return value
 
 
+def validate_run_id(value: object) -> str:
+    """Reuse CallIdentity's bounded run_id rules (Unicode allowed, no controls)."""
+    return _bounded_text(value, "run_id")
+
+
 def is_call_id(value: object) -> bool:
     return isinstance(value, str) and CALL_ID_PATTERN.fullmatch(value) is not None
 
