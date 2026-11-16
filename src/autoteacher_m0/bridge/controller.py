@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import sys
 import uuid
 from dataclasses import dataclass
@@ -10,6 +11,7 @@ from pathlib import Path
 from typing import Mapping
 
 from autoteacher_m0.bridge.admission import Admission, AdmissionError, load_admission
+from autoteacher_m0.accounting.observation import ProviderObservation
 from autoteacher_m0.bridge.protocol import (
     ERROR_CODES, Envelope, validate_chunk_payload, validate_error_payload,
     validate_request_payload,
@@ -83,6 +85,23 @@ class TrustedController:
             allow_files=False, allow_images=False, allow_store=False),
             claimer=_BoundClaimer(broker))
         self.transport = TrustedEgressTransport(self.boundary, provider=None)
+
+    def _crash(self, hook: str) -> None:
+        """Test-only crash hook; disabled unless launcher sets both env vars."""
+        if os.environ.get("G3B_TEST_MODE") == "1" and os.environ.get("G3B_CRASH_HOOK") == hook:
+            os._exit(97)
+
+    def reconcile_on_startup(self, receipt_dir: str | None = None) -> list[dict]:
+        pending = self.attempts.reconcile_on_startup(receipt_dir)
+        for row in pending:
+            if row.get("state") in {"ATTEMPT_STARTED", "RESPONSE_OBSERVED"}:
+                if not row.get("receipt_id"):
+                    self.attempts.mark_settlement_uncertain(row["attempt_id"],
+                                                             reason="NO_RECEIPT_AFTER_CRASH")
+                else:
+                    self.attempts.mark_worst_case(row["attempt_id"],
+                                                   reason="RECEIPT_RECONCILED_NO_RESEND")
+        return self.attempts.reconcile_on_startup()
 
     def _prepare(self, payload: Mapping[str, object], step: int) -> tuple[PreparedProviderRequest, EgressRequest]:
         validate_request_payload(payload)
@@ -199,16 +218,19 @@ class TrustedController:
             if not reserved.get("ok"):
                 raise BridgeError(reserved.get("code", "BUDGET_DENIED"))
             reservation_id = reserved["reservation_id"]
+            self._crash("after_reserve_before_claim")
             request = EgressRequest(**{**request.__dict__, "reservation_id": reservation_id,
                                        "estimated_cost_usd": "0.001"})
             decision = self.boundary.claim_dispatch_for_request(
                 prepared, request, expected_reservation_route_model=(ROUTE, MODEL))
             if not decision.allowed or decision.permission is None:
                 raise BridgeError("CLAIM_DENIED")
+            self._crash("after_claim_before_attempt_start")
             attempt_id = self.attempts.begin_attempt(
                 scope_id=prepared.scope_id, call_id=prepared.call_id,
                 reservation_id=reservation_id, prepared_digest=prepared.request_digest,
                 payload_digest=payload_digest, payload_length=len(payload_bytes))
+            self._crash("after_attempt_start_before_fake_send")
             holder: dict[str, object] = {}
 
             def provider(_req):
@@ -222,6 +244,7 @@ class TrustedController:
 
             self.transport.dispatch(request, decision.permission, provider=provider)
             receipt = holder.get("receipt")
+            self._crash("after_fake_receive_before_response")
             if receipt is None or not isinstance(receipt, object) or not hasattr(receipt, "raw_sha256"):
                 self.attempts.mark_settlement_uncertain(attempt_id, reason="FAKE_RECEIPT_MISSING")
                 raise BridgeError("SETTLEMENT_UNCERTAIN")
@@ -231,36 +254,59 @@ class TrustedController:
                     or receipt.nonce != self.admission.admission_nonce):
                 self.attempts.mark_settlement_uncertain(attempt_id, reason="FAKE_RECEIPT_MISMATCH")
                 raise BridgeError("FAKE_RECEIPT_MISMATCH")
+            usage = receipt.usage
+            usage_map = usage if isinstance(usage, Mapping) else {}
+            def _num(key: str):
+                value = usage_map.get(key)
+                return value if type(value) is int and value >= 0 else None
+            complete = all(_num(k) is not None for k in
+                           ("inputTokens", "cacheReadTokens", "cacheWriteTokens", "outputTokens"))
+            if usage is None:
+                complete_state = "MISSING"
+            elif complete:
+                complete_state = "AUTHORITATIVE"
+            else:
+                complete_state = "PARTIAL"
+            observation = ProviderObservation.from_mapping({
+                "requested_route": ROUTE, "observed_route": ROUTE,
+                "model_reported": MODEL, "provider_request_id": receipt.receipt_id,
+                "usage_raw_hash": receipt.raw_sha256,
+                "input": _num("inputTokens"), "cache_read": _num("cacheReadTokens"),
+                "cache_write": _num("cacheWriteTokens"), "output": _num("outputTokens"),
+                "reasoning": _num("reasoningTokens"), "cost_estimate": None,
+                "cost_source": "synthetic_fixture_cost",
+                "error_kind": "none", "complete_or_uncertain": complete_state})
+            observation.validate_for_policy("inclusive")
+            observation_digest = hashlib.sha256(canonical_json(observation.to_mapping()).encode()).hexdigest()
             self.attempts.mark_response_observed(
                 attempt_id, receipt_id=receipt.receipt_id,
                 receipt_json=json.dumps({"receipt_id": receipt.receipt_id,
                                          "raw_sha256": receipt.raw_sha256,
                                          "raw_length": receipt.raw_length,
-                                         "mode": receipt.mode}, sort_keys=True))
-            usage = receipt.usage
-            if receipt.mode == "ok_usage" and isinstance(usage, Mapping):
-                settled = self.broker.settle(reservation_id=reservation_id, usage=dict(usage))
+                                         "mode": receipt.mode,
+                                         "observation_digest": observation_digest}, sort_keys=True))
+            self._crash("after_response_before_settlement")
+            camel = None
+            if usage_map:
+                camel = {key: usage_map[key] for key in
+                         ("inputTokens", "cacheReadTokens", "cacheWriteTokens",
+                          "outputTokens", "reasoningTokens", "totalTokens")
+                         if key in usage_map}
+            if complete_state == "AUTHORITATIVE":
+                settled = self.broker.settle(reservation_id=reservation_id, usage=camel)
                 if settled.get("ok"):
                     self.attempts.mark_settled(attempt_id, settlement_json=json.dumps(settled, sort_keys=True))
+                    self._crash("after_settlement_before_sdk_finish")
                     return ([{"kind": "chunk", "chunk": {"type": "text-delta", "index": 0, "text": "ok"}}]
-                            + list(receipt.frames) + [{"kind": "receipt", "payload": {
-                                "receipt_id": receipt.receipt_id,
-                                "raw_sha256": receipt.raw_sha256,
-                                "raw_length": receipt.raw_length}}])
+                            + [dict(frame, chunk={**frame["chunk"], "index": 0})
+                               if frame.get("kind") == "chunk" and "index" not in frame.get("chunk", {})
+                               else frame for frame in receipt.frames])
                 self.attempts.mark_settlement_uncertain(attempt_id, reason="SETTLE_REJECTED")
                 raise BridgeError("SETTLEMENT_UNCERTAIN")
-            # Known partial/missing/invalid usage: fail with known dimensions, hold worst case.
-            mapped = None
-            if isinstance(usage, Mapping) and "inputTokens" in usage:
-                mapped = {k: v for k, v in usage.items() if k in
-                          {"inputTokens", "cacheReadTokens", "cacheWriteTokens", "outputTokens"}}
-            failed = self.broker.fail(reservation_id=reservation_id, usage=mapped)
+            failed = self.broker.fail(reservation_id=reservation_id, usage=camel)
             if failed.get("ok"):
-                self.attempts.mark_worst_case(attempt_id, reason="USAGE_PARTIAL_OR_MISSING_OR_INVALID")
-                return [{"kind": "receipt", "payload": {"receipt_id": receipt.receipt_id,
-                                                         "raw_sha256": receipt.raw_sha256,
-                                                         "raw_length": receipt.raw_length}},
-                        {"kind": "finish", "reason": {"kind": "error"}}]
+                self.attempts.mark_worst_case(attempt_id, reason="USAGE_NOT_AUTHORITATIVE")
+                return [{"kind": "finish", "reason": {"kind": "error"}}]
             self.attempts.mark_settlement_uncertain(attempt_id, reason="FAIL_REJECTED")
             raise BridgeError("SETTLEMENT_UNCERTAIN")
         except (AdmissionError, BridgeError, BrokerClientError, ValueError) as exc:

@@ -1,5 +1,6 @@
 """Controller-owned durable attempt journal (G3-B, SQLite WAL/FULL)."""
 from __future__ import annotations
+import json
 import sqlite3
 import uuid
 from datetime import datetime, timezone
@@ -118,7 +119,25 @@ CREATE TABLE IF NOT EXISTS g3b_admissions (
             "(SELECT call_id FROM g3b_attempts)").fetchone()
         return int(row[0])
 
-    def reconcile_on_startup(self) -> list[dict]:
+    def reconcile_on_startup(self, receipt_dir: str | Path | None = None) -> list[dict]:
+        rows = self.conn.execute(
+            "SELECT * FROM g3b_attempts WHERE state IN "
+            "('ATTEMPT_STARTED','RESPONSE_OBSERVED','SETTLEMENT_UNCERTAIN')").fetchall()
+        if receipt_dir is not None:
+            import glob
+            for row in rows:
+                if row["state"] != "ATTEMPT_STARTED":
+                    continue
+                for path in glob.glob(str(Path(receipt_dir) / "rcpt-*.json")):
+                    try:
+                        doc = json.loads(Path(path).read_text())
+                    except Exception:
+                        continue
+                    if doc.get("raw_sha256") == row["payload_digest"]:
+                        self._update(row["attempt_id"], "RESPONSE_OBSERVED",
+                                     receipt_id=doc.get("receipt_id"),
+                                     receipt_json=json.dumps(doc, sort_keys=True))
+                        break
         rows = self.conn.execute(
             "SELECT * FROM g3b_attempts WHERE state IN "
             "('ATTEMPT_STARTED','RESPONSE_OBSERVED','SETTLEMENT_UNCERTAIN')").fetchall()

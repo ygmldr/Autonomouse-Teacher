@@ -1,6 +1,8 @@
 from __future__ import annotations
 import hashlib
 import json
+import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -185,3 +187,55 @@ def test_b2_07_attempt_journal_failure_prevents_fake(tmp_path: Path, monkeypatch
         broker.close()
         fake.close()
         attempts.close()
+
+
+# ---------------------------------------------------------------- crash hooks (subprocess)
+CRASH_CHILD = Path(__file__).resolve().parent / "_crash_child.py"
+
+
+def _crash_run(tmp_path: Path, hook: str):
+    env = {**os.environ, "G3B_TEST_MODE": "1", "G3B_CRASH_HOOK": hook,
+           "PYTHONPATH": "src:artifacts/foundation/deps"}
+    proc = subprocess.run([sys.executable, "-B", str(CRASH_CHILD), str(tmp_path)],
+                          env=env, capture_output=True, text=True, timeout=30)
+    return proc
+
+
+def _journal_state(tmp_path: Path) -> str | None:
+    import sqlite3
+    db = sqlite3.connect(tmp_path / "attempts.sqlite3")
+    try:
+        row = db.execute("SELECT state FROM g3b_attempts").fetchone()
+        return None if row is None else row[0]
+    finally:
+        db.close()
+
+
+def test_crash_after_claim_before_attempt_start_no_resend(tmp_path: Path) -> None:
+    proc = _crash_run(tmp_path, "after_claim_before_attempt_start")
+    assert proc.returncode == 97, (proc.stdout, proc.stderr)
+    assert (tmp_path / "receipts" / "received-count.json").exists() is False
+    assert _journal_state(tmp_path) is None
+
+
+def test_crash_after_attempt_start_before_fake_send_pending(tmp_path: Path) -> None:
+    proc = _crash_run(tmp_path, "after_attempt_start_before_fake_send")
+    assert proc.returncode == 97, (proc.stdout, proc.stderr)
+    assert _journal_state(tmp_path) == "ATTEMPT_STARTED"
+    counter = tmp_path / "receipts" / "received-count.json"
+    assert not counter.exists()
+    from autoteacher_m0.bridge.attempts import AttemptJournal
+    journal = AttemptJournal(tmp_path / "attempts.sqlite3")
+    try:
+        assert journal.reconcile_on_startup()[0]["state"] == "ATTEMPT_STARTED"
+    finally:
+        journal.close()
+
+
+def test_crash_after_fake_receive_before_response_receipt_persisted(tmp_path: Path) -> None:
+    proc = _crash_run(tmp_path, "after_fake_receive_before_response")
+    assert proc.returncode == 97, (proc.stdout, proc.stderr)
+    assert _journal_state(tmp_path) == "ATTEMPT_STARTED"
+    receipts = list((tmp_path / "receipts").glob("rcpt-*.json"))
+    assert len(receipts) == 1
+    assert json.loads(receipts[0].read_text())["raw_sha256"]
