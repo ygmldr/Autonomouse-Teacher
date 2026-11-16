@@ -72,7 +72,7 @@ def main() -> int:
     os.replace(tmpc, counter)
     frames = []
     if mode == "ok_usage":
-        frames = [{"kind": "chunk", "chunk": {"type": "text-delta", "text": "ok"}},
+        frames = [{"kind": "chunk", "chunk": {"type": "text-delta", "index": 0, "text": "ok"}},
                   {"kind": "usage", "usage": receipt["usage"]},
                   {"kind": "finish", "reason": {"kind": "stop"}}]
     elif mode == "partial_usage":

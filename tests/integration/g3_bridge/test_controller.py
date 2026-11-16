@@ -11,6 +11,7 @@ from autoteacher_m0.bridge.attempts import AttemptJournal
 from autoteacher_m0.bridge.broker_client import BrokerClient
 from autoteacher_m0.bridge.controller import TrustedController
 from autoteacher_m0.bridge.fake_backend import FakeBackend
+from autoteacher_m0.bridge.protocol import Envelope
 
 ROUTE = "offline-test-only-g3b"
 MODEL = "fixture-bridge-v1"
@@ -63,6 +64,23 @@ def _controller(tmp_path: Path, scenario: str = "ok_usage"):
     return controller, broker, fake, attempts
 
 
+def _env(payload):
+    return Envelope(v=1, kind="request", transport_id="tr-" + "a" * 32,
+                    seq=2, payload=payload, hash=None)
+
+
+def _frames(controller, payload):
+    result = []
+    for env in controller.handle_envelope(_env(payload)):
+        item = {"kind": env.kind, "payload": env.payload}
+        if "chunk" in env.payload:
+            item["chunk"] = env.payload["chunk"]
+        if "reason" in env.payload:
+            item["reason"] = env.payload["reason"]
+        result.append(item)
+    return result
+
+
 def _payload(**overrides):
     base = {"sessionId": "s1", "provider": ROUTE, "model": MODEL,
             "messages": [{"role": "user", "content": "hello"}], "tools": [],
@@ -74,8 +92,7 @@ def _payload(**overrides):
 def test_b2_01_success_chain_real_broker_and_fake(tmp_path: Path) -> None:
     controller, broker, fake, attempts = _controller(tmp_path)
     try:
-        frames = controller.handle_envelope(_payload())
-        assert any(frame["kind"] == "receipt" for frame in frames), frames
+        frames = _frames(controller, _payload())
         assert not any(frame["kind"] == "error" for frame in frames), frames
         receipt = fake.last_receipt
         assert receipt is not None and receipt.raw_sha256 == fake.sent_payload_digest
@@ -93,7 +110,7 @@ def test_b2_01_success_chain_real_broker_and_fake(tmp_path: Path) -> None:
 def test_b2_03_route_mismatch_zero_fake(tmp_path: Path) -> None:
     controller, broker, fake, attempts = _controller(tmp_path)
     try:
-        frames = controller.handle_envelope(_payload(provider="offline-test-only-other"))
+        frames = _frames(controller, _payload(provider="offline-test-only-other"))
         assert frames[0]["kind"] == "error"
         assert frames[0]["payload"]["code"] == "ROUTE_MISMATCH"
         assert fake.received_count() == 0
@@ -110,7 +127,7 @@ def test_b2_04_missing_admission_or_self_auth_zero_fake(tmp_path: Path) -> None:
     assert exc.value.code == "ADMISSION_MISSING"
     controller, broker, fake, attempts = _controller(tmp_path)
     try:
-        frames = controller.handle_envelope(_payload(call_id="call-" + "a" * 48))
+        frames = _frames(controller, _payload(call_id="call-" + "a" * 48))
         assert frames[0]["kind"] == "error"
         assert frames[0]["payload"]["code"] == "ADMISSION_SELF_AUTH_DENIED"
         assert fake.received_count() == 0
@@ -123,7 +140,7 @@ def test_b2_04_missing_admission_or_self_auth_zero_fake(tmp_path: Path) -> None:
 def test_b2_09_partial_usage_holds_without_zeroing(tmp_path: Path) -> None:
     controller, broker, fake, attempts = _controller(tmp_path, scenario="partial_usage")
     try:
-        frames = controller.handle_envelope(_payload())
+        frames = _frames(controller, _payload())
         assert any(frame["kind"] == "finish" and frame.get("reason", {}).get("kind") == "error"
                    for frame in frames), frames
         assert fake.received_count() == 1
@@ -160,7 +177,7 @@ def test_b2_07_attempt_journal_failure_prevents_fake(tmp_path: Path, monkeypatch
         def fail(*args, **kwargs):
             raise ValueError("ATTEMPT_JOURNAL_UNAVAILABLE")
         monkeypatch.setattr(attempts, "begin_attempt", fail)
-        frames = controller.handle_envelope(_payload())
+        frames = _frames(controller, _payload())
         assert frames[0]["kind"] == "error"
         assert fake.received_count() == 0
         monkeypatch.setattr(attempts, "begin_attempt", original)

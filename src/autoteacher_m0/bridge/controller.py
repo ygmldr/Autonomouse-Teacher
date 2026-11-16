@@ -9,12 +9,15 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Mapping
 
-from autoteacher_m0.bridge.admission import (
-    Admission, AdmissionError, load_admission, validate_request_payload,
+from autoteacher_m0.bridge.admission import Admission, AdmissionError, load_admission
+from autoteacher_m0.bridge.protocol import (
+    ERROR_CODES, Envelope, validate_chunk_payload, validate_error_payload,
+    validate_request_payload,
 )
 from autoteacher_m0.bridge.attempts import AttemptJournal
 from autoteacher_m0.bridge.broker_client import BrokerClient, BrokerClientError
 from autoteacher_m0.bridge.fake_backend import FakeBackend
+from autoteacher_m0.bridge.ipc_server import BridgeServer
 from autoteacher_m0.security.egress import (
     ClaimResult, EgressBoundary, EgressPolicy, EgressRequest,
     PreparedProviderRequest, TrustedEgressTransport, canonical_json,
@@ -123,20 +126,67 @@ class TrustedController:
             call_id=prepared.call_id, request_digest=prepared.request_digest)
         return prepared, request
 
-    def handle_envelope(self, payload: Mapping[str, object]) -> list[dict]:
+    def handle_envelope(self, env: Envelope):
+        if not isinstance(env, Envelope):
+            raise BridgeError("BAD_TYPE")
+        try:
+            validate_request_payload(env.payload)
+        except Exception as exc:
+            code = getattr(exc, "code", "REQUEST_INVALID")
+            if isinstance(env.payload, Mapping) and set(env.payload) & {
+                    "call_id", "reservation_id", "request_digest", "authorized", "admission"}:
+                code = "ADMISSION_SELF_AUTH_DENIED"
+            yield Envelope(1, "error", env.transport_id, env.seq + 1,
+                           validate_error_payload(code if code in ERROR_CODES else "REQUEST_INVALID"), None)
+            return
+        try:
+            frames = self._handle_payload(env.payload)
+        except Exception as exc:
+            code = getattr(exc, "code", "INTERNAL")
+            if code not in ERROR_CODES:
+                code = "INTERNAL"
+            yield Envelope(1, "error", env.transport_id, env.seq + 1,
+                           validate_error_payload(code), None)
+            return
+        seq = env.seq + 1
+        for frame in frames:
+            kind = frame.get("kind")
+            if kind == "receipt":
+                continue
+            if kind == "chunk":
+                payload = {"chunk": frame["chunk"]}
+                try:
+                    validate_chunk_payload(payload)
+                except Exception:
+                    yield Envelope(1, "error", env.transport_id, seq,
+                                   validate_error_payload("REQUEST_INVALID"), None)
+                    return
+            elif kind == "finish":
+                payload = {"reason": frame["reason"]}
+            elif kind == "error":
+                payload = frame["payload"]
+            else:
+                continue
+            yield Envelope(1, kind, env.transport_id, seq, payload, None)
+            seq += 1
+
+    def _handle_payload(self, payload: Mapping[str, object]) -> list[dict]:
         try:
             if self.calls >= self.admission.max_calls:
                 raise BridgeError("BUDGET_DENIED")
             step = self.calls
             self.calls += 1
             prepared, request = self._prepare(payload, step)
+            mode = self.admission.fake_scenario
+            if mode == "tool":
+                mode = "tool_once" if step == 0 else "tool_final"
             fake_payload = {
                 "schema": "m0.g3b.fake.v1", "call_id": prepared.call_id,
                 "prepared_digest": prepared.request_digest, "route_id": ROUTE,
                 "model": MODEL, "messages": list(prepared.messages),
                 "tools": list(prepared.tools), "system": prepared.system,
                 "max_output_tokens": prepared.max_output_tokens, "stream": True,
-                "mode": self.admission.fake_scenario,
+                "mode": mode,
                 "nonce": self.admission.admission_nonce,
             }
             payload_bytes = canonical_json(fake_payload).encode("utf-8")
@@ -159,15 +209,24 @@ class TrustedController:
                 scope_id=prepared.scope_id, call_id=prepared.call_id,
                 reservation_id=reservation_id, prepared_digest=prepared.request_digest,
                 payload_digest=payload_digest, payload_length=len(payload_bytes))
-            outcome = self.transport.dispatch(request, decision.permission,
-                                              provider=lambda _req: {"status": 200,
-                                                                     "usage": None,
-                                                                     "error": None})
-            if outcome.get("state") != "SETTLED_USAGE":
-                # Provider callable above is a stub; actual Fake send is below.
-                pass
-            receipt = self.fake.send_exact_bytes(payload_bytes)
+            holder: dict[str, object] = {}
+
+            def provider(_req):
+                if hashlib.sha256(payload_bytes).hexdigest() != payload_digest:
+                    raise ValueError("FAKE_RECEIPT_MISMATCH")
+                rec = self.fake.send_exact_bytes(payload_bytes)
+                holder["receipt"] = rec
+                holder["sent"] = self.fake.sent_payload_digest
+                mapped_usage = rec.usage if isinstance(rec.usage, Mapping) else None
+                return {"status": 200, "usage": mapped_usage, "error": None}
+
+            self.transport.dispatch(request, decision.permission, provider=provider)
+            receipt = holder.get("receipt")
+            if receipt is None or not isinstance(receipt, object) or not hasattr(receipt, "raw_sha256"):
+                self.attempts.mark_settlement_uncertain(attempt_id, reason="FAKE_RECEIPT_MISSING")
+                raise BridgeError("SETTLEMENT_UNCERTAIN")
             if (receipt.raw_sha256 != payload_digest
+                    or holder.get("sent") != payload_digest
                     or receipt.raw_length != len(payload_bytes)
                     or receipt.nonce != self.admission.admission_nonce):
                 self.attempts.mark_settlement_uncertain(attempt_id, reason="FAKE_RECEIPT_MISMATCH")
@@ -183,7 +242,7 @@ class TrustedController:
                 settled = self.broker.settle(reservation_id=reservation_id, usage=dict(usage))
                 if settled.get("ok"):
                     self.attempts.mark_settled(attempt_id, settlement_json=json.dumps(settled, sort_keys=True))
-                    return ([{"kind": "chunk", "chunk": {"type": "text-delta", "text": "ok"}}]
+                    return ([{"kind": "chunk", "chunk": {"type": "text-delta", "index": 0, "text": "ok"}}]
                             + list(receipt.frames) + [{"kind": "receipt", "payload": {
                                 "receipt_id": receipt.receipt_id,
                                 "raw_sha256": receipt.raw_sha256,
@@ -223,17 +282,13 @@ def main(argv: list[str] | None = None) -> int:
     attempts = AttemptJournal(config["attempt_db"])
     controller = TrustedController(admission, broker=broker, fake=fake, attempts=attempts,
                                    expected_uid=config.get("expected_uid", 65534))
-    for line in sys.stdin:
-        try:
-            payload = json.loads(line)
-        except json.JSONDecodeError:
-            print(json.dumps({"kind": "error", "payload": {"code": "REQUEST_INVALID"}}), flush=True)
-            continue
-        for frame in controller.handle_envelope(payload):
-            print(json.dumps(frame, sort_keys=True, separators=(",", ":")), flush=True)
-    broker.close()
-    fake.close()
-    attempts.close()
+    server = BridgeServer(controller, config["socket_path"])
+    try:
+        server.serve_forever()
+    finally:
+        broker.close()
+        fake.close()
+        attempts.close()
     return 0
 
 
