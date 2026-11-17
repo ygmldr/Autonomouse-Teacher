@@ -33,6 +33,7 @@ const MAX_REQUEST_BYTES = 262_144
 const MAX_RESPONSE_BYTES = 65_536
 const MAX_TOTAL_RESPONSE_BYTES = 1_048_576
 const MAX_CHUNKS = 256
+const MAX_QUEUE_LINES = MAX_CHUNKS + 2
 const REQUEST_DEADLINE_MS = 30_000
 const MAX_JSON_DEPTH = 32
 const BLOCK_TYPES = new Set(['text', 'reasoning', 'image', 'file', 'tool-call',
@@ -85,6 +86,19 @@ function depth(value: unknown, level = 0): number {
   return level
 }
 
+function responseDepth(value: unknown, level = 0): number {
+  if (level > MAX_JSON_DEPTH) invalidResponse('G3B_BRIDGE_DEPTH')
+  if (Array.isArray(value)) {
+    return value.reduce<number>((max: number, item: unknown) =>
+      Math.max(max, responseDepth(item, level + 1)), level)
+  }
+  if (record(value)) {
+    return Object.values(value).reduce<number>((max: number, item: unknown) =>
+      Math.max(max, responseDepth(item, level + 1)), level)
+  }
+  return level
+}
+
 function encodeEnvelope(kind: string, transportId: string, seq: number, payload: Json): string {
   const payloadBytes = Buffer.from(canonicalJson(payload), 'utf8')
   const hash = createHash('sha256').update(payloadBytes).digest('hex')
@@ -100,6 +114,7 @@ function decodeEnvelope(line: string): Json {
     invalidResponse('G3B_BRIDGE_BAD_JSON')
   }
   if (!record(value)) invalidResponse('G3B_BRIDGE_ENVELOPE_NOT_OBJECT')
+  responseDepth(value)
   const keys = Object.keys(value)
   const allowed = new Set(['v', 'kind', 'transport_id', 'seq', 'payload', 'hash'])
   if (keys.some(key => !allowed.has(key))) invalidResponse('G3B_BRIDGE_UNKNOWN_ENVELOPE_FIELD')
@@ -239,6 +254,8 @@ class FrameQueue {
   #waiters: Array<{ resolve: (line: string | null) => void; reject: (error: Error) => void }> = []
   #closed = false
   #failure: Error | null = null
+  #lineCount = 0
+  #queuedBytes = 0
 
   push(data: Buffer): void {
     if (this.#closed) return
@@ -253,6 +270,16 @@ class FrameQueue {
       this.#buffer = this.#buffer.subarray(index + 1)
       if (lineBuffer.length > MAX_RESPONSE_BYTES) {
         this.fail(new Error('G3B_BRIDGE_LINE_TOO_LARGE'))
+        return
+      }
+      this.#lineCount += 1
+      this.#queuedBytes += lineBuffer.length + 1
+      if (this.#lineCount > MAX_QUEUE_LINES) {
+        this.fail(new Error('G3B_BRIDGE_QUEUE_LINES_EXCEEDED'))
+        return
+      }
+      if (this.#queuedBytes > MAX_TOTAL_RESPONSE_BYTES) {
+        this.fail(new Error('G3B_BRIDGE_QUEUE_BYTES_EXCEEDED'))
         return
       }
       const line = lineBuffer.toString('utf8')
@@ -273,7 +300,17 @@ class FrameQueue {
     if (this.#closed) return
     this.#closed = true
     this.#failure = error
+    this.#lines = []
+    this.#buffer = Buffer.alloc(0)
     while (this.#waiters.length > 0) this.#waiters.shift()!.reject(error)
+  }
+
+  close(reason = 'G3B_BRIDGE_CLOSED'): void {
+    if (this.#closed) return
+    this.#closed = true
+    this.#lines = []
+    this.#buffer = Buffer.alloc(0)
+    while (this.#waiters.length > 0) this.#waiters.shift()!.reject(new Error(reason))
   }
 
   next(): Promise<string | null> {
@@ -326,6 +363,7 @@ export class BridgeAdapter extends LlmAdapter {
     const cleanup = (): void => {
       signal.removeEventListener('abort', onAbort)
       clearTimeout(deadline)
+      queue.close()
       socket.destroy()
     }
     const sendCancel = (reason: 'aborted' | 'timeout'): void => {

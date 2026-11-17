@@ -37,7 +37,41 @@ ERROR_CODES = frozenset({
     "ATTEMPT_ALREADY_STARTED", "FAKE_UNAVAILABLE", "FAKE_IO_ERROR",
     "FAKE_RECEIPT_MISMATCH", "USAGE_INVALID", "SETTLEMENT_UNCERTAIN",
     "CANCELLED", "INTERNAL",
+    # G3-C additive, frozen Broker abstraction codes (raw Broker codes such as
+    # CALL_ID_CONFLICT must never surface as a generic client UNKNOWN_FIELD).
+    "BROKER_CALL_ID_CONFLICT", "BROKER_IDEMPOTENCY_CONFLICT",
+    "BROKER_ALREADY_SETTLED", "BROKER_ALREADY_FAILED", "BROKER_INVALID_USAGE",
+    "BROKER_ERROR", "BROKER_TIMEOUT", "DEADLINE_EXCEEDED",
+    "TOO_MANY_CONNECTIONS",
 })
+
+# Deliberately finite: raw Broker protocol codes are implementation details.
+# They are mapped to the frozen IPC abstraction before an Envelope is built.
+BROKER_ERROR_CODE_MAP = {
+    "CALL_ID_CONFLICT": "BROKER_CALL_ID_CONFLICT",
+    "IDEMPOTENCY_CONFLICT": "BROKER_IDEMPOTENCY_CONFLICT",
+    "ALREADY_SETTLED": "BROKER_ALREADY_SETTLED",
+    "ALREADY_FAILED": "BROKER_ALREADY_FAILED",
+    "INVALID_USAGE": "BROKER_INVALID_USAGE",
+    "INTERNAL_ERROR": "BROKER_ERROR",
+}
+
+
+def normalize_broker_error_code(code: object) -> str:
+    """Map one raw Broker code to a frozen IPC code (unknown -> BROKER_ERROR).
+
+    Fail-closed by construction: no raw/unknown Broker string can become a
+    success or a client-side UNKNOWN_FIELD. Codes that are already valid IPC
+    codes are preserved so an additive Broker-side code can be surfaced.
+    """
+    if not isinstance(code, str):
+        return "BROKER_ERROR"
+    mapped = BROKER_ERROR_CODE_MAP.get(code)
+    if mapped is not None:
+        return mapped
+    if code in ERROR_CODES:
+        return code
+    return "BROKER_ERROR"
 
 _TRANSPORT_ID = re.compile(r"tr-[0-9a-f]{32}\Z", re.ASCII)
 _HEX64 = re.compile(r"[0-9a-f]{64}\Z", re.ASCII)
@@ -268,7 +302,8 @@ def _validate_ack(payload: dict[str, Any]) -> None:
         _fail("BAD_TYPE", "ack.code")
 
 
-def _validate_finish(payload: dict[str, Any]) -> None:
+def validate_finish_payload(payload: dict[str, Any]) -> None:
+    """Validate the terminal finish schema (error/aborted require failure)."""
     if set(payload) != {"reason"}:
         _fail("UNKNOWN_FIELD", "finish")
     reason = payload["reason"]
@@ -325,7 +360,7 @@ _VALIDATORS = {
     "request": validate_request_payload,
     "ack": _validate_ack,
     "chunk": validate_chunk_payload,
-    "finish": _validate_finish,
+    "finish": validate_finish_payload,
     "error": _validate_error,
     "cancel": _validate_cancel,
     "receipt": _validate_receipt,
@@ -412,7 +447,9 @@ def validate_error_payload(code: str, message: str = "") -> dict[str, Any]:
 
 
 __all__ = [
-    "ERROR_CODES", "Envelope", "canonical_payload_bytes", "encode_envelope",
+    "BROKER_ERROR_CODE_MAP", "ERROR_CODES", "Envelope",
+    "canonical_payload_bytes", "encode_envelope", "normalize_broker_error_code",
     "parse_envelope", "payload_digest", "validate_chunk_payload",
-    "validate_error_payload", "validate_request_payload",
+    "validate_error_payload", "validate_finish_payload",
+    "validate_request_payload",
 ]

@@ -6,13 +6,13 @@ import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { mkdirSync, readFileSync, rmSync, existsSync } from 'node:fs'
 import { test } from 'node:test'
-import { pathToFileURL } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { Context } from '@deepseek-ai/cordis'
 import LlmRuntime from '@deepseek-ai/dsh-llm'
 const bridge = await import(pathToFileURL('/probe/lib/index.js').href)
 
 const PYTHON = '/opt/python/bin/python3.11'
-const STUB = '/src/test/stub_controller.py'
+const STUB = fileURLToPath(new URL('./stub_controller.py', import.meta.url))
 const SOCKET = '/work/g3b/bridge.sock'
 const BASE = '/work/g3b'
 
@@ -110,6 +110,45 @@ test('adapter rejects malformed JSON frames', async () => {
 
 test('adapter rejects oversized response frames without unbounded buffering', async () => {
   const proc = await startStub('large_frame')
+  try {
+    const adapter = new bridge.BridgeAdapter()
+    await assert.rejects(collect(adapter, options(new AbortController().signal)),
+      error => error.code === 'INVALID_RESPONSE')
+  } finally {
+    await stopStub(proc)
+  }
+})
+
+test('adapter surfaces additive BROKER_* rejection codes', async () => {
+  const proc = await startStub('broker_conflict')
+  try {
+    const adapter = new bridge.BridgeAdapter()
+    await assert.rejects(collect(adapter, options(new AbortController().signal)),
+      error => {
+        assert.equal(error.code, 'SERVER')
+        assert.equal(error.message, 'G3B_BRIDGE_BROKER_CALL_ID_CONFLICT')
+        return true
+      })
+  } finally {
+    await stopStub(proc)
+  }
+})
+
+test('adapter bounds queued lines and burst response bytes', async () => {
+  for (const mode of ['line_flood', 'total_bytes']) {
+    const proc = await startStub(mode)
+    try {
+      const adapter = new bridge.BridgeAdapter()
+      await assert.rejects(collect(adapter, options(new AbortController().signal)),
+        error => error.code === 'INVALID_RESPONSE')
+    } finally {
+      await stopStub(proc)
+    }
+  }
+})
+
+test('adapter rejects over-depth response payloads', async () => {
+  const proc = await startStub('deep_payload')
   try {
     const adapter = new bridge.BridgeAdapter()
     await assert.rejects(collect(adapter, options(new AbortController().signal)),

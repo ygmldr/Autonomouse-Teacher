@@ -83,6 +83,38 @@ def main() -> int:
                                           "blockType": "text"}}))
             seq += 1
             time.sleep(30)
+        elif MODE == "broker_conflict":
+            conn.sendall(frame("error", transport, seq,
+                               {"code": "BROKER_CALL_ID_CONFLICT",
+                                "message": "BROKER_CALL_ID_CONFLICT",
+                                "retryable": False}))
+        elif MODE == "line_flood":
+            payloads = []
+            for _ in range(300):
+                payloads.append(frame("chunk", transport, seq,
+                                      {"chunk": {"type": "text-delta",
+                                                 "index": 0, "text": "x"}}))
+                seq += 1
+            conn.sendall(b"".join(payloads))
+        elif MODE == "total_bytes":
+            payloads = []
+            for _ in range(20):
+                payloads.append(frame("chunk", transport, seq,
+                                      {"chunk": {"type": "text-delta",
+                                                 "index": 0,
+                                                 "text": "x" * 60000}}))
+                seq += 1
+            conn.sendall(b"".join(payloads))
+        elif MODE == "deep_payload":
+            deep = {}
+            cursor = deep
+            for _ in range(40):
+                cursor["x"] = {}
+                cursor = cursor["x"]
+            conn.sendall(frame("chunk", transport, seq,
+                               {"chunk": {"type": "text-delta", "index": 0,
+                                          "text": "deep"},
+                                "extra": deep}))
         else:
             conn.sendall(frame("error", transport, seq,
                                {"code": "INTERNAL", "message": "STUB_MODE_UNKNOWN",
