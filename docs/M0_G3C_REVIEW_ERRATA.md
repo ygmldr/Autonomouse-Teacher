@@ -78,7 +78,7 @@ v1 裁定 `PARTIAL` 的理由不是产品语义失败：Reviewer 在自己的 11
 
 ### 3.1 本归档的独立回归实测（供二次复核参照，不是二次裁定）
 
-本归档在 **`b2f6af0` 源码**上重跑了回归（docs 工作区为归档前的 `bea0fc3`；最终 docs 归档 commit 见 Packet v2 `manifest.docs_sha`），原始日志写在新文件 `artifacts/g3c/regression/pr1-*.log`（不覆盖旧日志）：
+本归档在 **`b2f6af0` 源码**上重跑了回归（源码 HEAD 为 `b2f6af0`；运行期间 docs 工作区已含最终归档内容，docs HEAD 仍为 `bea0fc3`，随后由最终 docs commit 固化），原始日志写在新文件 `artifacts/g3c/regression/pr1-*.log`（不覆盖旧日志）：
 
 | 项 | 实测 | 说明 |
 |---|---|---|
