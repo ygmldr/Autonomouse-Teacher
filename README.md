@@ -1,4 +1,6 @@
 # Autonomous Teacher — M0
+> 安全策略与密钥扫描：[SECURITY.md](SECURITY.md)。
+
 
 依据 [v0.4 任务书](<docs/Autonomous_Teacher_M0_v04.md>) 的离线优先技术验证设施，不是教学产品。当前总体 **DECISION PENDING**；没有真实模型调用，也没有人类安全/路由批准。
 
