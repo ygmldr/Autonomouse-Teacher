@@ -388,6 +388,7 @@ def copy_d2(out: Path) -> None:
         source = D2_PROBE_SOURCE.get(case)
         if source and (probe_root / source).is_file():
             copy_file(probe_root / source, dst / "attack_source.py")
+            copy_file(probe_root / "probe_common.py", dst / "probe_common.py")
         else:
             write_text(dst / "attack_source.md",
                        f"# {case} attack source\n\n"
