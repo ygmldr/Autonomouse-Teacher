@@ -1,0 +1,27 @@
+{
+  "schema": "m0.g3b.admission.v1",
+  "admission_id": "{{ADMISSION_ID}}",
+  "scope_id": "fixed-offline-scope",
+  "run_id": "{{RUN_ID}}",
+  "synthetic": true,
+  "route": {
+    "route_id": "offline-test-only-g3b",
+    "provider": "offline-test-only-g3b",
+    "model": "fixture-bridge-v1"
+  },
+  "tool_schemas": {{TOOL_SCHEMAS}},
+  "limits": {
+    "max_calls": 8,
+    "max_attempts": 1,
+    "max_input_tokens": 100000,
+    "max_output_tokens": 1024,
+    "deadline_ms": 30000
+  },
+  "fake_scenario": "{{FAKE_SCENARIO}}",
+  "expiry_utc": "{{EXPIRY_UTC}}",
+  "launcher": {
+    "uid": 65534,
+    "container": true,
+    "admission_nonce": "{{NONCE}}"
+  }
+}

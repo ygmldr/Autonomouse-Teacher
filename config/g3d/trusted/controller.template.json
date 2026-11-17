@@ -1,0 +1,14 @@
+{
+  "admission_path": "/work/state/admission.json",
+  "broker_config_path": "/work/state/broker.json",
+  "fake_script": "/project/fake/fake_provider.py",
+  "receipt_dir": "/work/state/receipts",
+  "attempt_db": "/work/state/attempts.sqlite3",
+  "socket_path": "/work/g3b/bridge.sock",
+  "python": "/opt/python/bin/python3.11",
+  "fake_python": "/opt/python/bin/python3.11",
+  "expected_uid": 65534,
+  "socket_mode": 432,
+  "socket_gid": null,
+  "expected_peer_uid": 65534
+}

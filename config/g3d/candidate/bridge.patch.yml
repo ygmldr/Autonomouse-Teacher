@@ -1,0 +1,40 @@
+# G3-D1-B candidate overlay: all real providers/tools stay disabled; NO Key and
+# NO network. The only model route is the public LlmAdapter bridge that sends one
+# assembled request over the fixed AF_UNIX path /work/g3b/bridge.sock.
+#
+# This file is part of the candidate stage (read-only at runtime). It must never
+# reference the trusted stage (/project/src) or trusted state.
+- id: llm-deepseek
+  disabled: true
+- id: session-log-deepseek
+  config:
+    enabled: false
+- id: plugin-package-inventory-deepseek
+  disabled: true
+- id: compaction-basic
+  disabled: true
+- id: image-offload
+  disabled: true
+- id: tool-fs
+  disabled: true
+- id: tool-working-directory
+  disabled: true
+- id: persistent-bash
+  disabled: true
+- id: persistent-pwsh
+  disabled: true
+- id: terminal-bash
+  disabled: true
+- id: terminal-pwsh
+  disabled: true
+- id: pty
+  disabled: true
+- id: subprocess
+  disabled: true
+- id: jobs
+  disabled: true
+- insert:
+    - id: g3b-trusted-bridge-provider
+      name: /project/runtime/bridge/lib/index.js
+    - id: offline-public-skill
+      name: /project/runtime/skill/lib/index.js
