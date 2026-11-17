@@ -10,7 +10,6 @@ from __future__ import annotations
 import csv
 import json
 import subprocess
-import sys
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 from pathlib import Path
@@ -74,6 +73,18 @@ EVIDENCE_ALIAS = {
     "C1-02": ["usage-error", "usage-no-usage", "usage-partial", "usage-invalid", "usage-eof"],
     "C1-04": ["probe-replay"],
 }
+
+
+# Cases whose only dynamic evidence is host-level pytest (real sockets/Broker/
+# Fake children, but not a real-DSH run). The matrix must never imply DSH.
+HOST_ONLY = {
+    "C1-01B", "C1-01C", "C1-03B", "C1-03D", "C2-03A", "C2-03B", "C2-03C",
+    "C2-03D", "C2-03E", "C2-04", "C3-01A", "C3-01E", "C3-02D", "C3-02E",
+    "C3-03A", "C3-03B", "C3-03C", "C3-03D", "C3-03E", "C3-03F", "C3-03G",
+    "C3-04D",
+}
+HOST_ONLY_NOTE = ("test_type=host pytest (real BridgeServer/Broker/Fake child processes); "
+                  "NOT a real-DSH run")
 
 HOST_PY = ("PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src:artifacts/foundation/deps "
            "/root/.local/bin/python3.11 -B -m pytest")
@@ -820,6 +831,9 @@ def matrix_rows() -> list[dict]:
             if observed is None:
                 observed = next((item for item in raw[1:-1] if isinstance(item, str)), "")
             notes = detail.get("notes", "")
+        if case_id in HOST_ONLY:
+            observed = "host-level (not DSH): " + str(observed)
+            notes = (notes + "; " if notes else "") + HOST_ONLY_NOTE
         command = COMMANDS.get(case_id) or {}
         argv_text = " ".join(command.get("argv", []))[:1500]
         log_path = (command.get("log") or "").replace(str(ROOT) + "/", "")
