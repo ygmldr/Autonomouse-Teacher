@@ -16,6 +16,8 @@
 5. **仍未证明/未做**：G3-D OS 边界（16 行 NOT_RUN）、真实 Provider token/账单、远端 exactly-once、Live；不得用本地 Claim/Fake usage 代替。
 6. **请求裁定**：独立 Reviewer 按 §8.3 与本报告证据给出 `PASS_FOR_G3C_NO_KEY_CONTRACT_RECOVERY_SCOPE`（或 FAIL/PARTIAL/BLOCKED）；不得给出任何 G3-D/Live/GO 裁定。
 
+**矩阵口径**：归档的 v1.0 空矩阵（commit `7199058`）为 66 行；工作矩阵按任务书 §5/§6/§7 增补 `C1-02`（finish schema）、`C1-04`（replay/业务冲突）、`C2-04`（recovery admission）三个 case（原归档矩阵未列），并填 G0/C 共 53 行。docs 矩阵与工作矩阵采用同一 69 行口径；D 行 16 条保持原字节、全部 `NOT_RUN`；`reviewer_verdict` 留空，等待独立复核。
+
 ## 1. 身份与提交链
 
 | 项 | 值 |
@@ -226,7 +228,7 @@ e6fde1c chore: G3-C C3-04 post-fix evidence runner and matrix analysis
 | 本轮全量回归 | `artifacts/g3c/regression/`（原始日志 + JUnit + summary） |
 | 环境 | `artifacts/g3c/env/`（run-start/fix-run-start/stage.json + 本轮 canonical） |
 | 旧 C3-04A 失败证据 | `artifacts/g3c/traces/stream-slow/`、`artifacts/g3c/evidence/evidence-matrix-g3c.before-c3-04a-fix.csv` |
-| Packet | `artifacts/review-packet-g3c-e6fde1c.../`（`manifest.json`/`diff.patch`/`hashes.sha256`/`matrix/`/`evidence/`/`docs/`/`reproduce/`/`security-nonclaims.md`） |
+| Packet | `artifacts/review-packet-g3c-e6fde1cdf0bec9e957e98d569b257c8f17dfa363/`（`manifest.json`/`diff.patch`/`hashes.sha256`/`matrix/`/`evidence/`/`docs/`/`reproduce/`/`security-nonclaims.md`） |
 
 ## 14. 残余、限制与必须维护者决定的事项
 
