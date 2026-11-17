@@ -346,7 +346,7 @@ python3 reproduce/check_p1_labels.py "/root/Autonomous Teacher"
 test -f artifacts/g3c/traces/probe-replay/probe-result.json
 test ! -f artifacts/g3c/traces/probe-replay/dsh-result.json
 grep -E 'C1-01A|C1-04|C2-02D|C2-02E|C3-01B|C3-01C|C3-02A|C3-02B|C-END-01' \
-  matrix/Autonomous_Teacher_M0_G3C_G3D_Test_Evidence_Matrix_v1.0.csv
+  docs/Autonomous_Teacher_M0_G3C_G3D_Test_Evidence_Matrix_v1.0.csv
 ```
 
 Expected: the 8 corrected rows are labelled raw-UDS/container reconcile/summary;
@@ -401,6 +401,11 @@ Crash (then reconcile the same trace directory; the seed used by the Owner is
 directory and mount it read-only as `/seed`):
 
 ```bash
+cd "/root/Autonomous Teacher"
+STAGE=$PWD/artifacts/g3c/stage
+DEPS=$PWD/artifacts/foundation/deps
+ROOTFS=$PWD/artifacts/security/rootfs
+mkdir -p artifacts/g3c/traces/reviewer-crash; chmod 0777 artifacts/g3c/traces/reviewer-crash
 # crash: provider response observed, controller exits before settlement
 podman run --rm --name reviewer-crash \
   --network none --http-proxy=false --unsetenv-all \
@@ -418,6 +423,7 @@ podman run --rm --name reviewer-crash \
   --rootfs "$ROOTFS" /opt/python/bin/python3.11 -B /probe/run_c3/worker_c3.py \
   --label reviewer-crash --prompt G3C_CRASH --evidence /evidence
 # reconcile: seed is a copy of the crash work dir, never the live trace
+mkdir -p artifacts/g3c/traces/reviewer-reconcile; chmod 0777 artifacts/g3c/traces/reviewer-reconcile
 podman run --rm --name reviewer-reconcile \
   --network none --http-proxy=false --unsetenv-all \
   --env PATH=/opt/python/bin:/usr/bin --env HOME=/work \
