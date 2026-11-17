@@ -1,8 +1,8 @@
 # M0 G3-C Findings and Disposition
 
 > 逐条映射：SRC-01..SRC-12、G3-B Independent Reviewer P1-1/P1-2/P2-1..P2-7、C3-04A、host-level vs real-DSH、G3-D 未做事项。
-> 身份：Base `bb5bd0b`；G0 `e107e22`；impl `e6fde1c`。状态标签：`FIXED_CLOSED`（修复且有动态证据）、`FIXED_RESIDUAL`（修复但保留明确残余）、`DOCUMENTED_RESIDUAL`（不改/记录）、`ENV_LIMITATION`（环境限制）、`NOT_DONE`（范围外）。
-> 本文件不代替独立 Reviewer 裁定；所有 `PASS` 均为 Owner 侧无 Key 证据判定。
+> 身份：Base `bb5bd0b`；G0 `e107e22`；原始 impl `e6fde1c`；**PR1 fix `b2f6af054555705192c4e1ae3019a68078764736`（父 `78be77c`）**。状态标签：`FIXED_CLOSED`（修复且有动态证据）、`FIXED_RESIDUAL`（修复但保留明确残余）、`DOCUMENTED_RESIDUAL`（不改/记录）、`ENV_LIMITATION`（环境限制）、`NOT_DONE`（范围外）。
+> 本文件不代替独立 Reviewer 裁定；所有 `PASS` 均为 Owner 侧无 Key 证据判定。PR1 修正了 P1-1 的真实 DSH 标注与 P1-3 的矩阵证据索引，并新增 P1-2 的确定性双 Controller 冷启动处置（§4/§8）。
 
 ## 1. SRC-01..SRC-12
 
@@ -11,7 +11,7 @@
 | SRC-01 usage 丢失、重启只 hold | `FIXED_CLOSED` | `mark_response_observed` 持久完整 `m0.g3c.observation.v1` 文档（usage/observation/digest）；reconcile 校验 `journal_digest`、读 Broker `reservation_status`，authoritative → `settle`，partial/invalid → `fail` | C2-02A/B（after crash → `SETTLED`，fake 不增）；C2-02F（partial → `WORST_CASE_HELD`）；C2-02E（两次 reconcile 幂等） | 文档缺失/损坏/无 receipt → `SETTLEMENT_UNCERTAIN`（C2-02D、C2-03C）。这是有意的失败关闭，不低计、不重发 |
 | SRC-02 cancel 非功能 | `FIXED_CLOSED` | `cancel(*, transport_id, reason)` + per-transport 状态 + checkpoint；发送前零发送，发送后按 receipt 结算/uncertain；错误签名记录不吞 | C3-01A/B/C/E；C3-01D；C3-03G | 发送后无法回滚 Provider；断连不是 durable cancel（见 §4）。cancel 是 best-effort、账务保守，符合冻结契约 |
 | SRC-03 Fake usage 与账本不同源 | `FIXED_CLOSED` | Fake `usage` 帧与 receipt usage 强制 canonical 相等；DSH 收到 `chunk.type=usage`；Observation/账本同源 | C2-01A（`usage_equal=True`）；C2-01D；C1-02（五类坏 usage） | usage 是 synthetic fixture，不是真实账单 |
-| SRC-04 admission 边界未执行 | `FIXED_CLOSED` | `max_output_tokens` 比较；输入 UTF-8 bytes 上界；`deadline_ms` 进入 checkpoint/Broker/Fake 超时 | C1-03A/C/E/F；C3-02B/C | 输入 token 为保守合成上界（可能高估），非 tokenizer |
+| SRC-04 admission 边界未执行 | `FIXED_CLOSED` | `max_output_tokens` 比较；输入 UTF-8 bytes 上界；`deadline_ms` 进入 checkpoint/Broker/Fake 超时 | C1-03A/C/E/F；C3-02B（raw-UDS fake stall）、C3-02C（real DSH deadline） | 输入 token 为保守合成上界（可能高估），非 tokenizer |
 | SRC-05 Broker 无读超时 | `FIXED_CLOSED` | `select` + 单调 deadline + 回复长度上界；超时标记 client 不可信 | C3-02A（1 次请求、1.62 s、`BROKER_TIMEOUT`、fake=0） | 只覆盖本地 Broker 子进程；远端超时未验证 |
 | SRC-06 首帧/连接/线程无界 | `FIXED_CLOSED` | 首帧 deadline、连接上限 8、`TOO_MANY_CONNECTIONS`、线程回收、watchdog、响应上限 | C3-03A/B/C/D/E/F/G；`probe-ipc-bounds`；C3-02D | 资源压力证据主要在 host/容器定向探针，不是真实 DSH 高并发 |
 | SRC-07 跨连接响应预算污染 | `FIXED_CLOSED` | 每连接状态 `_ConnectionContext`；预算不共享 | C3-03D/E | — |
@@ -28,7 +28,7 @@
 |---|---|---|---|---|
 | P1-1 | B3-08 只保守 `WORST_CASE_HELD`，非幂等 settle | `FIXED_CLOSED` | Observation/usage 持久化 + reconcile 校验 + Broker 权威状态 → 幂等 `settle`；C2-02A/B/E | receipt 缺失/损坏仍 uncertain（有意的保守）；不低计、不重发 |
 | P1-2 | cancel no-op，TypeError 被吞 | `FIXED_CLOSED` | 新 cancel 契约、传播、错误签名日志；C3-01A/B/C/E、C3-03G | 发送后不可回滚 Provider；断连非 durable cancel |
-| P2-1 | Broker 冲突码 `UNKNOWN_FIELD`，B3-05 `CLAIM_DENIED` 未复现 | `FIXED_CLOSED` | 新增 `BROKER_*` 码 + 映射；replay 得 `ATTEMPT_ALREADY_STARTED`；C1-01A-D、C1-04 | 未再声称 B3-05 的 `CLAIM_DENIED` 原文；以新码为准 |
+| P2-1 | Broker 冲突码 `UNKNOWN_FIELD`，B3-05 `CLAIM_DENIED` 未复现 | `FIXED_CLOSED` | 新增 `BROKER_*` 码 + 映射；replay 得 `ATTEMPT_ALREADY_STARTED`；C1-01A（raw-UDS）、C1-01B/C/D（host）、C1-04（raw-UDS） | 未再声称 B3-05 的 `CLAIM_DENIED` 原文；以新码为准 |
 | P2-2 | 非 authoritative finish 缺 `failure` | `FIXED_CLOSED` | `_terminal_events` 统一 failure；C1-02 | — |
 | P2-3 | `max_calls` 被无效请求消耗 | `FIXED_CLOSED` | 递增位置后移 + `rejected_calls`；C1-03B/C | — |
 | P2-4 | observation 表未使用 | `DOCUMENTED_RESIDUAL` | 设计取舍：Attempt journal 的 `m0.g3c.observation.v1` 文档为唯一权威 observation（含 digest、冲突拒绝）；`budget_provider_observations` 仍不写入 | 若维护者要求专用表，需 G3-D/后续轮次做双写/迁移；当前有 C2-03A-E 冲突与一致性测试 |
@@ -52,13 +52,28 @@
 
 **注意**：旧 trace 与旧矩阵从未被覆盖；`*-fixed` 是后置证据。`C3-04B/C/E` 及 `echo/tool/usage/crash/reconcile/sigterm` 在修复后重跑；其余未受影响的证据保留原名。
 
-## 4. host-level vs real-DSH 标注
+## 4. host-level vs real-DSH 标注（PR1 逐条核对）
 
-矩阵中以下行明确是**宿主 pytest（真实 socket/Broker/Fake 子进程，但不是真实 DSH）**，不得写成 real-DSH：
+**逐 case 证据类型表（53 个 PASS 行）**：
 
-`C1-01B`、`C1-01C`、`C1-03B`、`C1-03D`、`C2-03A..E`、`C2-04`、`C3-01A`、`C3-01E`、`C3-02D`、`C3-02E`、`C3-03A..G`、`C3-04D`（共 22 行）。
+| 证据类型 | 行数 | case_id |
+|---|---:|---|
+| **real DSH**（固定 rootfs 内 `worker_c3.py` 驱动 DSH 0.2.2-rc.2 + Fake + 真实 Broker；有 `dsh-result.json`） | 19 | `C1-02`、`C1-03A/C/E/F`、`C2-01A..D`、`C2-02A/B/C/F`（crash 半）、`C3-01D`、`C3-02C`、`C3-04A/B/C/E` |
+| **real DSH summary**（链接上述 trace，本身不是独立运行） | 1 | `C-END-01`（`echo-fixed` + `tool-fixed` + `resume-first/second`） |
+| **raw-UDS probe**（固定 rootfs 内 `probes_c3.py`，真实 Controller/Broker/Fake/SQLite，无 DSH；有 `probe-result.json`） | 6 | `C1-01A`、`C1-04`、`C3-01B`、`C3-01C`、`C3-02A`、`C3-02B` |
+| **container reconcile**（固定 rootfs 内 `reconcile_c3.py`，无 DSH；有 `reconcile-result.json`） | 2 | `C2-02D`、`C2-02E` |
+| **host pytest**（真实 socket/Broker/Fake 子进程，但不是 DSH） | 23 | `C1-01B/C/D`、`C1-03B/D`、`C2-03A..E`、`C2-04`、`C3-01A/E`、`C3-02D/E`、`C3-03A..G`、`C3-04D` |
+| **G0 / regression** | 2 | `G0-01`、`C-END-02` |
+| **合计** | **53** | |
 
-其余真实 DSH 行（`C1-01A`、`C1-02`、`C1-03A/C/E/F`、`C1-04`、`C2-01A..D`、`C2-02A..F`、`C3-01B/C/D`、`C3-02A/B/C`、`C3-04A/B/C/E`、`C-END-01`）在固定 rootfs 容器内由 `spikes/g3b-trusted-bridge/run_c3/worker_c3.py` 驱动真实 DSH 0.2.2-rc.2 + Fake Provider + 真实 SQLite Broker 产生；仍**不是**真实模型/远端 Provider。
+**必须保留的区分**：
+
+- **C1-01A 不是 real DSH**：它由 `spikes/g3b-trusted-bridge/run_c3/probes_c3.py --probe replay` 产生（`artifacts/g3c/traces/probe-replay/probe-result.json`，**无** `dsh-result.json`），与 C1-04 共用同一份 raw-UDS 证据；C1-01 矩阵的 expected evidence 是 “new raw test stdout/trace + freeze SHA + independent replay”，不要求 real DSH。把 C1-01A 写成“真实 DSH replay”是 Review P1-1 的核心错误，已在本文件/报告/矩阵中删除。
+- **C1-04、C3-01B/C、C3-02A/B 是 raw-UDS probe**（固定 rootfs、`--network none`、真实 Broker/Fake），不是 DSH；矩阵 `observed` 已补 `raw-UDS (not DSH)`。
+- **C2-02D/E 是 container reconcile**；`C2-02A/B/C/F` 的 crash 半是 real DSH、reconcile 半是 container reconcile。矩阵已按此标注，不再把整个 `C2-02A..F` 笼统写成 real DSH。
+- **C1-01D、C2-04 是 host pytest**（C1-01D 另有 Node adapter TAP），矩阵 `observed` 已补 `host-level (not DSH)`。
+- 其余 host-level 行（`C1-01B/C`、`C1-03B/D`、`C2-03A..E`、`C3-01A/E`、`C3-02D/E`、`C3-03A..G`、`C3-04D`）沿用既有 `host-level (not DSH)` 标注。
+- 上述所有 real DSH 行仍由 `worker_c3.py` 驱动 DSH 0.2.2-rc.2 + Fake Provider + 真实 SQLite Broker 产生；仍**不是**真实模型/远端 Provider。PR1 只复跑 Echo/Tool 冒烟；其余旧 trace 来自 `e6fde1c`，未重新标注为 `b2f6af0` 产物（矩阵 `impl_sha` 统一指向当前实现 `b2f6af0`，trace 内 `argv.json`/`commands.jsonl` 可追溯生成批次）。
 
 **断连 cancel 限制**：客户端无 cancel 帧断连时，IPC 关闭生成器会 abort，并仅在 worker 仍存活时调用 `cancel(transport_id, "stream_closed")`；没有独立的 durable“断连”事件/对账记录，provider 也不能回滚。因此不得把断连当作 cancel 契约的完整覆盖（已写入报告 §14、Review Request R2.8）。
 
@@ -83,7 +98,7 @@
 | OCI `test_c3_01e_sigterm_cleans_socket_and_broker_child` | `tests/integration/g3c/test_c1_03_admission.py` | 冻结 rootfs 无 `pgrep`，探针无法启动 | 产品语义在宿主通过；建议后续改为不依赖外部 `pgrep`（维护者决定） |
 | OCI `test_c3_02a_broker_alive_without_stdout_times_out_once` | `tests/integration/g3c/test_c3_02_deadline.py` | `/tmp` noexec，`slow-broker-wrapper` 无法 exec | 宿主通过；建议后续把 wrapper 放到可执行 tmpfs 或改用 `python -c`（维护者决定） |
 
-这四项均非产品断言失败；OCI 计数实际为 768 passed / 2 failed / 1 skipped（不是旧记录 766/2）。工作矩阵 `C-END-02` 与 docs 矩阵已按新回归更新，旧 `evidence-matrix-g3c.before-c3-04a-fix.csv` 保留旧数字。
+这四项均非产品断言失败；原始 OCI 计数为 768 passed / 2 failed / 1 skipped（不是旧记录 766/2）；PR1 修复后（`b2f6af0`）为 **773 passed / 2 failed / 1 skipped**（新增 5 个 P1-2 测试，2 个失败原因不变）。工作矩阵 `C-END-02` 与 docs 矩阵已按新回归更新，旧 `evidence-matrix-g3c.before-c3-04a-fix.csv` 保留旧数字。
 
 ## 7. 需维护者/Reviewer 明确决定的事项
 
@@ -95,3 +110,20 @@
 6. 是否要求 Packet 附 D0 设计文档副本（当前按“不复制 G3-B/历史”原则不复制；D0 原字节由独立 docs commit 归档）。
 
 以上 1–6 均不应被默认解释为 PASS；请 Reviewer 在裁定中逐项表明是否影响 `PASS_FOR_G3C_NO_KEY_CONTRACT_RECOVERY_SCOPE`。
+
+## 8. PR1：Review P1-2 双 Controller 冷启动处置
+
+Reviewer P1-2 复现：两个 Controller 同时冷启动共享 AttemptJournal 时，`PRAGMA journal_mode=WAL`（旧 `attempts.py:58`）可能抛出未处理 `sqlite3.OperationalError: database is locked`，3/6 次一子进程 exit 1。产品语义（至多一次 Fake）未破，但不是确定性拒绝。PR1 处置（`b2f6af054555705192c4e1ae3019a68078764736`）：
+
+| 项 | 修复 |
+|---|---|
+| 初始化顺序 | `PRAGMA busy_timeout` 先于 `journal_mode=WAL`；初始化用短 busy timeout（250 ms），成功后恢复运行时 10 s |
+| 有界重试 | WAL/DDL 对 `SQLITE_BUSY/SQLITE_LOCKED` 重试，默认 10 s、50 ms 间隔；真实错误不重试、原样抛出 |
+| 良性 DDL 竞争 | 两个初始化器竞争同一 `ADD COLUMN` 的 `duplicate column name` 在列已存在时视为成功 |
+| 耗尽 | 抛 `AttemptJournalUnavailable`，Controller 关闭 Broker/Fake、不绑定 socket，stderr 固定 `ATTEMPT_JOURNAL_UNAVAILABLE`，exit **4** |
+| singleton | 每个 socket 路径持进程生命周期 `flock`；第二进程在启动 Broker/Fake/journal 前 stderr 固定 `CONTROLLER_SINGLETON_LOCKED`，exit **5**；崩溃由内核释放锁 |
+| admission replay | 保持 `ADMISSION_REPLAYED_AFTER_RECOVERY`，exit **3**（先 reconcile 后登记，语义未削弱） |
+
+**20 轮实测**（`artifacts/g3c/evidence/concurrency-coldstart-20261117T153229Z.json`）：20/20 为 1 个成功 Controller + 1 个 `CONTROLLER_SINGLETON_LOCKED`（exit 5），0 traceback，Fake counter 恒 1，Attempt 恒 `SETTLED`；另 3×20 轮压力复跑同结果。原始 WAL 竞争场景另以 20 轮双进程 `AttemptJournal` 冷初始化测试覆盖（`test_c3_05d`，0 unhandled lock）。固定 rootfs OCI full 也执行了同一 20 轮 Controller 测试并通过（uid 65534、只读 rootfs、`--network none`）。**未做** real-DSH 双客户端同 Claim：`worker_c3.py` 每进程自带 Controller/admission，需要新 barrier runner；该残余见报告 §14.14。
+
+新增测试：`tests/integration/g3c/test_c3_05_twocontroller_coldstart.py`（20 轮双 Controller 冷启动、WAL 锁重试成功、重试耗尽固定错误、journal-unavailable 受控退出、20 轮双进程 journal 初始化竞争）。`tests/integration/g3c` 由 105 增至 **110 passed**。
