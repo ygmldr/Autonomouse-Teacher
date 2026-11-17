@@ -19,7 +19,8 @@ def utc() -> str:
 
 def usage_for(mode: str) -> dict | None:
     if mode in {"ok_usage", "tool_once", "tool_final", "slow_usage", "usage_conflict",
-                "usage_after_finish", "multi_usage"}:
+                "usage_after_finish", "multi_usage", "stream_slow", "many_chunks",
+                "big_output", "truncated_stream"}:
         return {"inputTokens": 11, "cacheReadTokens": 2, "cacheWriteTokens": 0,
                 "outputTokens": 5, "reasoningTokens": 0, "totalTokens": 18}
     if mode == "partial_usage":
@@ -27,6 +28,71 @@ def usage_for(mode: str) -> dict | None:
     if mode == "usage_invalid":
         return {"inputTokens": "bad"}
     return None
+
+
+def timing_mark(nonce: str, name: str, **extra: object) -> None:
+    """Append one fsynced wall/monotonic mark for streaming T1<T2 evidence.
+
+    The sidecar lives next to the receipt files so the Controller evidence copy
+    carries it; it never participates in receipt validation.
+    """
+    import time as _time
+    path = RECEIPT_DIR / f"timing-{nonce}.json"
+    try:
+        document = json.loads(path.read_text()) if path.exists() else {"marks": []}
+    except (OSError, ValueError):
+        document = {"marks": []}
+    document.setdefault("marks", []).append({
+        "name": name, "epoch_ms": int(_time.time() * 1000),
+        "monotonic": _time.monotonic(), **extra})
+    tmp = path.with_suffix(".tmp")
+    with open(tmp, "w", encoding="utf-8") as handle:
+        json.dump(document, handle, sort_keys=True, separators=(",", ":"))
+        handle.flush()
+        os.fsync(handle.fileno())
+    os.replace(tmp, path)
+
+
+def stream_mode(mode: str, nonce: str) -> int:
+    """Incremental G3-C modes; the receipt is already durable before this runs."""
+    import time as _time
+
+    def emit(frame: dict) -> None:
+        print(json.dumps(frame, sort_keys=True, separators=(",", ":")), flush=True)
+
+    timing_mark(nonce, "frames_start", mode=mode)
+    if mode == "stream_slow":
+        emit({"kind": "chunk", "chunk": {"type": "text-delta", "index": 0,
+                                         "text": "early"}})
+        timing_mark(nonce, "first_chunk_flushed")
+        _time.sleep(2.0)
+        emit({"kind": "usage", "usage": usage_for(mode)})
+        emit({"kind": "finish", "reason": {"kind": "stop"}})
+    elif mode == "truncated_stream":
+        emit({"kind": "chunk", "chunk": {"type": "text-delta", "index": 0,
+                                         "text": "partial"}})
+        timing_mark(nonce, "first_chunk_flushed")
+        timing_mark(nonce, "exit_without_finish")
+        return 3
+    elif mode == "many_chunks":
+        for index in range(300):
+            emit({"kind": "chunk", "chunk": {"type": "text-delta", "index": index,
+                                             "text": "x"}})
+        timing_mark(nonce, "chunks_flushed", count=300)
+        emit({"kind": "usage", "usage": usage_for(mode)})
+        emit({"kind": "finish", "reason": {"kind": "stop"}})
+    elif mode == "big_output":
+        block = "y" * 60000
+        for index in range(20):
+            emit({"kind": "chunk", "chunk": {"type": "text-delta", "index": index,
+                                             "text": block}})
+        timing_mark(nonce, "chunks_flushed", count=20)
+        emit({"kind": "usage", "usage": usage_for(mode)})
+        emit({"kind": "finish", "reason": {"kind": "stop"}})
+    else:
+        raise SystemExit("UNKNOWN_STREAM_MODE")
+    timing_mark(nonce, "exit_after_finish")
+    return 0
 
 
 def main() -> int:
@@ -74,11 +140,15 @@ def main() -> int:
     tmpc.write_text(json.dumps({"count": count}), encoding="utf-8")
     os.replace(tmpc, counter)
     if mode == "eof":
+        timing_mark(nonce, "exit_without_frames")
         return 0
     if mode == "timeout":
         import time as _time
+        timing_mark(nonce, "stall_after_receipt")
         _time.sleep(35)
         return 2
+    if mode in {"stream_slow", "many_chunks", "big_output", "truncated_stream"}:
+        return stream_mode(mode, nonce)
     frames = []
     if mode == "ok_usage":
         frames = [{"kind": "chunk", "chunk": {"type": "text-delta", "index": 0, "text": "ok"}},
@@ -124,6 +194,11 @@ def main() -> int:
         frames = [{"kind": "usage", "usage": receipt["usage"]},
                   {"kind": "usage", "usage": receipt["usage"]},
                   {"kind": "finish", "reason": {"kind": "stop"}}]
+    elif mode == "tool_final":
+        frames = [{"kind": "chunk", "chunk": {"type": "text-delta", "index": 0,
+                                              "text": "ok"}},
+                  {"kind": "usage", "usage": receipt["usage"]},
+                  {"kind": "finish", "reason": {"kind": "stop"}}]
     elif mode == "usage_after_finish":
         frames = [{"kind": "finish", "reason": {"kind": "stop"}},
                   {"kind": "usage", "usage": receipt["usage"]}]
@@ -134,6 +209,7 @@ def main() -> int:
                   {"kind": "finish", "reason": {"kind": "stop"}}]
     for frame in frames:
         print(json.dumps(frame, sort_keys=True, separators=(",", ":")), flush=True)
+    timing_mark(nonce, "exit_after_frames", frames=len(frames))
     return 0
 
 
