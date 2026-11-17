@@ -50,14 +50,34 @@ HOST_TESTS = {
     "C3-04D": ["tests/integration/g3c/test_c3_04_streaming.py::test_c3_04d_consumer_stall_is_bounded_and_close_cleans"],
 }
 
+# C3-04 post-fix evidence is stored under new trace names so the original
+# failing trace/commands stay byte-for-byte intact. LOGICAL_TRACE resolves the
+# stable case name used by the checks to the evidence directory actually read.
+# The same applies to the real-DSH/regression cases re-run after the streaming
+# change (echo/tool/usage/crash/cancel/sigterm).
+FIXED_TRACES = {
+    "echo", "tool",
+    "usage-error", "usage-no-usage", "usage-partial", "usage-invalid", "usage-eof",
+    "usage-multi", "usage-after-finish",
+    "stream-slow", "stream-many", "stream-big", "stream-truncated",
+    "sigterm",
+    "probe-cancel", "probe-cancel-concurrent",
+    "crash-after_fake_receive_before_response",
+    "reconcile-after_fake_receive_before_response",
+    "crash-after_response_before_settlement",
+    "reconcile-after_response_before_settlement",
+}
+LOGICAL_TRACE = {name: f"{name}-fixed" for name in FIXED_TRACES}
+
 # Matrix cases derived from one or more concrete container runs.
 EVIDENCE_ALIAS = {
-    "C2-01A": ["echo"], "C2-01B": ["tool"], "C2-01C": ["usage-partial"],
-    "C2-01D": ["usage-multi", "usage-after-finish"],
+    "C2-01A": ["echo-fixed"], "C2-01B": ["tool-fixed"],
+    "C2-01C": ["usage-partial-fixed"],
+    "C2-01D": ["usage-multi-fixed", "usage-after-finish-fixed"],
     "C1-03A": ["admission-output-limit"], "C1-03C": ["admission-max-calls"],
     "C1-03E": ["deadline-300"], "C1-03F": ["admission-input-limit"],
-    "C2-02A": ["crash-after_response_before_settlement",
-               "reconcile-after_response_before_settlement"],
+    "C2-02A": ["crash-after_response_before_settlement-fixed",
+               "reconcile-after_response_before_settlement-fixed"],
     "C2-02B": ["crash-after_broker_settle_before_journal_mark",
                "reconcile-after_broker_settle_before_journal_mark"],
     "C2-02C": ["crash-after_attempt_start_before_fake_send",
@@ -65,12 +85,13 @@ EVIDENCE_ALIAS = {
     "C2-02D": ["reconcile-tamper-receipt-usage"],
     "C2-02E": ["reconcile-after_response_before_settlement", "reconcile2-after-response"],
     "C2-02F": ["crash-after_broker_settle-partial", "reconcile-after_broker_settle-partial"],
-    "C3-01B": ["probe-cancel"], "C3-01C": ["probe-cancel-concurrent"],
-    "C3-01D": ["sigterm"], "C3-02A": ["probe-broker-hang"],
+    "C3-01B": ["probe-cancel-fixed"], "C3-01C": ["probe-cancel-concurrent-fixed"],
+    "C3-01D": ["sigterm-fixed"], "C3-02A": ["probe-broker-hang"],
     "C3-02B": ["probe-fake-stall"], "C3-02C": ["deadline-100"],
-    "C3-04A": ["stream-slow"], "C3-04B": ["stream-many"],
-    "C3-04C": ["stream-big"], "C3-04E": ["stream-truncated"],
-    "C1-02": ["usage-error", "usage-no-usage", "usage-partial", "usage-invalid", "usage-eof"],
+    "C3-04A": ["stream-slow-fixed"], "C3-04B": ["stream-many-fixed"],
+    "C3-04C": ["stream-big-fixed"], "C3-04E": ["stream-truncated-fixed"],
+    "C1-02": ["usage-error-fixed", "usage-no-usage-fixed", "usage-partial-fixed",
+              "usage-invalid-fixed", "usage-eof-fixed"],
     "C1-04": ["probe-replay"],
 }
 
@@ -85,11 +106,17 @@ HOST_ONLY = {
 }
 HOST_ONLY_NOTE = ("test_type=host pytest (real BridgeServer/Broker/Fake child processes); "
                   "NOT a real-DSH run")
+FIXED_RERUN_NOTE = "post-C3-04A streaming-fix rerun trace"
+
+
+def fixed_note(paths: object, notes: str) -> str:
+    """Mark rows whose evidence was re-produced after the streaming fix."""
+    if "-fixed" not in str(paths) or "streaming-fix" in notes:
+        return notes
+    return (notes + "; " if notes else "") + FIXED_RERUN_NOTE
 
 HOST_PY = ("PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src:artifacts/foundation/deps "
            "/root/.local/bin/python3.11 -B -m pytest")
-
-
 
 def utc() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -103,15 +130,15 @@ def load_json(path: Path):
 
 
 def dsh(name: str):
-    return load_json(TRACES / name / "dsh-result.json")
+    return load_json(TRACES / LOGICAL_TRACE.get(name, name) / "dsh-result.json")
 
 
 def recon(name: str):
-    return load_json(TRACES / name / "reconcile-result.json")
+    return load_json(TRACES / LOGICAL_TRACE.get(name, name) / "reconcile-result.json")
 
 
 def probe(name: str):
-    return load_json(TRACES / name / "probe-result.json")
+    return load_json(TRACES / LOGICAL_TRACE.get(name, name) / "probe-result.json")
 
 
 def commands() -> dict:
@@ -452,16 +479,23 @@ def check_stream_slow() -> tuple:
     exit_mark = marks.get("exit_after_finish")
     t1 = _first_dsh_chunk_ms(result)
     t2 = exit_mark.get("epoch_ms") if exit_mark else None
-    ok = bool(chunk_mark and exit_mark and t1 and t1 <= t2 and result.get("final_response") == "early")
+    before = bool(t1 and t2 and t1 <= t2)
+    ok = bool(chunk_mark and exit_mark and before and result.get("final_response") == "early")
     status = "PASS" if ok else "FAIL"
-    return status, {"observed": f"fake_chunk_ms={chunk_mark.get('epoch_ms') if chunk_mark else None} "
-                                f"fake_exit_ms={t2} dsh_first_chunk_ms={t1} "
-                                f"T1_before_fake_exit={bool(t1 and t2 and t1 <= t2)} "
-                                f"(controller buffers Fake frames until settlement)",
-                     "notes": "C3-04A is a genuine integration gap: FakeBackend/Controller read "
-                              "incrementally (host test), but ipc_server receives the whole frame "
-                              "list after settlement, so this is buffered replay, not real-time "
-                              "streaming to DSH"}
+    detail = {"observed": f"fake_chunk_ms={chunk_mark.get('epoch_ms') if chunk_mark else None} "
+                          f"fake_exit_ms={t2} dsh_first_chunk_ms={t1} "
+                          f"T1_before_fake_exit={before} "
+                          f"lead_ms={(t2 - t1) if before else None} "
+                          f"(real trace {LOGICAL_TRACE['stream-slow']})"}
+    if ok:
+        detail["notes"] = ("real-time streaming: the first validated Fake chunk reaches the DSH "
+                           "SDK while the Fake child is still running (T1<T2); settlement/usage "
+                           "follow after the stream")
+    else:
+        detail["notes"] = ("C3-04A FAIL: DSH first chunk did not precede Fake exit; this must "
+                           "not be labelled real-time streaming (see "
+                           f"artifacts/g3c/traces/{LOGICAL_TRACE['stream-slow']})")
+    return status, detail
 
 
 def check_stream_many() -> tuple:
@@ -670,6 +704,12 @@ def check_ipc_bounds() -> tuple:
                      f"overload={observations.get('overload')}")
 
 
+def passed_count(text: str) -> int:
+    import re
+    match = re.search(r"(\d+) passed", text)
+    return int(match.group(1)) if match else 0
+
+
 def check_full_regression() -> tuple:
     """Host and frozen-rootfs full suites are complementary environments.
 
@@ -688,11 +728,13 @@ def check_full_regression() -> tuple:
                          and "test_all_live_entrypoints_remain_blocked" in host)
     oci_env_failures = ("test_c3_01e_sigterm_cleans_socket_and_broker_child" in oci
                         and "test_c3_02a_broker_alive_without_stdout_times_out_once" in oci)
-    host_passes = "766 passed" in host
-    oci_passes = "766 passed" in oci
+    # The host/joint suites grew by the two C3-04A host streaming tests
+    # (766 -> 768 and 134 -> 136); require at least the current baseline.
+    host_passes = passed_count(host) >= 768
+    oci_passes = passed_count(oci) >= 766
     joint_path = EV / "logs/host-g3c-joint.log"
     joint_text = joint_path.read_text() if joint_path.exists() else ""
-    joint_ok = "134 passed" in joint_text
+    joint_ok = passed_count(joint_text) >= 136
     ruff_path = EV / "logs/host-ruff.log"
     ruff_ok = ruff_path.exists() and "EXIT=0" in ruff_path.read_text()
     node = node_fail_counts()
@@ -702,7 +744,7 @@ def check_full_regression() -> tuple:
     return ("PASS" if ok else "PARTIAL",
             {"observed": f"host_full=[{host_summary}] (2 env-only: /project+ro-mode); "
                          f"oci_full=[{oci_summary}] (2 env-only: no /bin/sh in frozen rootfs); "
-                         f"joint_134={joint_ok}; ruff={ruff_ok}; "
+                         f"joint_136={joint_ok}; ruff={ruff_ok}; "
                          f"node_adapter=9_pass/0_fail, node_guard=19_pass/0_fail; "
                          f"union covers every non-skipped test",
              "notes": "the two host failures are the same pre-existing G3-B host-env "
@@ -849,22 +891,28 @@ def matrix_rows() -> list[dict]:
         if not argv_text and case_id in HOST_TESTS:
             argv_text = HOST_PY + " " + " ".join(HOST_TESTS[case_id])
             log_path = "artifacts/g3c/logs/host-g3c-only.log"
+        db_path = detail.get("db") or extra_paths or evidence_paths(case_id)
         rows.append({
             "case_id": case_id, "gate": original["gate"], "priority": original["priority"],
             "scenario": original["scenario_or_assertion"],
             "status": status, "observed": str(observed)[:900],
             "command_argv": detail.get("argv", argv_text),
             "log_path": detail.get("log", log_path),
-            "db_or_receipt_path": detail.get("db") or extra_paths or evidence_paths(case_id),
+            "db_or_receipt_path": db_path,
             "impl_sha": IMPL_SHA,
-            "notes": notes,
+            "notes": fixed_note(db_path, notes),
         })
     extras = [
         ("C1-02", "G3-C1", "P1",
          "Fake error/no_usage/partial_usage/usage_invalid/eof terminals are schema-valid "
          "finish(error,failure) or error Envelope; Broker FAILED/WORST_CASE; no successful finish",
-         "C1-02", "artifacts/g3c/traces/usage-error",
-         "artifacts/g3c/logs/usage-error.log"),
+         "C1-02",
+         " ; ".join(f"artifacts/g3c/traces/{name}-fixed" for name in (
+             "usage-error", "usage-no-usage", "usage-partial",
+             "usage-invalid", "usage-eof")),
+         " ; ".join(f"artifacts/g3c/logs/{name}-fixed.log" for name in (
+             "usage-error", "usage-no-usage", "usage-partial",
+             "usage-invalid", "usage-eof"))),
         ("C1-04", "G3-C1", "P1",
          "Replay/business conflicts: same call_id same payload replay, different digest, "
          "reservation mismatch, settled not overwritten, no bypass; Fake counter does not grow",
@@ -892,7 +940,7 @@ def matrix_rows() -> list[dict]:
                                       if key in HOST_TESTS else ""),
                      "log_path": log, "db_or_receipt_path": evidence,
                      "impl_sha": IMPL_SHA,
-                     "notes": detail.get("notes", "")})
+                     "notes": fixed_note(evidence, detail.get("notes", ""))})
     return rows
 
 
