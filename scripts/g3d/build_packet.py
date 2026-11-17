@@ -1134,7 +1134,7 @@ def build(args: argparse.Namespace) -> int:
              "note": "independent G3-D review not performed; matrix row stays NOT_RUN"},
         ],
         "packet_payload_file_count": payload_count,
-        "packet_payload_tree_method": "sha256 over sorted 'sha256  relpath' lines of payload files (hashes.sha256 lines excluding manifest.json)",
+        "packet_payload_tree_method": "sha256 over the 'sha256  relpath' lines of hashes.sha256 in relative-path order, excluding manifest.json",
         "nonclaims": "review/security-nonclaims.md",
         "remaining_risk_register": "review/remaining-risk-register.md",
         "packet_builder": {"path": "scripts/g3d/build_packet.py",
