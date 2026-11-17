@@ -19,6 +19,7 @@ No real Key/model/external HTTP is used or reachable from this module.
 """
 from __future__ import annotations
 import argparse
+import fcntl
 import hashlib
 import json
 import os
@@ -41,7 +42,7 @@ from autoteacher_m0.bridge.protocol import (
     ERROR_CODES, Envelope, validate_chunk_payload, validate_error_payload,
     validate_request_payload,
 )
-from autoteacher_m0.bridge.attempts import AttemptJournal
+from autoteacher_m0.bridge.attempts import AttemptJournal, AttemptJournalUnavailable
 from autoteacher_m0.bridge.broker_client import BrokerClient, BrokerClientError
 from autoteacher_m0.bridge.fake_backend import FakeBackend
 from autoteacher_m0.bridge.ipc_server import BridgeServer
@@ -70,6 +71,16 @@ _STREAM_QUEUE_FRAMES = 8
 _STREAM_POLL_SECONDS = 0.05
 _STREAM_JOIN_SECONDS = 5.0
 _STREAM_TERMINAL_GRACE_SECONDS = 1.0
+
+# Stable startup failure surface (P1-2). Only these codes are written to stderr
+# on the controlled-exit paths; the frozen launcher contract maps them to fixed
+# non-zero exit codes and never depends on a Python traceback.
+ERROR_CONTROLLER_SINGLETON_LOCKED = "CONTROLLER_SINGLETON_LOCKED"
+ERROR_ATTEMPT_JOURNAL_UNAVAILABLE = "ATTEMPT_JOURNAL_UNAVAILABLE"
+ERROR_ADMISSION_REPLAYED_AFTER_RECOVERY = "ADMISSION_REPLAYED_AFTER_RECOVERY"
+EXIT_ADMISSION_REPLAYED = 3
+EXIT_ATTEMPT_JOURNAL_UNAVAILABLE = 4
+EXIT_CONTROLLER_SINGLETON_LOCKED = 5
 
 # Broker v1 raw code -> (preferred additive G3-C protocol code, existing-code
 # fallback used until Agent A's additive protocol enum is merged). The preferred
@@ -1502,6 +1513,40 @@ class TrustedController:
             os._exit(97)
 
 
+def _acquire_controller_singleton(socket_path: Path) -> int | None:
+    """Hold an exclusive per-socket lock for the Controller process lifetime.
+
+    One AF_UNIX socket path can only ever have one serving Controller. Taking
+    the lock *before* the stale-socket unlink / Broker / Fake / journal setup
+    makes a second cold start deterministic: it exits with
+    ``CONTROLLER_SINGLETON_LOCKED`` instead of racing WAL/socket setup. The OS
+    releases the lock on any exit (including SIGKILL), so crash recovery works.
+    """
+    lock_path = socket_path.with_name(socket_path.name + ".lock")
+    flags = os.O_RDWR | os.O_CREAT | os.O_CLOEXEC
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    try:
+        fd = os.open(lock_path, flags, 0o600)
+    except OSError:
+        # A non-regular/unopenable lock path is not a licence to start a second
+        # Controller; report the same stable singleton rejection.
+        return None
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        os.close(fd)
+        return None
+    try:
+        os.ftruncate(fd, 0)
+        os.write(fd, f"{os.getpid()}\n".encode("ascii"))
+        os.lseek(fd, 0, os.SEEK_SET)
+    except OSError:
+        # Diagnostics only; the lock itself is already held.
+        pass
+    return fd
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", required=True)
@@ -1520,46 +1565,75 @@ def main(argv: list[str] | None = None) -> int:
             raise SystemExit("CONFIG_INVALID")
     socket_path = Path(config["socket_path"])
     socket_path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-    if os.path.lexists(socket_path):
-        socket_path.unlink()
-    admission = load_admission(config["admission_path"], expected_uid=config.get("expected_uid", 65534))
-    broker = BrokerClient(config_path=config["broker_config_path"], python=config["python"])
-    broker.start()
-    fake = FakeBackend(script=config["fake_script"], receipt_dir=config["receipt_dir"],
-                       python=config.get("fake_python", config["python"]),
-                       mode=admission.fake_scenario)
-    attempts = AttemptJournal(config["attempt_db"])
-    controller = TrustedController(admission, broker=broker, fake=fake, attempts=attempts,
-                                   expected_uid=config.get("expected_uid", 65534),
-                                   register_admission=False)
-    # G3-C2-04 frozen order: recover old attempts BEFORE consuming a new
-    # admission. An ADMISSION_REPLAYED therefore cannot strand durable state.
-    controller.reconcile_on_startup(config.get("receipt_dir"))
+    lock_fd = _acquire_controller_singleton(socket_path)
+    if lock_fd is None:
+        sys.stderr.write(ERROR_CONTROLLER_SINGLETON_LOCKED + "\n")
+        return EXIT_CONTROLLER_SINGLETON_LOCKED
+    broker: BrokerClient | None = None
+    fake: FakeBackend | None = None
+    attempts: AttemptJournal | None = None
     try:
-        attempts.register_admission(admission.admission_id, admission.sha256,
-                                    admission.run_id, controller.instance_id)
-    except ValueError as exc:
-        if str(exc) == "ADMISSION_REPLAYED":
-            sys.stderr.write("ADMISSION_REPLAYED_AFTER_RECOVERY\n")
-            broker.close()
-            fake.close()
-            attempts.close()
-            return 3
-        raise
-    server = BridgeServer(controller, config["socket_path"])
+        if os.path.lexists(socket_path):
+            socket_path.unlink()
+        admission = load_admission(config["admission_path"],
+                                   expected_uid=config.get("expected_uid", 65534))
+        broker = BrokerClient(config_path=config["broker_config_path"],
+                              python=config["python"])
+        broker.start()
+        fake = FakeBackend(script=config["fake_script"], receipt_dir=config["receipt_dir"],
+                           python=config.get("fake_python", config["python"]),
+                           mode=admission.fake_scenario)
+        try:
+            attempts = AttemptJournal(config["attempt_db"])
+        except AttemptJournalUnavailable:
+            # Bounded WAL/DDL retries were exhausted by a real lock holder.
+            # Broker/Fake are closed by the finally below; no socket was bound.
+            sys.stderr.write(ERROR_ATTEMPT_JOURNAL_UNAVAILABLE + "\n")
+            return EXIT_ATTEMPT_JOURNAL_UNAVAILABLE
+        controller = TrustedController(admission, broker=broker, fake=fake,
+                                       attempts=attempts,
+                                       expected_uid=config.get("expected_uid", 65534),
+                                       register_admission=False)
+        # G3-C2-04 frozen order: recover old attempts BEFORE consuming a new
+        # admission. An ADMISSION_REPLAYED therefore cannot strand durable state.
+        controller.reconcile_on_startup(config.get("receipt_dir"))
+        try:
+            attempts.register_admission(admission.admission_id, admission.sha256,
+                                        admission.run_id, controller.instance_id)
+        except ValueError as exc:
+            if str(exc) == "ADMISSION_REPLAYED":
+                sys.stderr.write(ERROR_ADMISSION_REPLAYED_AFTER_RECOVERY + "\n")
+                return EXIT_ADMISSION_REPLAYED
+            raise
+        server = BridgeServer(controller, config["socket_path"])
 
-    def _stop(_signum, _frame):
-        server.shutdown()
+        def _stop(_signum, _frame):
+            server.shutdown()
 
-    signal.signal(signal.SIGTERM, _stop)
-    signal.signal(signal.SIGINT, _stop)
-    try:
+        signal.signal(signal.SIGTERM, _stop)
+        signal.signal(signal.SIGINT, _stop)
         server.serve_forever()
+        return 0
     finally:
-        broker.close()
-        fake.close()
-        attempts.close()
-    return 0
+        # The normal path already closed the resources; these calls are
+        # idempotent no-ops there and perform the controlled-exit cleanup on
+        # the journal/lock failure paths.
+        _close_quietly(broker)
+        _close_quietly(fake)
+        _close_quietly(attempts)
+        try:
+            os.close(lock_fd)
+        except OSError:
+            pass
+
+
+def _close_quietly(resource) -> None:
+    if resource is None:
+        return
+    try:
+        resource.close()
+    except Exception:  # noqa: BLE001 - startup cleanup must not mask the exit code
+        pass
 
 
 if __name__ == "__main__":

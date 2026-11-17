@@ -10,17 +10,55 @@ G3-C additions are additive:
   another transport is rejected before a second send.
 * ``begin_attempt`` consumes the intent in the same transaction as the durable
   attempt insert; send is allowed only after that commit.
+
+P1-2 (G3-C review): the SQLite initialisation is deterministic under concurrent
+cold starts. ``busy_timeout`` is installed before the ``journal_mode=WAL``
+transition, WAL/DDL lock failures are retried for a bounded interval, benign
+``duplicate column name`` races from two initialisers are accepted, and
+exhaustion raises ``AttemptJournalUnavailable`` so the Controller can exit with
+a stable ``ATTEMPT_JOURNAL_UNAVAILABLE`` code instead of a traceback.
 """
 from __future__ import annotations
 import functools
 import json
 import sqlite3
 import threading
+import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
 ATTEMPTS_PATH = Path("/work/g3b/attempts.sqlite3")
+
+# Journal initialisation is the only place where a cold Controller must wait for
+# another SQLite writer. The wait is deliberately bounded and retried here
+# instead of being an unbounded (or absent) ``busy_timeout``. A caller that
+# exhausts the budget gets ``AttemptJournalUnavailable`` and can exit with a
+# stable, auditable code instead of leaking ``sqlite3.OperationalError``.
+DEFAULT_INIT_RETRY_SECONDS = 10.0
+DEFAULT_INIT_RETRY_INTERVAL_SECONDS = 0.05
+INIT_BUSY_TIMEOUT_MS = 250
+RUNTIME_BUSY_TIMEOUT_MS = 10_000
+_RETRYABLE_SQLITE_CODES = frozenset({5, 6})  # SQLITE_BUSY / SQLITE_LOCKED
+
+
+class AttemptJournalUnavailable(RuntimeError):
+    """The durable journal could not be opened after bounded lock retries."""
+
+    code = "ATTEMPT_JOURNAL_UNAVAILABLE"
+
+    def __init__(self, message: str | None = None) -> None:
+        super().__init__(message or self.code)
+
+
+def _is_retryable_lock_error(exc: BaseException) -> bool:
+    """True only for transient SQLite lock/busy errors, never for real errors."""
+    code = getattr(exc, "sqlite_errorcode", None)
+    if isinstance(code, int) and (code & 0xFF) in _RETRYABLE_SQLITE_CODES:
+        return True
+    text = str(exc).lower()
+    return "database is locked" in text or "database table is locked" in text \
+        or "database schema is locked" in text or "database is busy" in text
 
 
 def _locked(method):
@@ -48,18 +86,52 @@ def _utc() -> str:
 
 
 class AttemptJournal:
-    def __init__(self, sqlite_path: str | Path = ATTEMPTS_PATH):
+    def __init__(self, sqlite_path: str | Path = ATTEMPTS_PATH, *,
+                 init_retry_seconds: float = DEFAULT_INIT_RETRY_SECONDS,
+                 init_retry_interval: float = DEFAULT_INIT_RETRY_INTERVAL_SECONDS):
         self.path = Path(sqlite_path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.RLock()
+        self.init_attempts = 0
         self.conn = sqlite3.connect(str(self.path), timeout=10, isolation_level=None,
                                     check_same_thread=False)
         self.conn.row_factory = sqlite3.Row
-        self.conn.execute("PRAGMA journal_mode=WAL")
-        self.conn.execute("PRAGMA synchronous=FULL")
-        self.conn.execute("PRAGMA foreign_keys=ON")
-        self.conn.execute("PRAGMA busy_timeout=10000")
-        self._ddl()
+        try:
+            self._initialize(max(float(init_retry_seconds), 0.0),
+                             max(float(init_retry_interval), 0.001))
+        except BaseException:
+            try:
+                self.conn.close()
+            except sqlite3.Error:
+                pass
+            raise
+
+    def _initialize(self, retry_seconds: float, retry_interval: float) -> None:
+        """Set pragmas/DDL with a bounded retry on transient SQLite locks.
+
+        Ordering matters: ``busy_timeout`` must be installed *before* the
+        ``journal_mode=WAL`` transition. The short init timeout keeps the total
+        wall-clock bound under our control (``retry_seconds``) while the
+        runtime timeout is raised to the normal 10 s only after success.
+        """
+        deadline = time.monotonic() + retry_seconds
+        while True:
+            self.init_attempts += 1
+            try:
+                self.conn.execute(f"PRAGMA busy_timeout={INIT_BUSY_TIMEOUT_MS}")
+                self.conn.execute("PRAGMA journal_mode=WAL")
+                self.conn.execute("PRAGMA synchronous=FULL")
+                self.conn.execute("PRAGMA foreign_keys=ON")
+                self._ddl()
+                self.conn.execute(f"PRAGMA busy_timeout={RUNTIME_BUSY_TIMEOUT_MS}")
+                return
+            except sqlite3.OperationalError as exc:
+                if not _is_retryable_lock_error(exc):
+                    raise
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise AttemptJournalUnavailable() from exc
+                time.sleep(min(retry_interval, remaining))
 
     def _ddl(self) -> None:
         self.conn.executescript("""
@@ -92,7 +164,18 @@ CREATE TABLE IF NOT EXISTS g3b_request_identities (
         existing = {row[1] for row in self.conn.execute("PRAGMA table_info(g3b_attempts)")}
         for name, kind in _ATTEMPT_COLUMNS.items():
             if name not in existing:
-                self.conn.execute(f"ALTER TABLE g3b_attempts ADD COLUMN {name} {kind}")
+                try:
+                    self.conn.execute(f"ALTER TABLE g3b_attempts ADD COLUMN {name} {kind}")
+                except sqlite3.OperationalError as exc:
+                    # Two cold initialisers can both observe the pre-migration
+                    # schema and race the same ADD COLUMN. Losing that benign
+                    # race is success as long as the column now exists.
+                    if "duplicate column name" not in str(exc).lower():
+                        raise
+                    current = {row[1] for row in
+                               self.conn.execute("PRAGMA table_info(g3b_attempts)")}
+                    if name not in current:
+                        raise
 
     @_locked
     def register_admission(self, admission_id: str, admission_sha256: str,
