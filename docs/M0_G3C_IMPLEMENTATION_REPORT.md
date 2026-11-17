@@ -3,7 +3,7 @@
 > **状态**：G3-C 实现与无 Key 证据已完成；独立 Review 结论 `PARTIAL`（无 P0，3 个 P1）。本版为 **PR1 修复后**更新：P1-2 代码/测试见 `b2f6af054555705192c4e1ae3019a68078764736`，P1-1/P1-3 为文档/矩阵证据索引修正。
 > **不是** G3-D PASS，**不是** Live/G4/G5/M0 GO 授权；OS 信任边界仍 `BLOCKED`。
 > **身份**：Base `bb5bd0bf83e22130ed0d81c54f54a4673654cfe3`（G3-B final + secret-scan）；G0 `e107e22`；原始 Implementation `e6fde1cdf0bec9e957e98d569b257c8f17dfa363`；**P1-2 fix** `b2f6af054555705192c4e1ae3019a68078764736`（父 `78be77c`）。
-> **Docs commit**：包含本报告/Findings/矩阵修正的 docs commit（父 `b2f6af0`）；其 SHA 记录于本文件与 Lead 汇报。
+> **Docs commits**：主体 `9ffa0b11c1a32cd023e0192e4763565f4f7de946`（父 `b2f6af0`，报告/Findings/矩阵修正）+ 其后交叉引用/文字修正（本文件最终 HEAD）；两份 SHA 记录于 Lead 汇报。
 > **矩阵**：`docs/Autonomous_Teacher_M0_G3C_G3D_Test_Evidence_Matrix_v1.0.csv`，69 行 = **PASS 53 / NOT_RUN 16**（D 行 16 项全部 NOT_RUN、原字节未改）。`impl_sha` 统一指向 PR1 fix `b2f6af0`；旧 trace 的生成身份仍可由 `commands.jsonl`/`argv.json` 追溯到 `e6fde1c`。
 > **无 Key 声明**：0 真实 Key / 0 真实模型 / 0 外部付费 HTTP / 0 Live；所有真实 DSH 运行均在固定 rootfs、`--network none`、Fake Provider 下完成。
 
@@ -33,7 +33,7 @@
 | 证据脚手架 | `f84b121` / `854bab6` / `8f04b53` |
 | C3-04A 修复 | `3675a41` |
 | 证据 runner/analyze | `e6fde1c` |
-| **PR1 docs commit** | 本报告/Findings/矩阵修正所在 commit（父 `b2f6af0`） |
+| **PR1 docs commits** | 主体 `9ffa0b11c1a32cd023e0192e4763565f4f7de946`（父 `b2f6af0`）+ 其后交叉引用/文字修正 |
 | 分支/远端 | `main`；**未 push**（远端仍为 `bb5bd0b`） |
 
 逐提交与「实施范围」：
@@ -206,7 +206,7 @@ b2f6af0 fix: G3-C deterministic two-controller cold start (no-key)
 | 真实 DSH 冒烟 Echo | `artifacts/g3c/pr1/traces/echo/dsh-result.json`；日志 `artifacts/g3c/pr1/logs/echo.log` | `ok/completed`，1 attempt `SETTLED`，controller exit 0，DSH usage == receipt | 0 |
 | 真实 DSH 冒烟 Tool | `artifacts/g3c/pr1/traces/tool/dsh-result.json`；日志 `artifacts/g3c/pr1/logs/tool.log` | 2 attempts `SETTLED`，2 assistant messages，1 tool-result，controller exit 0 | 0 |
 
-说明：OCI full 在固定 rootfs 内执行了同一 20 轮双 Controller 冷启动测试（通过），覆盖 uid 65534、只读 rootfs、`--network none` 下的 singleton/WAL 行为；但它仍不是“两个真实 DSH 客户端同 Claim”的运行（worker 每个进程自带 Controller/admission），该残余见 §14.13。
+说明：OCI full 在固定 rootfs 内执行了同一 20 轮双 Controller 冷启动测试（通过），覆盖 uid 65534、只读 rootfs、`--network none` 下的 singleton/WAL 行为；但它仍不是“两个真实 DSH 客户端同 Claim”的运行（worker 每个进程自带 Controller/admission），该残余见 §14.14。
 
 环境/卫生：rootfs canonical 前后均为 `25491e45aa3dc54c526db9b9d46d18b31c7840150473e2fdb4d8b882f02fe9c0`；deps 前后均为 `e07729d7997944417b1c25531749b3e6e5e34aa4248f01dc8f370282082ecb98`；OCI runner 前后 rootfs canonical；`podman ps -a` 空；无残留 Broker/Fake/Controller/DSH 进程。
 
