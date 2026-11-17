@@ -97,10 +97,17 @@ RUN_ID_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,80}\Z", re.ASCII)
 SCENARIO_ADMISSION = {
     "echo": {"fake_scenario": "ok_usage", "max_calls": 1},
     "tool": {"fake_scenario": "tool", "max_calls": 2},
+    # D2 attack probes are raw-UDS negative/positive clients inside the real
+    # Candidate container; they need several independent calls per Run.
+    "attack": {"fake_scenario": "ok_usage", "max_calls": 8},
+    # D2-11 Resume is exactly two real DSH turns in one persisted session.
+    "resume": {"fake_scenario": "ok_usage", "max_calls": 2},
 }
 SCENARIO_PROMPT = {
     "echo": "G3D_ECHO",
     "tool": "Use skill_lookup to look up binary_search",
+    "attack": "G3D_D2_ATTACK",
+    "resume": "G3D_RESUME_ALPHA 7f3a9c",
 }
 REQUIRED_CONTROLLER_KEYS = {
     "admission_path", "broker_config_path", "fake_script", "receipt_dir",
@@ -824,7 +831,8 @@ class Launcher:
         argv = lib.trusted_run_argv(
             podman="podman", rootfs=str(lib.ROOTFS),
             stage_trusted=str(self.stage_dir / "trusted"), deps=str(lib.DEPS),
-            run_dir=str(self.run_dir), name=self.trusted_name)
+            run_dir=str(self.run_dir), name=self.trusted_name,
+            crash_hook=getattr(self, "crash_hook", None))
         problems = lib.argv_contract_problems(
             argv, role="trusted", run_dir=str(self.run_dir),
             stage_dir=str(self.stage_dir / "trusted"))

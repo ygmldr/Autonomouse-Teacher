@@ -443,6 +443,25 @@ def _assemble_stage(*, base: str, stage_dir: Path, identity: dict,
         "bytes": written["bytes"],
         "source": {**_source_worktree(entry_source), "path": entry_source},
     })
+    # D2 audited adversarial probes (candidate-side, exact allow-list).
+    probe_root = lib.REPO_ROOT / "scripts" / "g3d" / "probes"
+    probe_sources = sorted(probe_root.glob("*.py"))
+    found_probes = {path.name for path in probe_sources}
+    if found_probes != set(lib.D2_PROBE_FILES):
+        fail(lib.EXIT_STAGE_INVALID, "D2 probe set does not match the allow-list",
+             missing=sorted(set(lib.D2_PROBE_FILES) - found_probes),
+             extra=sorted(found_probes - set(lib.D2_PROBE_FILES)))
+    for source_path in probe_sources:
+        relative = f"run/probes/{source_path.name}"
+        written = _write_stage_file(candidate / "run" / "probes" / source_path.name,
+                                    source_path.read_bytes())
+        candidate_rows.append({
+            "path": relative, "sha256": written["sha256"],
+            "bytes": written["bytes"],
+            "source": {**_source_worktree(f"scripts/g3d/probes/{source_path.name}"),
+                       "path": f"scripts/g3d/probes/{source_path.name}"},
+        })
+    patch_source = "config/g3d/candidate/bridge.patch.yml"
     patch_source = "config/g3d/candidate/bridge.patch.yml"
     patch_bytes = (lib.REPO_ROOT / patch_source).read_bytes()
     if b"/probe/" in patch_bytes or b"/work/state" in patch_bytes:

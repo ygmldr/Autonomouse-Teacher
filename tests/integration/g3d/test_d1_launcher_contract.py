@@ -528,8 +528,12 @@ def test_scenario_admission_is_frozen_per_scenario() -> None:
     # A caller cannot mutate the module-level table through the returned dict.
     echo["max_calls"] = 99
     assert launcher_mod.SCENARIO_ADMISSION["echo"]["max_calls"] == 1
-    with pytest.raises(lib.G3DError):
-        launcher_mod.scenario_admission("resume")
+    # D2 additive scenarios: the D1 echo/tool entries above stay byte-frozen;
+    # the adversarial/Resume runs need their own bounded call budgets.
+    assert launcher_mod.scenario_admission("attack") == {
+        "fake_scenario": "ok_usage", "max_calls": 8}
+    assert launcher_mod.scenario_admission("resume") == {
+        "fake_scenario": "ok_usage", "max_calls": 2}
 
 
 def test_scenario_prompt_and_default_argv() -> None:
@@ -542,8 +546,10 @@ def test_scenario_prompt_and_default_argv() -> None:
     assert echo_args.prompt == "G3D_ECHO"
     explicit = launcher_mod.parse_args(["--scenario", "tool", "--prompt", "custom"])
     assert explicit.prompt == "custom"
-    with pytest.raises(SystemExit):
-        launcher_mod.parse_args(["--scenario", "resume"])
+    # D2 additive scenarios are now accepted by the same launcher CLI.
+    assert launcher_mod.scenario_prompt("attack") == "G3D_D2_ATTACK"
+    assert launcher_mod.parse_args(["--scenario", "resume"]).prompt == (
+        "G3D_RESUME_ALPHA 7f3a9c")
 
 
 def test_pair_tool_ledger_joins_by_durable_ids_not_list_order() -> None:

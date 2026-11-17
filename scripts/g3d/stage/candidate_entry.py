@@ -24,6 +24,7 @@ import json
 import os
 from pathlib import Path
 import platform
+import re
 import socket
 import stat
 import sys
@@ -41,6 +42,8 @@ MAX_TRACE = 2000
 GROUP_SOCKET = 2000
 SOCKET_MODE = 0o660
 KEY_MARKERS = ("KEY", "TOKEN", "SECRET", "CREDENTIAL", "PASSWORD")
+SCENARIOS = frozenset({"echo", "tool", "resume"})
+LABEL_PATTERN = re.compile(r"[a-z0-9][a-z0-9-]{0,32}\Z")
 
 
 def utc() -> str:
@@ -86,6 +89,11 @@ def write_json_nofollow(path: Path, document: dict, *, mode: int = 0o600) -> dic
     os.chmod(path, mode)
     return {"path": str(path), "sha256": hashlib.sha256(data).hexdigest(),
             "bytes": len(data)}
+
+
+def evidence_name(base: str, label: str | None) -> str:
+    suffix = f"-{label}" if label else ""
+    return f"{base}{suffix}.json"
 
 
 def errno_of(callable_) -> dict:
@@ -397,6 +405,20 @@ def scenario_verdict(result: dict | None, scenario: str) -> tuple[bool, str | No
         if not usages or not isinstance(usages[-1], dict):
             return False, "USAGE_MISSING", detail
         return True, None, detail
+    if scenario == "resume":
+        resume = result.get("resume") if isinstance(result.get("resume"), dict) else {}
+        detail["resume"] = {"used": resume.get("used"),
+                            "resume_marker_count":
+                                (resume.get("sessions") or {}).get("resume_marker_count"),
+                            "session_lines":
+                                (resume.get("sessions") or {}).get("total_lines")}
+        if resume.get("used") is not True:
+            return False, "RESUME_SDK_NOT_USED", detail
+        if not usages or not isinstance(usages[-1], dict):
+            return False, "USAGE_MISSING", detail
+        if int(detail["resume"]["resume_marker_count"] or 0) < 1:
+            return False, "RESUME_MARKER_MISSING", detail
+        return True, None, detail
     if scenario != "tool":
         return False, "UNSUPPORTED_SCENARIO", detail
     if len(messages) != 2 or not all(isinstance(item, dict) for item in usages):
@@ -415,7 +437,47 @@ def scenario_verdict(result: dict | None, scenario: str) -> tuple[bool, str | No
     return True, None, detail
 
 
-def run_dsh(*, scenario: str, session_id: str, prompt: str) -> dict:
+def session_evidence() -> dict:
+    """Record the persisted DSH session files visible to the Candidate.
+
+    The Candidate may read its own session tree; this is evidence that the
+    second process resumed real persisted history, not a replay invented by the
+    launcher. Only bounded regular files are read and only path/size/SHA/line
+    counts plus a resume-marker count are emitted (never prompt text).
+    """
+    root = SESSION / "dsh-home" / "sessions"
+    files: list[dict] = []
+    total_lines = 0
+    resume_markers = 0
+    if root.is_dir():
+        for path in sorted(root.rglob("*.jsonl"))[:16]:
+            try:
+                info = os.lstat(path)
+                if not stat.S_ISREG(info.st_mode) or info.st_size > (16 << 20):
+                    files.append({"path": str(path), "rejected": True})
+                    continue
+                data = path.read_bytes()
+            except OSError as exc:
+                files.append({"path": str(path), "error": type(exc).__name__})
+                continue
+            lines = data.count(b"\n")
+            markers = len(re.findall(rb'"reason"\s*:\s*"resume"', data))
+            total_lines += lines
+            resume_markers += markers
+            files.append({
+                "path": str(path.relative_to(SESSION)),
+                "bytes": len(data),
+                "sha256": hashlib.sha256(data).hexdigest(),
+                "lines": lines,
+                "resume_marker_count": markers,
+            })
+    return {"root": str(root.relative_to(SESSION)), "files": files,
+            "total_lines": total_lines, "resume_marker_count": resume_markers,
+            "exists": root.is_dir()}
+
+
+def run_dsh(*, scenario: str, session_id: str, prompt: str,
+            resume: bool = False, label: str | None = None) -> dict:
     EVIDENCE.mkdir(parents=True, exist_ok=True)
     (SESSION / "dsh-home").mkdir(exist_ok=True)
     (SESSION / "workspace").mkdir(exist_ok=True)
@@ -444,7 +506,11 @@ def run_dsh(*, scenario: str, session_id: str, prompt: str) -> dict:
             shutdown_timeout_seconds=5,
         )
         harness.start()
-        result = harness.run(prompt, session_id=session_id,
+        if resume:
+            session = harness.resume_session(session_id)
+        else:
+            session = harness.start_session(session_id)
+        result = session.run(prompt,
                              on_notification=lambda note: trace_event(notifications, note))
     except Exception as exc:  # noqa: BLE001 - terminal state is evidence
         error = {"type": type(exc).__name__, "message": str(exc)[:2000]}
@@ -484,8 +550,12 @@ def run_dsh(*, scenario: str, session_id: str, prompt: str) -> dict:
         "processes_after": process_rows(),
         "env": dsh_env(),
         "env_names": sorted(os.environ),
+        "resume": {"used": bool(resume),
+                   "sdk_call": "resume_session" if resume else "start_session",
+                   "sessions": session_evidence()},
     }
-    write_json_nofollow(EVIDENCE / "dsh-result.json", summary, mode=0o600)
+    write_json_nofollow(EVIDENCE / evidence_name("dsh-result", label), summary,
+                        mode=0o600)
     return summary
 
 
@@ -494,19 +564,30 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--scenario", default="echo")
     parser.add_argument("--session", default="g3d-d1-s1")
     parser.add_argument("--prompt", default=None)
+    parser.add_argument("--mode", default="dsh", choices=("dsh", "hold"))
+    parser.add_argument("--hold-seconds", type=int, default=600)
+    parser.add_argument("--label", default="")
     args = parser.parse_args(argv)
-    if args.scenario not in {"echo", "tool"}:
+    label = args.label or None
+    if label is not None and not LABEL_PATTERN.fullmatch(label):
+        sys.stderr.write("CANDIDATE_LABEL_INVALID\n")
+        return 2
+    if args.scenario not in SCENARIOS:
         sys.stderr.write("CANDIDATE_SCENARIO_UNSUPPORTED\n")
         return 2
-    if args.prompt is None:
+    if args.mode == "hold":
+        if not 0 < args.hold_seconds <= 3600:
+            sys.stderr.write("CANDIDATE_HOLD_SECONDS_INVALID\n")
+            return 2
+    elif args.prompt is None:
         args.prompt = ("Use skill_lookup to look up binary_search"
                        if args.scenario == "tool" else "G3D_ECHO")
     principal = principal_checks()
     EVIDENCE.mkdir(parents=True, exist_ok=True)
-    principal_record = write_json_nofollow(EVIDENCE / "principal.json", principal,
-                                           mode=0o600)
+    principal_record = write_json_nofollow(
+        EVIDENCE / evidence_name("principal", label), principal, mode=0o600)
     emit("candidate-principal", ok=not principal["problems"],
-         problems=principal["problems"],
+         problems=principal["problems"], mode=args.mode, label=label,
          uid=principal["uid"], gid=principal["gid"], groups=principal["groups"],
          uid_map=principal["uid_map"], gid_map=principal["gid_map"],
          socket=principal["socket"], network=principal["network"],
@@ -515,11 +596,23 @@ def main(argv: list[str] | None = None) -> int:
         emit("candidate-result", ok=False, reason="PRINCIPAL",
              problems=principal["problems"])
         return 6
+    if args.mode == "hold":
+        # D2 attack container: a real Candidate process staying alive while the
+        # Host Launcher execs audited probes into its namespaces. It holds no
+        # trusted state and never talks to the bridge itself.
+        emit("candidate-hold", ok=True, label=label,
+             hold_seconds=args.hold_seconds)
+        try:
+            time.sleep(args.hold_seconds)
+        except KeyboardInterrupt:
+            pass
+        return 0
     result = run_dsh(scenario=args.scenario, session_id=args.session,
-                     prompt=args.prompt)
+                     prompt=args.prompt, resume=(args.scenario == "resume"),
+                     label=label)
     ok, reason, detail = scenario_verdict(result, args.scenario)
     usages = detail.get("usages") or []
-    emit("candidate-result", ok=ok, reason=reason,
+    emit("candidate-result", ok=ok, reason=reason, label=label,
          final_response=result.get("final_response"),
          finish_reason=result.get("finish_reason"),
          usage=usages[-1] if usages else None, usages=usages,
@@ -527,6 +620,7 @@ def main(argv: list[str] | None = None) -> int:
          tool_calls=len(detail.get("tool_calls") or []),
          tool_results=len(detail.get("tool_results") or []),
          event_count=result.get("event_count"),
+         resume=detail.get("resume"),
          error=result.get("error"), session_id=result.get("session_id"))
     return 0 if ok else 7
 

@@ -82,8 +82,40 @@ ALLOWED_DIRTY_PREFIXES = (
     "scripts/g3d/",
     "config/g3d/",
     "tests/integration/g3d/test_d1_launcher_contract.py",
+    "tests/integration/g3d/test_d2_",
     "docs/M0_G3D_D1B_REPORT.md",
+    "docs/M0_G3D_D2",
 )
+
+# D2 adversarial probes are audited candidate-stage Python files. They are the
+# only Python files (besides run/candidate_entry.py) the candidate stage may
+# carry; the allow-list is exact so a mistyped/extra probe fails the stage.
+D2_PROBE_DIR = "run/probes"
+D2_PROBE_FILES = frozenset({
+    "probe_common.py",
+    "d2_01_read_state.py",
+    "d2_02_write_state.py",
+    "d2_03_state_classes.py",
+    "d2_04_broker_access.py",
+    "d2_05_bypass_claim.py",
+    "d2_06_forged_frames.py",
+    "d2_07_network.py",
+    "d2_08_kernel_surface.py",
+    "d2_09_tool_plugin.py",
+    "d2_10_disconnect.py",
+    "d2_12_stress.py",
+    "d2_13_dac_control.py",
+    "d2_14_stale_run.py",
+})
+D2_PROBE_PATHS = frozenset(f"{D2_PROBE_DIR}/{name}" for name in D2_PROBE_FILES)
+AUX_ROLES = frozenset({"control", "stale", "stress"})
+TRUSTED_CRASH_HOOKS = frozenset({
+    "after_reserve_before_claim",
+    "after_claim_before_attempt_start",
+    "after_attempt_start_before_fake_send",
+    "after_fake_receive_before_response",
+    "after_response_before_settlement",
+})
 
 FAIL_REASONS = {
     EXIT_PREFLIGHT_IDENTITY: "PREFLIGHT_IDENTITY",
@@ -617,7 +649,8 @@ def container_name(run_id: str, role: str) -> str:
     return f"{CONTAINER_PREFIX}{role}-{run_id}"
 
 
-def _base_security_flags() -> list[str]:
+def _base_security_flags(*, pids_limit: int = 256, memory: str = "1g",
+                         cpus: str = "1") -> list[str]:
     return [
         "--network", "none",
         "--http-proxy=false",
@@ -627,10 +660,10 @@ def _base_security_flags() -> list[str]:
         "--read-only-tmpfs=false",
         "--cap-drop", "ALL",
         "--security-opt", "no-new-privileges",
-        "--pids-limit", "256",
-        "--memory", "1g",
-        "--memory-swap", "1g",
-        "--cpus", "1",
+        "--pids-limit", str(int(pids_limit)),
+        "--memory", memory,
+        "--memory-swap", memory,
+        "--cpus", cpus,
         "--ulimit", "nofile=4096:4096",
     ]
 
@@ -639,8 +672,18 @@ def trusted_run_argv(*, podman: str, rootfs: str, stage_trusted: str, deps: str,
                      run_dir: str, name: str,
                      config_path: str = CONTROLLER_CONFIG_PATH,
                      timeout_s: int = 300,
-                     evidence_dir: str | None = None) -> list[str]:
+                     evidence_dir: str | None = None,
+                     crash_hook: str | None = None) -> list[str]:
     evidence = evidence_dir or str(Path(run_dir) / "evidence")
+    extra_env: list[str] = []
+    if crash_hook is not None:
+        if crash_hook not in TRUSTED_CRASH_HOOKS:
+            raise G3DError("unknown trusted crash hook",
+                           exit_code=EXIT_STAGE_INVALID,
+                           detail={"crash_hook": crash_hook})
+        # Product test-only hook: requires *both* env vars and is used only for
+        # trusted fault injection, never for a candidate attack observation.
+        extra_env = ["--env", "G3B_TEST_MODE=1", "--env", f"G3B_CRASH_HOOK={crash_hook}"]
     argv = [podman, "run", "-d", "--name", name, "--rootfs",
             "--timeout", str(int(timeout_s)),
             "--userns=host", "--user", "0:0",
@@ -650,6 +693,7 @@ def trusted_run_argv(*, podman: str, rootfs: str, stage_trusted: str, deps: str,
             "--env", "PYTHONPATH=/project/src:/deps",
             "--env", "PYTHONDONTWRITEBYTECODE=1",
             "--env", "TMPDIR=/tmp",
+            *extra_env,
             "--tmpfs", "/tmp:rw,noexec,nosuid,nodev,size=64m,mode=1777",
             "--tmpfs", "/work:rw,noexec,nosuid,nodev,size=256m,mode=1777",
             "--mount", f"type=bind,src={stage_trusted},dst=/project,ro=true",
@@ -669,7 +713,9 @@ def trusted_run_argv(*, podman: str, rootfs: str, stage_trusted: str, deps: str,
 def candidate_run_argv(*, podman: str, rootfs: str, stage_candidate: str, deps: str,
                        run_dir: str, name: str, scenario: str = "echo",
                        session: str = "g3d-d1-s1", prompt: str = "G3D_ECHO",
-                       timeout_s: int = 300) -> list[str]:
+                       timeout_s: int = 300, mode: str = "dsh",
+                       label: str | None = None,
+                       hold_seconds: int = 600) -> list[str]:
     argv = [podman, "run", "-d", "--name", name, "--rootfs",
             "--timeout", str(int(timeout_s)),
             "--uidmap", "0:65534:1",
@@ -699,10 +745,158 @@ def candidate_run_argv(*, podman: str, rootfs: str, stage_candidate: str, deps: 
             "--workdir", "/work/session",
             "--systemd=false",
             rootfs, "/opt/python/bin/python3.11", "-B",
-            "/project/run/candidate_entry.py",
-            "--scenario", scenario, "--session", session, "--prompt", prompt]
+            "/project/run/candidate_entry.py"]
+    if mode == "hold":
+        argv.extend(["--mode", "hold", "--hold-seconds", str(int(hold_seconds)),
+                     "--label", str(label or "hold")])
+    elif mode == "dsh":
+        argv.extend(["--scenario", scenario, "--session", session,
+                     "--prompt", prompt])
+        if label:
+            argv.extend(["--label", str(label)])
+    else:
+        raise G3DError("unknown candidate mode", exit_code=EXIT_STAGE_INVALID,
+                       detail={"mode": mode})
     return argv
 
+
+def aux_run_argv(*, podman: str, rootfs: str, stage_candidate: str, deps: str,
+                 run_dir: str, name: str, role: str, probe: str,
+                 probe_args: Sequence[str] = (), timeout_s: int = 300,
+                 pids_limit: int = 256, memory: str = "1g",
+                 cpus: str = "1") -> list[str]:
+    """Build a Candidate-identity auxiliary container for one D2 probe.
+
+    Every auxiliary container keeps the Candidate UID/GID map, private
+    namespaces, ``--network none``, ``--cap-drop ALL`` and read-only rootfs.
+    The only differences are auditable:
+    * ``control`` gets an extra *read-only* state mount (D2-13 CONTROL, never a
+      positive Candidate configuration);
+    * ``stale`` mounts a different (empty/stale) IPC directory, not this run's;
+    * ``stress`` uses the frozen lower cgroup limits (8 pids / 128 MiB).
+    """
+    if role not in AUX_ROLES:
+        raise G3DError("unknown auxiliary role", exit_code=EXIT_STAGE_INVALID,
+                       detail={"role": role})
+    if probe not in D2_PROBE_FILES:
+        raise G3DError("probe is not in the audited D2 allow-list",
+                       exit_code=EXIT_STAGE_INVALID, detail={"probe": probe})
+    stale_ipc = Path(run_dir) / "stale-ipc"
+    ipc_source = stale_ipc if role == "stale" else Path(run_dir) / "ipc"
+    argv = [podman, "run", "--rm", "--name", name, "--rootfs",
+            "--timeout", str(int(timeout_s)),
+            "--uidmap", "0:65534:1",
+            "--gidmap", "0:65534:1",
+            "--gidmap", "2000:2000:1",
+            "--user", "0:0",
+            "--group-add", str(GROUP_SOCKET),
+            *_base_security_flags(pids_limit=pids_limit, memory=memory, cpus=cpus),
+            "--env", "PATH=/opt/python/bin:/usr/bin",
+            "--env", "HOME=/work/session",
+            "--env", "PYTHONPATH=/deps",
+            "--env", "PYTHONDONTWRITEBYTECODE=1",
+            "--env", "TMPDIR=/tmp",
+            "--env", "NO_COLOR=1",
+            "--tmpfs", "/tmp:rw,noexec,nosuid,nodev,size=128m,mode=1777",
+            "--tmpfs", "/work:rw,noexec,nosuid,nodev,size=512m,mode=1777",
+            "--mount", f"type=bind,src={stage_candidate},dst=/project,ro=true",
+            "--mount", f"type=bind,src={deps},dst=/deps,ro=true",
+            "--mount", f"type=bind,src={stage_candidate}/etc/passwd,dst=/etc/passwd,ro=true",
+            "--mount", f"type=bind,src={stage_candidate}/etc/group,dst=/etc/group,ro=true",
+            "--mount", f"type=bind,src={Path(run_dir) / 'candidate-session'},dst=/work/session,rw=true",
+            "--mount", f"type=bind,src={ipc_source},dst=/work/g3b,ro=true"]
+    if role == "control":
+        argv.extend(["--mount",
+                     f"type=bind,src={Path(run_dir) / 'state'},dst=/work/state,ro=true"])
+    argv.extend([
+        "--workdir", "/work/session",
+        "--systemd=false",
+        rootfs, "/opt/python/bin/python3.11", "-B",
+        f"/project/run/probes/{probe}",
+        *[str(value) for value in probe_args],
+    ])
+    return argv
+
+
+def aux_argv_contract_problems(argv: Sequence[str], *, role: str,
+                               run_dir: str, stage_dir: str,
+                               probe: str) -> list[str]:
+    """Assert the D2 auxiliary container contract (fail closed on any drift)."""
+    if role not in AUX_ROLES:
+        return [f"unknown_role:{role}"]
+    problems: list[str] = []
+    tokens = [str(token) for token in argv]
+    joined = "\n".join(tokens)
+
+    def require_pair(first: str, second: str) -> None:
+        for index, token in enumerate(tokens[:-1]):
+            if token == first and tokens[index + 1] == second:
+                return
+        problems.append(f"missing:{first} {second}")
+
+    require_pair("--network", "none")
+    require_pair("--cap-drop", "ALL")
+    require_pair("--security-opt", "no-new-privileges")
+    require_pair("--uidmap", "0:65534:1")
+    require_pair("--gidmap", "0:65534:1")
+    require_pair("--gidmap", "2000:2000:1")
+    require_pair("--group-add", str(GROUP_SOCKET))
+    require_pair("--user", "0:0")
+    if "--read-only" not in tokens:
+        problems.append("missing:--read-only")
+    for forbidden in ("--privileged", "--userns=host", "--pid=host", "--ipc=host",
+                      "--net=host", "-v", "--volume", "--device"):
+        if forbidden in tokens:
+            problems.append(f"forbidden:{forbidden}")
+    if "podman.sock" in joined or "/var/run/docker.sock" in joined:
+        problems.append("forbidden:engine_socket")
+    for value in argv_env(argv):
+        name = value.split("=", 1)[0]
+        if key_like_names([name]):
+            problems.append(f"forbidden:key_like_env:{name}")
+    if probe not in D2_PROBE_FILES:
+        problems.append(f"probe_not_allowlisted:{probe}")
+    if not any(token.endswith(f"/project/run/probes/{probe}") for token in tokens):
+        problems.append("missing:probe_entrypoint")
+    mounts = argv_mounts(argv)
+    if not any(mount.endswith("dst=/project,ro=true") for mount in mounts):
+        problems.append("missing:project_ro_mount")
+    if not any(mount.endswith("dst=/deps,ro=true") for mount in mounts):
+        problems.append("missing:deps_ro_mount")
+    if any("dst=/output" in mount for mount in mounts):
+        problems.append("forbidden:evidence_mount")
+    state_mounts = [mount for mount in mounts if "dst=/work/state" in mount]
+    ipc_mounts = [mount for mount in mounts if "dst=/work/g3b" in mount]
+    if len(ipc_mounts) != 1:
+        problems.append(f"ipc_mount_count:{len(ipc_mounts)}")
+    if role == "control":
+        if state_mounts != [f"type=bind,src={Path(run_dir) / 'state'},"
+                            "dst=/work/state,ro=true"]:
+            problems.append("control_missing_exact_state_ro_mount")
+        if not all(mount.endswith(",ro=true") for mount in state_mounts):
+            problems.append("control_state_not_read_only")
+        if ipc_mounts and not ipc_mounts[0].endswith(",ro=true"):
+            problems.append("control_ipc_not_read_only")
+    elif state_mounts:
+        problems.append(f"forbidden:{role}_state_mount")
+    if role == "stale":
+        expected = f"type=bind,src={Path(run_dir) / 'stale-ipc'},dst=/work/g3b,ro=true"
+        if ipc_mounts != [expected]:
+            problems.append("stale_ipc_mount_not_isolated")
+    elif role in {"control", "stress"}:
+        expected = f"type=bind,src={Path(run_dir) / 'ipc'},dst=/work/g3b,ro=true"
+        if ipc_mounts != [expected]:
+            problems.append(f"{role}_ipc_mount_wrong")
+    if role == "stress":
+        require_pair("--pids-limit", "8")
+        require_pair("--memory", "128m")
+        require_pair("--memory-swap", "128m")
+    if role in {"control", "stale"}:
+        require_pair("--pids-limit", "256")
+        require_pair("--memory", "1g")
+    if any(b"stage_candidate" in mount.encode() for mount in mounts):
+        problems.append("forbidden:candidate_stage_placeholder")
+    return problems
 
 def argv_mounts(argv: Sequence[str]) -> list[str]:
     values: list[str] = []
@@ -1064,8 +1258,9 @@ def forbidden_candidate_reasons(relpaths: Iterable[str]) -> list[str]:
         if name.endswith(FORBIDDEN_CANDIDATE_SUFFIXES):
             reasons.append(f"forbidden_suffix:{relative}")
         if name.endswith(".py") and "site-packages" not in relative:
-            # Candidate stage carries exactly one audited Python entrypoint.
-            if relative != "run/candidate_entry.py":
+            # The candidate stage carries exactly one audited entrypoint plus
+            # the exact D2 probe allow-list; anything else fails the stage.
+            if relative != "run/candidate_entry.py" and relative not in D2_PROBE_PATHS:
                 reasons.append(f"unexpected_python:{relative}")
     return sorted(set(reasons))
 
