@@ -214,6 +214,7 @@ D2-13/14/12 的辅助容器同样使用 **Candidate 的 UID/GID 映射与安全�
 | D2-12 | 最终仅 1 套账本（stress 不产生额外 Claim/Fake） |
 | D2-11 / D2-15 | 1/2/2 套 SETTLED，usage 与 receipt 对账 |
 | Admission | 每个 Run 恰好 1 条 consumed；无重复 admission / head-of-line 复用 |
+| **19 Run 合计** | Reservation **14**、Claim **14**、Attempt **14**、Receipt **13**（D2-10-trusted 在 Fake 发送前被杀，无 receipt）；所有有 cost 的行 cost>0，无 FREE/NOT_DISPATCHED |
 
 ### 6.2 清理、容器与 canonical
 
