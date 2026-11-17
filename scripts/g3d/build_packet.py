@@ -1063,6 +1063,8 @@ def build(args: argparse.Namespace) -> int:
         "docs_sha": docs_sha,
         "docs_parent_sha": git("rev-parse", f"{docs_sha}^").strip(),
         "head_at_packet": git("rev-parse", "HEAD").strip(),
+        "regression_head": ((D4 / "head.txt").read_text().strip()
+                            if (D4 / "head.txt").is_file() else None),
         "stage": {
             "path": D3_STAGE,
             "manifest_sha256": D3_STAGE_MANIFEST,
@@ -1207,6 +1209,8 @@ base_sha={base}
 implementation_sha={impl}
 implementation_code_sha={CODE_SHA}
 docs_sha={docs_sha}
+head_at_packet={git("rev-parse", "HEAD").strip()}
+regression_head={((D4 / "head.txt").read_text().strip() if (D4 / "head.txt").is_file() else "n/a")}
 stage_manifests_sha256={D3_STAGE_MANIFEST}
 runtime_rootfs_sha256={rootfs_hash}
 deps_sha256={deps_hash}

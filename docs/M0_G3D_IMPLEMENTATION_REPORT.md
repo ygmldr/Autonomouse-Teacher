@@ -39,7 +39,8 @@
 | D3 故障/并发 | `ef84f57db93f4d8f9bd00dcb8e31ae2075995ace` | `d3_runner.py`、`d3_probes/**`、suite；父 `bb34931` |
 | D3 OCI/可移植性修正 | `dc8214e0963018a3fa2ab26676d6a0f911841f3c` | 跳过/清理/测试修正 |
 | D3 最终实现 | `cf40c6bfb84ceae98e795db19efa955aa3035991` | 显式 4 deselect、保持 D1-A 冻结测试字节 |
-| D3 Gate docs/matrix | `4cc1679` → `941ac93` → `bb34931` → `97230a0` | D3 报告与矩阵；D4 开始前 HEAD |
+| D2 Gate docs/matrix | `4cc1679` → `941ac93` → `bb34931` | D2 报告、canonical 账本记录与残余交叉引用 |
+| D3 Gate docs/matrix | `97230a0ba40f5f2dec98a426676fbe81a5157a26` | D3 报告与矩阵；D4 开始前 HEAD |
 | **D4 docs（本提交）** | **`docs_sha`（见 Packet manifest）** | 本报告、Review Request、Findings、矩阵 `D0-01`、Packet builder |
 
 **关键不变量**：`git diff 4bd4803 97230a0 -- src` 为空；D1-A 的 `src` 改动在 `51abc66`，已是 `4bd4803` 的祖先。`spikes/`、`plugins/`、`scripts/g3c/`、`tests/integration/g3c`、`tests/integration/g3_bridge`、G3-C 历史 docs/Packet 均无改动。
