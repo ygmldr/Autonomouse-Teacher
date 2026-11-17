@@ -94,10 +94,69 @@ LIVEGATE_CODE = (
 
 KEY_MARKER = re.compile(r"(KEY|TOKEN|SECRET|CREDENTIAL|PASSWORD|AUTH)", re.IGNORECASE)
 RUN_ID_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,80}\Z", re.ASCII)
+SCENARIO_ADMISSION = {
+    "echo": {"fake_scenario": "ok_usage", "max_calls": 1},
+    "tool": {"fake_scenario": "tool", "max_calls": 2},
+}
+SCENARIO_PROMPT = {
+    "echo": "G3D_ECHO",
+    "tool": "Use skill_lookup to look up binary_search",
+}
 REQUIRED_CONTROLLER_KEYS = {
     "admission_path", "broker_config_path", "fake_script", "receipt_dir",
     "attempt_db", "socket_path", "python", "expected_uid",
 }
+
+
+def scenario_admission(scenario: str) -> dict:
+    """Return the frozen per-scenario admission overrides.
+
+    Echo keeps one provider request; Tool needs exactly two independent
+    provider requests inside one real Turn (tool_once -> tool_final).
+    """
+    if scenario not in SCENARIO_ADMISSION:
+        raise lib.G3DError("unsupported scenario", exit_code=lib.EXIT_PREFLIGHT_IDENTITY,
+                           detail={"scenario": scenario})
+    return dict(SCENARIO_ADMISSION[scenario])
+
+
+def scenario_prompt(scenario: str) -> str:
+    if scenario not in SCENARIO_PROMPT:
+        raise lib.G3DError("unsupported scenario", exit_code=lib.EXIT_PREFLIGHT_IDENTITY,
+                           detail={"scenario": scenario})
+    return SCENARIO_PROMPT[scenario]
+
+
+def pair_tool_ledger(attempts: list[dict], claims: list[dict],
+                     receipts: list[dict]) -> list[dict]:
+    """Join Tool attempts to their Claim and Fake receipt by durable ids.
+
+    The join is deliberately by ``call_id``/``receipt_id`` rather than list
+    position, so a missing, duplicated or mis-associated row is visible.
+    """
+    claims_by_call = {row.get("call_id"): row for row in claims
+                      if isinstance(row, dict) and row.get("call_id")}
+    receipts_by_id = {row.get("receipt_id"): row for row in receipts
+                      if isinstance(row, dict) and row.get("receipt_id")}
+    paired: list[dict] = []
+    ordered = sorted((row for row in attempts if isinstance(row, dict)),
+                     key=lambda row: int(row.get("logical_step") or 0))
+    for attempt in ordered:
+        claim = claims_by_call.get(attempt.get("call_id"))
+        receipt = receipts_by_id.get(attempt.get("receipt_id"))
+        paired.append({
+            "step": int(attempt.get("logical_step") or 0),
+            "attempt": attempt,
+            "claim": claim,
+            "receipt": receipt,
+            "prepared_ok": bool(claim) and
+            claim.get("request_digest") == attempt.get("prepared_digest"),
+            "payload_ok": bool(receipt) and
+            receipt.get("raw_sha256") == attempt.get("payload_digest"),
+            "reservation_link_ok": bool(claim) and
+            claim.get("reservation_id") == attempt.get("reservation_id"),
+        })
+    return paired
 
 
 class Launcher:
@@ -631,20 +690,29 @@ class Launcher:
         nonce = secrets.token_hex(16)
         expiry = (datetime.now(timezone.utc) + timedelta(hours=1)).strftime(
             "%Y-%m-%dT%H:%M:%SZ")
+        overrides = scenario_admission(self.args.scenario)
         rendered = admission_template
         rendered = rendered.replace("{{ADMISSION_ID}}", admission_id)
         rendered = rendered.replace("{{RUN_ID}}", self.run_id)
         tool_schemas = self._capture_tool_schemas()
         rendered = rendered.replace("{{TOOL_SCHEMAS}}",
                                     json.dumps(tool_schemas, sort_keys=True))
-        rendered = rendered.replace("{{FAKE_SCENARIO}}", "ok_usage")
+        rendered = rendered.replace("{{FAKE_SCENARIO}}",
+                                    overrides["fake_scenario"])
         rendered = rendered.replace("{{EXPIRY_UTC}}", expiry)
         rendered = rendered.replace("{{NONCE}}", nonce)
         admission = json.loads(rendered)
+        # D1-C scenario limits are applied on the parsed document so the frozen
+        # template stays byte-identical; no protocol field is added or removed.
+        admission["limits"]["max_calls"] = overrides["max_calls"]
         if admission.get("launcher", {}).get("uid") != lib.NOBODY_UID:
             self.fail(lib.EXIT_STAGE_INVALID, "admission launcher uid must be 65534")
         if admission.get("synthetic") is not True:
             self.fail(lib.EXIT_STAGE_INVALID, "admission must be synthetic")
+        if admission.get("fake_scenario") != overrides["fake_scenario"]:
+            self.fail(lib.EXIT_STAGE_INVALID, "admission fake_scenario mismatch")
+        if admission.get("limits", {}).get("max_calls") != overrides["max_calls"]:
+            self.fail(lib.EXIT_STAGE_INVALID, "admission max_calls mismatch")
         if admission.get("route") != {"route_id": "offline-test-only-g3b",
                                        "provider": "offline-test-only-g3b",
                                        "model": "fixture-bridge-v1"}:
@@ -1283,87 +1351,227 @@ class Launcher:
 
         candidate_exit = self.records.get("candidate_exit_code")
         check("candidate_exit_zero", candidate_exit == 0, exit=candidate_exit)
-        result_ok = isinstance(candidate_result, dict) and \
-            candidate_result.get("final_response") == "ok" and \
-            candidate_result.get("finish_reason") == "completed"
-        check("candidate_result_echo_ok", result_ok,
-              final_response=None if not candidate_result else
-              candidate_result.get("final_response"),
-              finish_reason=None if not candidate_result else
-              candidate_result.get("finish_reason"),
-              error=None if not candidate_result else candidate_result.get("error"))
-        messages = ((candidate_result or {}).get("event_summary") or {}).get(
-            "assistant_messages") or []
-        dsh_usage = None
-        if messages:
-            dsh_usage = messages[-1].get("data_usage") or messages[-1].get("usage")
-        check("dsh_usage_present", isinstance(dsh_usage, dict), usage=dsh_usage)
-
-        receipt_usage = receipts[0].get("usage") if receipts else None
-        check("dsh_usage_equals_fake_receipt_usage",
-              isinstance(dsh_usage, dict) and dsh_usage == receipt_usage,
-              dsh_usage=dsh_usage, receipt_usage=receipt_usage)
+        scenario = self.args.scenario
         reservations = snapshot["reservations"]
         claims = snapshot["claims"]
         attempts = snapshot["attempts"]
         admissions = snapshot["admissions"]
-        check("one_reservation_ok",
-              len(reservations) == 1 and reservations[0].get("status") == "OK",
-              rows=reservations)
-        check("one_bound_claim_completed",
-              len(claims) == 1 and claims[0].get("status") == "COMPLETED",
-              rows=claims)
-        check("one_attempt_settled",
-              len(attempts) == 1 and attempts[0].get("state") == "SETTLED",
-              rows=[{key: row.get(key) for key in
-                     ("attempt_id", "state", "call_id", "reservation_id",
-                      "receipt_id")} for row in attempts])
-        check("one_admission_consumed", len(admissions) == 1, rows=admissions)
-        check("one_receipt_and_counter_one",
-              len(receipts) == 1 and isinstance(counter, dict) and
-              counter.get("count") == 1, receipts=len(receipts), counter=counter)
-        claim_digest = claims[0].get("request_digest") if claims else None
-        attempt_prepared = attempts[0].get("prepared_digest") if attempts else None
-        check("prepared_digest_matches_claim",
-              claim_digest is not None and claim_digest == attempt_prepared,
-              claim_request_digest=claim_digest,
-              attempt_prepared_digest=attempt_prepared)
-        receipt_raw = receipts[0].get("raw_sha256") if receipts else None
-        attempt_payload = attempts[0].get("payload_digest") if attempts else None
-        check("payload_digest_matches_receipt",
-              receipt_raw is not None and receipt_raw == attempt_payload,
-              receipt_raw_sha256=receipt_raw,
-              attempt_payload_digest=attempt_payload)
-        settlement = None
-        attempt_settlement = None
-        if reservations:
-            try:
-                settlement = json.loads(reservations[0].get("settlement_json") or "null")
-            except (TypeError, json.JSONDecodeError):
+        messages = ((candidate_result or {}).get("event_summary") or {}).get(
+            "assistant_messages") or []
+        messages = sorted((item for item in messages if isinstance(item, dict)),
+                          key=lambda item: int(item.get("step") or 0))
+        dsh_usages = [item.get("data_usage") or item.get("usage")
+                      for item in messages]
+        result_ok = isinstance(candidate_result, dict) and \
+            candidate_result.get("final_response") == "ok" and \
+            candidate_result.get("finish_reason") == "completed"
+        if scenario == "echo":
+            check("candidate_result_echo_ok", result_ok,
+                  final_response=None if not candidate_result else
+                  candidate_result.get("final_response"),
+                  finish_reason=None if not candidate_result else
+                  candidate_result.get("finish_reason"),
+                  error=None if not candidate_result else candidate_result.get("error"))
+            dsh_usage = dsh_usages[-1] if dsh_usages else None
+            check("dsh_usage_present", isinstance(dsh_usage, dict), usage=dsh_usage)
+            receipt_usage = receipts[0].get("usage") if receipts else None
+            check("dsh_usage_equals_fake_receipt_usage",
+                  isinstance(dsh_usage, dict) and dsh_usage == receipt_usage,
+                  dsh_usage=dsh_usage, receipt_usage=receipt_usage)
+            check("one_reservation_ok",
+                  len(reservations) == 1 and reservations[0].get("status") == "OK",
+                  rows=reservations)
+            check("one_bound_claim_completed",
+                  len(claims) == 1 and claims[0].get("status") == "COMPLETED",
+                  rows=claims)
+            check("one_attempt_settled",
+                  len(attempts) == 1 and attempts[0].get("state") == "SETTLED",
+                  rows=[{key: row.get(key) for key in
+                         ("attempt_id", "state", "call_id", "reservation_id",
+                          "receipt_id")} for row in attempts])
+            check("one_admission_consumed", len(admissions) == 1, rows=admissions)
+            check("one_receipt_and_counter_one",
+                  len(receipts) == 1 and isinstance(counter, dict) and
+                  counter.get("count") == 1, receipts=len(receipts), counter=counter)
+            claim_digest = claims[0].get("request_digest") if claims else None
+            attempt_prepared = attempts[0].get("prepared_digest") if attempts else None
+            check("prepared_digest_matches_claim",
+                  claim_digest is not None and claim_digest == attempt_prepared,
+                  claim_request_digest=claim_digest,
+                  attempt_prepared_digest=attempt_prepared)
+            receipt_raw = receipts[0].get("raw_sha256") if receipts else None
+            attempt_payload = attempts[0].get("payload_digest") if attempts else None
+            check("payload_digest_matches_receipt",
+                  receipt_raw is not None and receipt_raw == attempt_payload,
+                  receipt_raw_sha256=receipt_raw,
+                  attempt_payload_digest=attempt_payload)
+            settlement = None
+            attempt_settlement = None
+            if reservations:
+                try:
+                    settlement = json.loads(
+                        reservations[0].get("settlement_json") or "null")
+                except (TypeError, json.JSONDecodeError):
+                    settlement = None
+            if attempts:
+                try:
+                    attempt_settlement = json.loads(
+                        attempts[0].get("settlement_json") or "null")
+                except (TypeError, json.JSONDecodeError):
+                    attempt_settlement = None
+            settlement_ok = (
+                isinstance(settlement, dict)
+                and settlement.get("status") == "OK"
+                and settlement.get("reservation_exceeded") is False
+                and float(settlement.get("cost_usd", "0")) > 0
+                and ((isinstance(attempt_settlement, dict)
+                      and attempt_settlement.get("code") == "SETTLED")
+                     or (attempts and attempts[0].get("state") == "SETTLED")))
+            check("settlement_ok_positive_cost", bool(settlement_ok),
+                  reservation_settlement=settlement,
+                  attempt_settlement=attempt_settlement)
+            check("receipt_synthetic_no_network",
+                  bool(receipts) and receipts[0].get("synthetic") is True
+                  and receipts[0].get("real_model_calls") == 0
+                  and receipts[0].get("http_calls") == 0
+                  and receipts[0].get("network_used") is False,
+                  receipt=receipts[0] if receipts else None)
+        else:
+            paired = pair_tool_ledger(attempts, claims, receipts)
+            summary = (candidate_result or {}).get("event_summary") or {}
+            tool_calls = [item for item in summary.get("tool_calls") or []
+                          if isinstance(item, dict)]
+            tool_results = [item for item in summary.get("tool_results") or []
+                            if isinstance(item, dict)]
+            tool_result_text = json.dumps(tool_results, sort_keys=True)
+            reservations_by_id = {row.get("reservation_id"): row
+                                  for row in reservations if isinstance(row, dict)}
+            claim_ids = {row.get("call_id") for row in claims}
+            attempt_ids = {row.get("attempt_id") for row in attempts}
+            receipt_ids = {row.get("receipt_id") for row in receipts}
+            reservation_ids = {row.get("reservation_id") for row in reservations}
+            usages_ok = (len(paired) == 2 and len(dsh_usages) == 2
+                         and all(isinstance(item, dict) for item in dsh_usages))
+            if usages_ok:
+                usages_ok = all(
+                    paired[index]["receipt"] is not None
+                    and dsh_usages[index] == paired[index]["receipt"].get("usage")
+                    for index in (0, 1))
+            check("candidate_result_tool_ok", result_ok,
+                  final_response=None if not candidate_result else
+                  candidate_result.get("final_response"),
+                  finish_reason=None if not candidate_result else
+                  candidate_result.get("finish_reason"),
+                  error=None if not candidate_result else candidate_result.get("error"))
+            check("dsh_tool_two_turns",
+                  len(messages) == 2
+                  and (messages[0].get("content_types") or [])
+                  and "tool-call" in messages[0]["content_types"]
+                  and (messages[1].get("content_types") or [])
+                  and "text" in messages[1]["content_types"],
+                  messages=[{"step": item.get("step"),
+                             "content_types": item.get("content_types")}
+                            for item in messages])
+            check("dsh_tool_skill_lookup_result",
+                  any(item.get("name") == "skill_lookup" for item in tool_calls)
+                  and bool(tool_results)
+                  and "binary_search" in tool_result_text
+                  and "m0-skills-v1" in tool_result_text,
+                  tool_calls=tool_calls, tool_results=tool_results)
+            check("dsh_usages_equal_two_receipt_usages", bool(usages_ok),
+                  dsh_usages=dsh_usages,
+                  receipt_usages=[(item["receipt"] or {}).get("usage")
+                                  for item in paired])
+            check("two_reservations_ok",
+                  len(reservations) == 2 and len(reservation_ids) == 2
+                  and all(row.get("status") == "OK" for row in reservations),
+                  rows=reservations)
+            check("two_bound_claims_completed",
+                  len(claims) == 2 and len(claim_ids) == 2
+                  and all(row.get("status") == "COMPLETED" for row in claims),
+                  rows=claims)
+            check("two_attempts_settled",
+                  len(attempts) == 2 and len(attempt_ids) == 2
+                  and all(row.get("state") == "SETTLED" for row in attempts),
+                  rows=[{key: row.get(key) for key in
+                         ("attempt_id", "state", "call_id", "reservation_id",
+                          "receipt_id", "logical_step", "mode")}
+                        for row in attempts])
+            check("two_attempt_modes_tool_once_tool_final",
+                  {row.get("mode") for row in attempts} == {"tool_once", "tool_final"},
+                  modes=[row.get("mode") for row in attempts])
+            check("one_admission_consumed", len(admissions) == 1, rows=admissions)
+            check("two_receipts_counter_two",
+                  len(receipts) == 2 and len(receipt_ids) == 2
+                  and isinstance(counter, dict) and counter.get("count") == 2,
+                  receipts=len(receipts), counter=counter)
+            check("two_prepared_digests_match_claims",
+                  len(paired) == 2
+                  and all(item["prepared_ok"] for item in paired)
+                  and len({item["attempt"].get("prepared_digest")
+                           for item in paired}) == 2,
+                  paired=[{"step": item["step"],
+                           "prepared_ok": item["prepared_ok"]} for item in paired])
+            check("two_payload_digests_match_receipts",
+                  len(paired) == 2
+                  and all(item["payload_ok"] for item in paired)
+                  and len({item["attempt"].get("payload_digest")
+                           for item in paired}) == 2,
+                  paired=[{"step": item["step"],
+                           "payload_ok": item["payload_ok"]} for item in paired])
+            check("two_reservation_links_ok",
+                  len(paired) == 2
+                  and all(item["reservation_link_ok"] for item in paired),
+                  paired=[{"step": item["step"],
+                           "reservation_link_ok": item["reservation_link_ok"]}
+                          for item in paired])
+            second_larger = (len(paired) == 2
+                             and int(paired[0]["attempt"].get("input_bound_tokens") or 0)
+                             < int(paired[1]["attempt"].get("input_bound_tokens") or 0))
+            check("tool_second_request_includes_result",
+                  bool(usages_ok and second_larger and tool_results),
+                  input_bounds=[item["attempt"].get("input_bound_tokens")
+                                for item in paired],
+                  tool_results=len(tool_results))
+            settlements = []
+            settlements_ok = len(paired) == 2
+            for item in paired:
+                reservation = reservations_by_id.get(
+                    item["attempt"].get("reservation_id"))
                 settlement = None
-        if attempts:
-            try:
-                attempt_settlement = json.loads(
-                    attempts[0].get("settlement_json") or "null")
-            except (TypeError, json.JSONDecodeError):
                 attempt_settlement = None
-        settlement_ok = (
-            isinstance(settlement, dict)
-            and settlement.get("status") == "OK"
-            and settlement.get("reservation_exceeded") is False
-            and float(settlement.get("cost_usd", "0")) > 0
-            and ((isinstance(attempt_settlement, dict)
-                  and attempt_settlement.get("code") == "SETTLED")
-                 or (attempts and attempts[0].get("state") == "SETTLED")))
-        check("settlement_ok_positive_cost", bool(settlement_ok),
-              reservation_settlement=settlement,
-              attempt_settlement=attempt_settlement)
-        check("receipt_synthetic_no_network",
-              bool(receipts) and receipts[0].get("synthetic") is True
-              and receipts[0].get("real_model_calls") == 0
-              and receipts[0].get("http_calls") == 0
-              and receipts[0].get("network_used") is False,
-              receipt=receipts[0] if receipts else None)
+                if reservation:
+                    try:
+                        settlement = json.loads(
+                            reservation.get("settlement_json") or "null")
+                    except (TypeError, json.JSONDecodeError):
+                        settlement = None
+                try:
+                    attempt_settlement = json.loads(
+                        item["attempt"].get("settlement_json") or "null")
+                except (TypeError, json.JSONDecodeError):
+                    attempt_settlement = None
+                settlements.append({"step": item["step"],
+                                    "reservation": settlement,
+                                    "attempt": attempt_settlement})
+                settlements_ok = settlements_ok and (
+                    isinstance(settlement, dict)
+                    and settlement.get("status") == "OK"
+                    and settlement.get("reservation_exceeded") is False
+                    and float(settlement.get("cost_usd", "0")) > 0
+                    and ((isinstance(attempt_settlement, dict)
+                          and attempt_settlement.get("code") == "SETTLED")
+                         or item["attempt"].get("state") == "SETTLED"))
+            check("two_settlements_ok_positive_cost", bool(settlements_ok),
+                  settlements=settlements)
+            check("tool_receipts_synthetic_no_network",
+                  len(receipts) == 2
+                  and all(item.get("synthetic") is True
+                          and item.get("real_model_calls") == 0
+                          and item.get("http_calls") == 0
+                          and item.get("network_used") is False
+                          for item in receipts),
+                  receipts=receipts)
         trusted_exit = trusted_record.get("exit_code")
         check("trusted_exit_zero", trusted_exit == 0, exit=trusted_exit)
         socket_before = self.socket_records.get("before_candidate") or {}
@@ -1516,7 +1724,7 @@ class Launcher:
         if failures and self.exit_code == lib.EXIT_OK:
             self.exit_code = lib.EXIT_CASE_FAILED
             self.failure = {"reason": "CASE_FAILED",
-                            "message": "D1-B Echo assertions failed",
+                            "message": f"D1-C {self.args.scenario} assertions failed",
                             "detail": {"failures": [item["id"] for item in failures]}}
 
     # -- cleanup --------------------------------------------------------
@@ -1638,11 +1846,12 @@ class Launcher:
         cleanup = self.records.get("cleanup") or {}
         canonical = cleanup.get("canonical") or {}
         summary = {
-            "schema": "m0.g3d.d1b.summary.v1",
+            "schema": "m0.g3d.d1c.summary.v1",
             "utc_start": self.started_utc,
             "utc_end": lib.utc(),
             "run_id": self.run_id,
             "case": self.case,
+            "scenario": self.args.scenario,
             "sub": self.sub or None,
             "status": "PASS" if self.exit_code == lib.EXIT_OK else "FAIL",
             "exit_code": self.exit_code,
@@ -1665,7 +1874,9 @@ class Launcher:
             "real_external_http_calls": 0,
             "has_real_key": False,
             "live_gate_status": "BLOCKED",
-            "os_boundary_status": "D1B_DUAL_PRINCIPAL_ECHO",
+            "os_boundary_status": ("D1C_DUAL_PRINCIPAL_TOOL"
+                                   if self.args.scenario == "tool"
+                                   else "D1C_DUAL_PRINCIPAL_ECHO"),
         }
         self.write_evidence_json("summary.json", summary)
         cleanup_path = self.evidence / "cleanup" / "cleanup.json"
@@ -1695,9 +1906,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--case", default="d1-echo")
     parser.add_argument("--sub", default="", help="optional run-id suffix")
-    parser.add_argument("--scenario", default="echo")
+    parser.add_argument("--scenario", default="echo", choices=sorted(SCENARIO_PROMPT))
     parser.add_argument("--session", default="g3d-d1-s1")
-    parser.add_argument("--prompt", default="G3D_ECHO")
+    parser.add_argument("--prompt", default=None)
     parser.add_argument("--stage", default=None)
     parser.add_argument("--run-id", default=None)
     parser.add_argument("--evidence-dir", default=None)
@@ -1705,7 +1916,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--ready-timeout", type=float, default=25.0)
     parser.add_argument("--stop-grace", type=float, default=5.0)
     parser.add_argument("--keep-run", action="store_true")
-    return parser.parse_args(argv)
+    args = parser.parse_args(argv)
+    if args.prompt is None:
+        args.prompt = scenario_prompt(args.scenario)
+    return args
 
 
 def main(argv: list[str] | None = None) -> int:

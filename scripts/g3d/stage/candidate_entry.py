@@ -359,6 +359,62 @@ def event_summary(events: list) -> dict:
             "tool_results": tool_results, "turn_end": turn_end}
 
 
+def message_usage(message: dict) -> dict | None:
+    """Return the usage carried by one assistant message, if any."""
+    usage = message.get("data_usage")
+    if not isinstance(usage, dict):
+        usage = message.get("usage")
+    return usage if isinstance(usage, dict) else None
+
+
+def scenario_verdict(result: dict | None, scenario: str) -> tuple[bool, str | None, dict]:
+    """Validate the synthetic DSH result for the requested scenario.
+
+    Echo requires one assistant turn with usage. Tool requires the same real
+    turn to produce two provider requests and one real ``skill_lookup`` result:
+    the first assistant message is a tool-call, the second is the final text
+    answer after the tool result, and both carry independent usage blocks.
+    """
+    detail: dict = {"scenario": scenario}
+    if not isinstance(result, dict):
+        return False, "NO_RESULT", detail
+    detail["final_response"] = result.get("final_response")
+    detail["finish_reason"] = result.get("finish_reason")
+    if result.get("final_response") != "ok" or result.get("finish_reason") != "completed":
+        return False, "DSH_ECHO" if scenario == "echo" else "DSH_TOOL", detail
+    summary = result.get("event_summary")
+    if not isinstance(summary, dict):
+        return False, "EVENT_SUMMARY", detail
+    messages = [item for item in summary.get("assistant_messages") or []
+                if isinstance(item, dict)]
+    usages = [message_usage(item) for item in messages]
+    detail["assistant_message_count"] = len(messages)
+    detail["assistant_steps"] = [item.get("step") for item in messages]
+    detail["usages"] = usages
+    detail["tool_calls"] = summary.get("tool_calls") or []
+    detail["tool_results"] = summary.get("tool_results") or []
+    if scenario == "echo":
+        if not usages or not isinstance(usages[-1], dict):
+            return False, "USAGE_MISSING", detail
+        return True, None, detail
+    if scenario != "tool":
+        return False, "UNSUPPORTED_SCENARIO", detail
+    if len(messages) != 2 or not all(isinstance(item, dict) for item in usages):
+        return False, "TOOL_TURN_COUNT", detail
+    first_types = messages[0].get("content_types") or []
+    second_types = messages[1].get("content_types") or []
+    if "tool-call" not in first_types or "text" not in second_types:
+        return False, "TOOL_MESSAGE_SHAPE", detail
+    calls = [item for item in detail["tool_calls"]
+             if isinstance(item, dict) and item.get("name") == "skill_lookup"]
+    results = [item for item in detail["tool_results"] if isinstance(item, dict)]
+    tool_text = json.dumps(results, sort_keys=True)
+    if not calls or not results or "binary_search" not in tool_text \
+            or "m0-skills-v1" not in tool_text:
+        return False, "TOOL_RESULT_MISSING", detail
+    return True, None, detail
+
+
 def run_dsh(*, scenario: str, session_id: str, prompt: str) -> dict:
     EVIDENCE.mkdir(parents=True, exist_ok=True)
     (SESSION / "dsh-home").mkdir(exist_ok=True)
@@ -407,7 +463,7 @@ def run_dsh(*, scenario: str, session_id: str, prompt: str) -> dict:
                     error = {"type": type(exc).__name__, "message": str(exc)[:2000]}
     finished = utc()
     summary = {
-        "schema": "m0.g3d.d1b.candidate-result.v1",
+        "schema": "m0.g3d.d1c.candidate-result.v1",
         "label": scenario,
         "scenario": scenario,
         "session_id": None if result is None else result.session_id,
@@ -437,11 +493,14 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--scenario", default="echo")
     parser.add_argument("--session", default="g3d-d1-s1")
-    parser.add_argument("--prompt", default="G3D_ECHO")
+    parser.add_argument("--prompt", default=None)
     args = parser.parse_args(argv)
-    if args.scenario != "echo":
+    if args.scenario not in {"echo", "tool"}:
         sys.stderr.write("CANDIDATE_SCENARIO_UNSUPPORTED\n")
         return 2
+    if args.prompt is None:
+        args.prompt = ("Use skill_lookup to look up binary_search"
+                       if args.scenario == "tool" else "G3D_ECHO")
     principal = principal_checks()
     EVIDENCE.mkdir(parents=True, exist_ok=True)
     principal_record = write_json_nofollow(EVIDENCE / "principal.json", principal,
@@ -458,19 +517,18 @@ def main(argv: list[str] | None = None) -> int:
         return 6
     result = run_dsh(scenario=args.scenario, session_id=args.session,
                      prompt=args.prompt)
-    usage = None
-    messages = (result.get("event_summary") or {}).get("assistant_messages") or []
-    if messages:
-        usage = messages[-1].get("data_usage") or messages[-1].get("usage")
-    echo_ok = (result.get("final_response") == "ok"
-               and result.get("finish_reason") == "completed"
-               and isinstance(usage, dict))
-    emit("candidate-result", ok=echo_ok, reason=None if echo_ok else "DSH_ECHO",
+    ok, reason, detail = scenario_verdict(result, args.scenario)
+    usages = detail.get("usages") or []
+    emit("candidate-result", ok=ok, reason=reason,
          final_response=result.get("final_response"),
          finish_reason=result.get("finish_reason"),
-         usage=usage, event_count=result.get("event_count"),
+         usage=usages[-1] if usages else None, usages=usages,
+         assistant_message_count=detail.get("assistant_message_count"),
+         tool_calls=len(detail.get("tool_calls") or []),
+         tool_results=len(detail.get("tool_results") or []),
+         event_count=result.get("event_count"),
          error=result.get("error"), session_id=result.get("session_id"))
-    return 0 if echo_ok else 7
+    return 0 if ok else 7
 
 
 if __name__ == "__main__":

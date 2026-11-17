@@ -31,6 +31,7 @@ if str(G3D_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(G3D_SCRIPTS))
 
 import lib_g3d as lib  # noqa: E402
+import launch as launcher_mod  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -514,3 +515,109 @@ def test_env_snapshot_records_names_not_values(monkeypatch: pytest.MonkeyPatch) 
     assert "DEEPSEEK_API_KEY" in snapshot["key_like_names"]
     assert "sk-should-never-appear" not in json.dumps(snapshot)
     assert lib.key_like_names(["DEEPSEEK_API_KEY", "PATH", "GITHUB_TOKEN"])
+
+
+# ---------------------------------------------------------------------------
+# D1-C Tool scenario: admission limits, prompt and durable ledger pairing
+# ---------------------------------------------------------------------------
+def test_scenario_admission_is_frozen_per_scenario() -> None:
+    echo = launcher_mod.scenario_admission("echo")
+    tool = launcher_mod.scenario_admission("tool")
+    assert echo == {"fake_scenario": "ok_usage", "max_calls": 1}
+    assert tool == {"fake_scenario": "tool", "max_calls": 2}
+    # A caller cannot mutate the module-level table through the returned dict.
+    echo["max_calls"] = 99
+    assert launcher_mod.SCENARIO_ADMISSION["echo"]["max_calls"] == 1
+    with pytest.raises(lib.G3DError):
+        launcher_mod.scenario_admission("resume")
+
+
+def test_scenario_prompt_and_default_argv() -> None:
+    assert launcher_mod.scenario_prompt("echo") == "G3D_ECHO"
+    assert launcher_mod.scenario_prompt("tool") == (
+        "Use skill_lookup to look up binary_search")
+    tool_args = launcher_mod.parse_args(["--scenario", "tool"])
+    assert tool_args.prompt == launcher_mod.scenario_prompt("tool")
+    echo_args = launcher_mod.parse_args(["--scenario", "echo"])
+    assert echo_args.prompt == "G3D_ECHO"
+    explicit = launcher_mod.parse_args(["--scenario", "tool", "--prompt", "custom"])
+    assert explicit.prompt == "custom"
+    with pytest.raises(SystemExit):
+        launcher_mod.parse_args(["--scenario", "resume"])
+
+
+def test_pair_tool_ledger_joins_by_durable_ids_not_list_order() -> None:
+    claims = [
+        {"call_id": "call-b", "reservation_id": "res-b",
+         "request_digest": "prep-b", "status": "COMPLETED"},
+        {"call_id": "call-a", "reservation_id": "res-a",
+         "request_digest": "prep-a", "status": "COMPLETED"},
+    ]
+    receipts = [
+        {"receipt_id": "rcpt-b", "raw_sha256": "payload-b", "usage": {"outputTokens": 5}},
+        {"receipt_id": "rcpt-a", "raw_sha256": "payload-a", "usage": {"outputTokens": 5}},
+    ]
+    attempts = [
+        {"attempt_id": "att-1", "call_id": "call-a", "reservation_id": "res-a",
+         "receipt_id": "rcpt-a", "logical_step": 0, "state": "SETTLED",
+         "prepared_digest": "prep-a", "payload_digest": "payload-a"},
+        {"attempt_id": "att-2", "call_id": "call-b", "reservation_id": "res-b",
+         "receipt_id": "rcpt-b", "logical_step": 1, "state": "SETTLED",
+         "prepared_digest": "prep-b", "payload_digest": "payload-b"},
+    ]
+    paired = launcher_mod.pair_tool_ledger(attempts, claims, receipts)
+    assert [item["step"] for item in paired] == [0, 1]
+    assert [item["attempt"]["attempt_id"] for item in paired] == ["att-1", "att-2"]
+    assert all(item["prepared_ok"] for item in paired)
+    assert all(item["payload_ok"] for item in paired)
+    assert all(item["reservation_link_ok"] for item in paired)
+
+
+def test_pair_tool_ledger_exposes_missing_or_mismatched_rows() -> None:
+    claims = [{"call_id": "call-a", "reservation_id": "res-a",
+               "request_digest": "prep-wrong", "status": "COMPLETED"}]
+    receipts = [{"receipt_id": "rcpt-a", "raw_sha256": "payload-wrong",
+                 "usage": {"outputTokens": 5}}]
+    attempts = [
+        {"attempt_id": "att-1", "call_id": "call-a", "reservation_id": "res-a",
+         "receipt_id": "rcpt-a", "logical_step": 0, "state": "SETTLED",
+         "prepared_digest": "prep-a", "payload_digest": "payload-a"},
+        {"attempt_id": "att-2", "call_id": "call-orphan", "reservation_id": "res-x",
+         "receipt_id": "rcpt-missing", "logical_step": 1, "state": "SETTLED",
+         "prepared_digest": "prep-x", "payload_digest": "payload-x"},
+    ]
+    paired = launcher_mod.pair_tool_ledger(attempts, claims, receipts)
+    assert len(paired) == 2
+    assert paired[0]["prepared_ok"] is False
+    assert paired[0]["payload_ok"] is False
+    assert paired[1]["claim"] is None and paired[1]["receipt"] is None
+    assert paired[1]["prepared_ok"] is False
+    assert paired[1]["payload_ok"] is False
+    assert paired[1]["reservation_link_ok"] is False
+
+
+def test_candidate_evidence_capture_refuses_poisoned_session_entries(
+        tmp_path: Path) -> None:
+    """D1-11: the launcher reads candidate output as untrusted input only."""
+    run_dir = tmp_path / "run"
+    evidence = tmp_path / "evidence"
+    session = run_dir / "candidate-session" / "evidence"
+    session.mkdir(parents=True)
+    evidence.mkdir()
+    (session / "dsh-result.json").write_text('{"ok": true}\n')
+    os.symlink("/etc/passwd", session / "poison-link")
+    if hasattr(os, "mkfifo"):
+        os.mkfifo(session / "poison-fifo")
+    broken = launcher_mod.Launcher.__new__(launcher_mod.Launcher)
+    broken.run_dir = run_dir
+    broken.evidence = evidence
+    broken.records = {}
+    broken._copy_candidate_evidence()
+    copied = {item["name"]: item for item in broken.records["candidate_evidence"]}
+    assert copied["dsh-result.json"]["bytes"] > 0
+    assert "error" in copied["poison-link"]
+    if "poison-fifo" in copied:
+        assert "error" in copied["poison-fifo"]
+    assert (evidence / "traces" / "dsh-result.json").is_file()
+    assert not (evidence / "traces" / "poison-link").exists()
+    assert not (evidence / "traces" / "poison-fifo").exists()
