@@ -139,6 +139,7 @@ v1 裁定 `PARTIAL` 的理由不是产品语义失败：Reviewer 在自己的 11
 ## 7. 本 errata 的边界与待二次复核事项
 
 - 本文件 **不改变** v1 报告的任何文字、行号内容或字节；v1 报告以原字节提交，sha256 必须保持 `4744c61f…`。若后续发现新的处置事实，只能追加新的 errata，不能改写本文件或 v1 报告。
+- 本 errata 与 v1 报告的最终归档提交只含 `docs/` 路径；Packet v2 `manifest.docs_sha` 指向该提交。归档提交本身不包含代码或 Packet 改动。
 - 本文件 **不裁定** PR1 已 PASS；它只记录“P1 的处置位置与证据”，最终裁定留给 Lead 指派的二次独立 Reviewer。
 - 二次 Reviewer 的最小待验证项：
   1. **P1-1**：逐行核对 53 个 PASS 行的证据类型（real DSH 必须有 `dsh-result.json`；raw-UDS 不得写成 DSH；reconcile 不得写成 DSH；host pytest 不得写成 DSH）；重点复核原 8 行与 C1-01A/C-END-01 的 argv/log/path。
