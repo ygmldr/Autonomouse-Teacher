@@ -50,11 +50,24 @@ def _request_payload() -> dict:
     }
 
 
-def _make_slow_broker(tmp_path: Path) -> tuple[str, Path]:
-    """Executable wrapper around a Broker that reads one line and never replies."""
+def _make_slow_broker(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[str, Path]:
+    """Slow Broker run by the trusted Python interpreter, not an exec'd wrapper.
+
+    The old helper wrote a ``#!/bin/sh`` wrapper into ``tmp_path`` and made it
+    executable.  The fixed OCI sandbox mounts ``/tmp`` ``noexec``, so ``execve``
+    of that wrapper is denied by the kernel.  Python does not ``execve`` the
+    imported module: the child interpreter reads it through ``PYTHONPATH``, so
+    the same test works on an executable and a ``noexec`` tmpfs without
+    removing ``--read-only-tmpfs=false`` or any other sandbox flag.
+    """
     log = tmp_path / "broker-requests.log"
-    script = tmp_path / "slow_broker.py"
-    script.write_text(
+    shadow = tmp_path / "shadow"
+    package = shadow / "autoteacher_m0" / "accounting"
+    package.mkdir(parents=True)
+    (shadow / "autoteacher_m0" / "__init__.py").write_text("", encoding="utf-8")
+    (package / "__init__.py").write_text("", encoding="utf-8")
+    (package / "broker.py").write_text(
         "import sys, time\n"
         "from pathlib import Path\n"
         "args = sys.argv[1:]\n"
@@ -66,11 +79,10 @@ def _make_slow_broker(tmp_path: Path) -> tuple[str, Path]:
         "        handle.flush()\n"
         "    time.sleep(30)\n",
         encoding="utf-8")
-    wrapper = tmp_path / "slow-broker-wrapper"
-    wrapper.write_text(f"#!/bin/sh\nexec {sys.executable} -B {script} \"$@\"\n",
-                       encoding="utf-8")
-    wrapper.chmod(0o755)
-    return str(wrapper), log
+    # Only the child interpreter sees this import root; the pytest process is
+    # unaffected and monkeypatch restores the environment after the test.
+    monkeypatch.setenv("PYTHONPATH", str(shadow))
+    return sys.executable, log
 
 
 def _wait_for(path: Path, timeout: float = 2.0) -> bool:
@@ -82,9 +94,10 @@ def _wait_for(path: Path, timeout: float = 2.0) -> bool:
     return False
 
 
-def test_c3_02a_broker_alive_without_stdout_times_out_once(tmp_path: Path) -> None:
-    wrapper, log = _make_slow_broker(tmp_path)
-    client = BrokerClient(config_path=str(log), python=wrapper, timeout_s=5.0)
+def test_c3_02a_broker_alive_without_stdout_times_out_once(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    python, log = _make_slow_broker(tmp_path, monkeypatch)
+    client = BrokerClient(config_path=str(log), python=python, timeout_s=5.0)
     client.start()
     try:
         started = time.monotonic()

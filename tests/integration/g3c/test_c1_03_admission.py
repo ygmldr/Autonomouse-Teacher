@@ -623,11 +623,60 @@ def _start_controller_main(root: Path):
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
 
 
+def _proc_cmdline_snapshot() -> dict[int, str]:
+    """Return ``pid -> cmdline`` for every process visible in ``/proc``.
+
+    The fixed OCI rootfs does not ship ``pgrep``; POSIX ``/proc`` plus
+    ``os.kill(pid, 0)`` is the portable process probe.  A broken ``/proc``
+    probe must fail the test loudly: otherwise the "no residual process"
+    assertion would pass vacuously.
+    """
+    proc_root = Path("/proc")
+    try:
+        entries = os.listdir(proc_root)
+    except OSError as exc:
+        pytest.fail(f"ENV_PROBE_UNAVAILABLE: /proc is not readable: {exc!r}")
+    pids = [int(name) for name in entries if name.isdigit()]
+    if not pids:
+        pytest.fail("ENV_PROBE_UNAVAILABLE: /proc exposes no numeric pids")
+    snapshot: dict[int, str] = {}
+    readable = 0
+    for pid in pids:
+        try:
+            raw = (proc_root / str(pid) / "cmdline").read_bytes()
+        except FileNotFoundError:
+            continue  # the process exited between listdir() and read
+        except OSError:
+            continue  # another principal may hide its cmdline
+        snapshot[pid] = raw.replace(b"\0", b" ").decode("utf-8", "replace")
+        readable += 1
+    if readable == 0:
+        pytest.fail(
+            "ENV_PROBE_UNAVAILABLE: no /proc/<pid>/cmdline entry was readable; "
+            "cannot prove broker-child cleanup")
+    return snapshot
+
+
+def _pids_matching(marker: str) -> list[int]:
+    """Live PIDs whose cmdline contains ``marker`` (liveness via os.kill)."""
+    matches: list[int] = []
+    for pid, cmdline in _proc_cmdline_snapshot().items():
+        if marker not in cmdline:
+            continue
+        try:
+            os.kill(pid, 0)
+        except (ProcessLookupError, PermissionError):
+            continue
+        matches.append(pid)
+    return sorted(matches)
+
+
 def test_c3_01e_sigterm_cleans_socket_and_broker_child(tmp_path: Path) -> None:
     write_admission(tmp_path)
     write_broker_config(tmp_path)
     proc = _start_controller_main(tmp_path)
     socket_path = tmp_path / "bridge.sock"
+    broker_marker = str(tmp_path / "broker.json")
     try:
         deadline = time.monotonic() + 15
         while not socket_path.exists() and time.monotonic() < deadline:
@@ -635,13 +684,29 @@ def test_c3_01e_sigterm_cleans_socket_and_broker_child(tmp_path: Path) -> None:
                 break
             time.sleep(0.02)
         assert socket_path.exists(), (proc.poll(), proc.stdout.read(), proc.stderr.read())
+        # Positive control: the same /proc probe must see the broker child
+        # before SIGTERM, so the post-SIGTERM absence check cannot be vacuous.
+        broker_pids: list[int] = []
+        deadline = time.monotonic() + 5
+        while not broker_pids and time.monotonic() < deadline:
+            if proc.poll() is not None:
+                break
+            broker_pids = _pids_matching(broker_marker)
+            if not broker_pids:
+                time.sleep(0.02)
+        assert broker_pids, (
+            f"ENV_PROBE_NO_BROKER: /proc probe found no live process matching "
+            f"{broker_marker}; cannot prove cleanup")
         proc.send_signal(signal.SIGTERM)
         returncode = proc.wait(timeout=15)
         assert returncode == 0, (returncode, proc.stderr.read())
         assert not socket_path.exists()
-        probe = subprocess.run(["pgrep", "-f", str(tmp_path / "broker.json")],
-                               capture_output=True, text=True)
-        assert probe.returncode != 0, probe.stdout
+        remaining = _pids_matching(broker_marker)
+        deadline = time.monotonic() + 5
+        while remaining and time.monotonic() < deadline:
+            time.sleep(0.02)
+            remaining = _pids_matching(broker_marker)
+        assert not remaining, f"broker child still alive after SIGTERM: {remaining}"
     finally:
         if proc.poll() is None:
             proc.kill()
