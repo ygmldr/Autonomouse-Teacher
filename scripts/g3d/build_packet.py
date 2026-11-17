@@ -371,6 +371,34 @@ def copy_d2(out: Path) -> None:
     shared = out / "d2" / "_probe-sources"
     for name in sorted(p.name for p in probe_root.glob("*.py")):
         copy_file(probe_root / name, shared / name)
+    write_text(out / "d2" / "old-bypass-to-new-denial.csv",
+               "old_bypass,old_evidence,d2_case,current_result,closed_by\n"
+               "B-1 read Broker DB,G3-B same-UID reviewer B-1,D2-01,"
+               "\"ENOENT(2) for DB/WAL/SHM and /state; broker.sqlite3 SHA unchanged; 0 rows\","
+               "\"candidate mount namespace has no /work/state; state 0700 root:root\"\n"
+               "B-2 write/truncate/replace Broker DB,G3-B same-UID reviewer B-2,D2-02,"
+               "\"O_RDWR/O_CREAT/O_TRUNC/unlink/chmod/replace/hardlink/symlink denied: ENOENT(2)/EROFS(30)/EXDEV(18); no hash change\","
+               "\"no state mount; read-only root/tmpfs; state not reachable\"\n"
+               "B-3 rewrite Policy,G3-B same-UID reviewer B-3,D2-03,"
+               "\"60 probes over 10 state classes all ENOENT(2); hashes and row counts unchanged\","
+               "\"candidate has no state copy; trusted owns admission/policy/attempt/receipt\"\n"
+               "B-4 direct RESERVED/CLAIMED dispatch without Controller,G3-B same-UID reviewer B-4,D2-04/05/06,"
+               "\"import autoteacher_m0 fails; broker/controller private UDS ENOENT; kind reserve/claim/settle -> UNKNOWN_KIND; forged authorized/dispatch_allowed -> UNKNOWN_FIELD; Fake=0\","
+               "\"candidate stage has no broker code/DB/socket; Controller is the only Reserve/Claim/Attempt path; protocol schema/digest/route checks\"\n"
+               "D2-11 positive control (anti-false-positive),D2-11 real-DSH Echo/Tool/Resume,D2-11,"
+               "\"Echo 1/1/1/1 counter=1; Tool 2/2/2/2 counter=2; Resume session 14->24 reason:resume 1; DSH usage==receipt usage\","
+               "\"same candidate and same approved socket still work; boundary is not 'disable all UDS'\"\n")
+    write_text(out / "d2" / "INDEX.md", """# D2 case index
+
+15 cases / 19 runs, all `exit 0`, `cleanup.ok=true`, canonical rootfs/deps/stage.
+`d2-10-trusted` and `d2-10-trusted-receipt` are the Trusted-side fault sub-runs.
+`_probe-sources/` contains the probe sources and `probe_common.py`; each case
+also carries its own `attack_source.py` (or `attack_source.md` for positive /
+crosscheck cases) plus `d2/case.json`, `run/checks.json`, state snapshots and
+raw stdout/stderr with real errno/protocol codes.
+
+Old G3-B same-UID bypasses and their new denials: `old-bypass-to-new-denial.csv`.
+""")
     for case in D2_CASES:
         src = D2 / case
         dst = out / "d2" / case
