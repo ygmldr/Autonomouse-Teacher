@@ -1,15 +1,31 @@
 # M0 G3-C Review Request（独立复核请求）
 
-> **状态**：G3-C 实现/证据已冻结，**请求 Lead 指派独立 Reviewer**。本文件不预设 Reviewer 结论，不是 Live/GO 授权。
-> **Base** `bb5bd0bf83e22130ed0d81c54f54a4673654cfe3`；**G0** `e107e22`；**Implementation** `e6fde1cdf0bec9e957e98d569b257c8f17dfa363`（父 `3675a41`）。
-> **Docs**：包含本文件/Implementation Report/FINDINGS/matrix 的 docs commit；SHA 见 Packet `manifest.json.docs_sha`。
-> **Packet**：`artifacts/review-packet-g3c-e6fde1cdf0bec9e957e98d569b257c8f17dfa363/`（`manifest.json`/`diff.patch`/`hashes.sha256`/`matrix/`/`evidence/`/`docs/`/`reproduce/`/`security-nonclaims.md`）。
-> **矩阵**：`docs/Autonomous_Teacher_M0_G3C_G3D_Test_Evidence_Matrix_v1.0.csv`，69 行 = 53 PASS / 16 NOT_RUN（D 行）。
+> **状态**：v1 独立复核结论为 `PARTIAL`（无 P0，3 个 P1）；PR1 已修复（`b2f6af0`）并更新 docs。现**请求 Lead 指派二次独立 Reviewer**。本文件不预设二次结论，不是 Live/GO 授权。
+> **Base** `bb5bd0bf83e22130ed0d81c54f54a4673654cfe3`；**G0** `e107e22`；**v1 Implementation** `e6fde1cdf0bec9e957e98d569b257c8f17dfa363`（父 `3675a41`）；**PR1 Implementation** `b2f6af054555705192c4e1ae3019a68078764736`（父 `78be77c`）。
+> **v1 复核输入**：`docs/REVIEW_G3C_INDEPENDENT.md`（339 行，sha256 `4744c61f1561c6f92634b29ef9a6a0f7ca82c4627aef31ba3d0163e4886d23b1`，原字节归档）+ `docs/M0_G3C_REVIEW_ERRATA.md`（append-only 处置记录）。
+> **Docs**：包含本文件/Implementation Report/FINDINGS/Review Errata/matrix 的最终 docs 归档 commit；SHA 见 Packet v2 `manifest.json.docs_sha`。
+> **Packet v2**：`artifacts/review-packet-g3c-b2f6af054555705192c4e1ae3019a68078764736/`（`manifest.json`/`diff.patch`/`docs-diff.patch`/`hashes.sha256`/`review/`/`matrix/`/`evidence/`/`docs/`/`reproduce/`/`security-nonclaims.md`）。
+> **v1 Packet（冻结，只读）**：`artifacts/review-packet-g3c-e6fde1cdf0bec9e957e98d569b257c8f17dfa363/`，docs_sha `78be77c`；不得修改或重建。
+> **矩阵**：`docs/Autonomous_Teacher_M0_G3C_G3D_Test_Evidence_Matrix_v1.0.csv`，69 行 = 53 PASS / 16 NOT_RUN（D 行）；PR1 后 `impl_sha` 指向 `b2f6af0`，旧 trace 的生成批次由 `argv.json`/`commands.jsonl` 追溯。
 > **最高可请求裁定**：`PASS_FOR_G3C_NO_KEY_CONTRACT_RECOVERY_SCOPE`。**禁止**给出 G3-D/Live/G4/G5/M0 GO 裁定。
 
-## 0. Reviewer 身份与范围
+## 0. 二次复核上下文（v1 PARTIAL → PR1）
 
-- **实现者/Owner 与 Reviewer 必须分离**。Reviewer 必须从冻结的 Git Blob + Packet 原始字节复核，不得只复述本请求/报告/矩阵文字，也不得复用 Owner 的结论句子作为自己的判定。
+v1 Reviewer 对 `e6fde1c` / docs `78be77c` / Packet v1 的裁定是 **`PARTIAL`**，不是 PASS/FAIL/BLOCKED：产品语义未发现 P0，但三项 P1 必须先修正或缩小主张。v1 的原始报告与 Reviewer 证据不被本 PR 改写：
+
+| v1 P1 | v1 问题 | PR1 处置位置 | 二次复核必须验证 |
+|---|---|---|---|
+| P1-1 | 真实 DSH 覆盖被高估；C1-01A 实为 raw-UDS replay，无 `dsh-result.json`；Findings 的 real-DSH 列表含 8 行 raw-UDS/reconcile/summary | docs `9ffa0b1`（Report/Findings/矩阵逐行标注）；`bea0fc3` 交叉引用；P1-1 是**更正/缩小主张**，没有新增 real-DSH replay | 53 行证据类型表；原 8 行与 C1-01A/C-END-01 的 argv/log/path；不得把 raw-UDS/reconcile/host pytest 写成 DSH |
+| P1-2 | 两个 Controller 同时冷启动共享 AttemptJournal 时 `database is locked` 未处理崩溃（v1 6 次中 3 次） | impl `b2f6af0`：`busy_timeout` 先于 WAL、有界重试、per-socket `flock` singleton、受控退出 5/4/3；20 轮测试 `tests/integration/g3c/test_c3_05_twocontroller_coldstart.py` | 用自己的命令重跑 ≥20 轮；1 成功 + 1 受控拒绝、0 traceback、Fake=1、Attempt `SETTLED`；核对代码顺序与退出码 |
+| P1-3 | 53 个 PASS 行中 25 个 `db_or_receipt_path` 不存在；C1-01A/C-END-01 无 argv/log | docs `9ffa0b1` 矩阵；审计 `artifacts/g3c/evidence/matrix-path-audit-pr1.txt`（before 25 missing → after 0）；D 行 16 条原字节未改 | 独立重跑路径存在性审计；核对 docs 矩阵与工作矩阵均 0 missing；D 行 SHA 不变；抽查 C1-01A/C-END-01/C2-04 |
+
+**证据读法**：v1 报告的结论/行号只适用于 docs `78be77c`；当前 docs 已含 PR1 修正。PR1 的 20 轮冷启动、矩阵审计和回归数字是 **Owner 运行**，二次 Reviewer 必须独立复跑，不能只引用 Owner 的 JSON/日志。PR1 没有新增 real-DSH replay，也没有做双真实 DSH 同 Claim；不得把 P1-1 的标注修正解释为“real-DSH replay 已补齐”。
+
+## 0.1 Reviewer 身份与范围
+
+- **实现者/Owner 与 Reviewer 必须分离**。二次 Reviewer 必须从冻结的 Git Blob + Packet v2 原始字节复核，不得只复述本请求/报告/矩阵/errata 文字，也不得复用 v1 Reviewer 或 Owner 的结论句子作为自己的判定。
+- **二次复核重点**：P1-1 的证据类型/真实 DSH 标注、P1-2 的 20 轮双 Controller 冷启动、P1-3 的矩阵路径审计；同时保留 v1 的 R1/R2/R4 语义复核，不能因为 P1 修复就跳过产品语义。
+- **不得把 v1 `PARTIAL` 或 Owner 的 PR1 修复文字直接改写为 PASS**；最终裁定必须由二次 Reviewer 自己的命令/证据支撑。
 - **本轮范围**：G3-C1 协议/错误语义/Admission；G3-C2 Usage/Receipt/Observation/Recovery；G3-C3 Cancel/Deadline/IPC 资源/增量 Streaming；无 Key 集成证据与全量回归。
 - **不在范围**：G3-D0/D1/D2/D3（OS 主体隔离/候选攻击/内核拒绝）、真实 Provider/Key/模型/外网/Live、G4/G5/M0 GO。
 - 证据中 **host-level（宿主 pytest，非真实 DSH）** 行已在矩阵逐行标注；Reviewer 不得把它们合并成“真实 DSH 通过”。
@@ -19,11 +35,12 @@
 
 ### R0 — 身份、漂移与范围
 
-1. 独立执行 `git rev-parse`/`git cat-file`/`git log`，确认 Base/G0/Impl 与 Packet `manifest.json` 一致；`git diff --binary bb5bd0b..e6fde1c` 的 sha256 与 `diff.patch` 一致。
-2. `sha256sum -c hashes.sha256` 在 Packet 根目录 100% 通过；`manifest.file_count` 与磁盘文件数一致；`docs_sha` 指向的 docs commit 包含四份 docs 与 matrix。
-3. 确认未修改/复制 G3-B packet、33 行矩阵、`docs/REVIEW_G3B_INDEPENDENT.md`、errata；确认 `security/gates.py`、`runtime/dsh_adapter.py`、`scripts/run_live.sh` 与冻结值一致（sha256 见报告 §11）。
+1. 独立执行 `git rev-parse`/`git cat-file`/`git log`，确认 Base/G0/v1 impl/PR1 impl/docs 与 Packet v2 `manifest.json` 一致；`git diff --binary bb5bd0b..b2f6af0` 的 sha256 与 `diff.patch` 一致；`git diff --binary bb5bd0b..<docs_sha>` 的 sha256 与 `docs-diff.patch` 一致。
+2. `sha256sum -c hashes.sha256` 在 Packet v2 根目录 100% 通过；`manifest.file_count` 与磁盘文件数一致；`docs_sha` 指向的最终 docs commit 包含 Report/Review Request/Findings/Review Errata/matrix，且 `review/REVIEW_G3C_INDEPENDENT.md` 与 docs blob 原字节一致（sha256 `4744c61f…`）。
+3. 确认未修改/复制 G3-B packet、33 行矩阵、`docs/REVIEW_G3B_INDEPENDENT.md`、G3-B errata、Packet v1；确认 `src/autoteacher_m0/security/gates.py`、`src/autoteacher_m0/runtime/dsh_adapter.py`、`scripts/run_live.sh` 与冻结值一致（sha256 见报告 §11；注意实际路径含 `src/autoteacher_m0/`）。
 4. 确认 LiveGate 未解锁：`run_live.sh` exit 3、`LiveGate.inspect(live_requested=True)` = `BLOCKED`、无 Key 环境变量/`.env`。
-5. 确认 docs matrix：69 行、D 行 16 条 `NOT_RUN` 且内容未被改写、3 条补充 C 用例（C1-02/C1-04/C2-04）已标注来源；工作矩阵 `C-END-02` 的回归后更正有原始日志支撑。
+5. 确认 docs matrix：69 行、D 行 16 条 `NOT_RUN` 且与 v1 冻结字节一致、3 条补充 C 用例（C1-02/C1-04/C2-04）已标注来源；工作矩阵 `C-END-02` 的回归后更正有原始日志支撑；PR1 路径审计 `missing_paths=0`。
+6. 确认 `impl_sha=b2f6af0` 与旧 trace 生成批次 `e6fde1c` 的可追溯区分（`argv.json`/`commands.jsonl`），不得把旧 trace 说成 PR1 新运行。
 
 ### R1 — 静态复验（从可发送入口反向追踪）
 
@@ -47,6 +64,7 @@ Reviewer 必须自行构造并记录 argv/UTC/exit/原始输出，至少覆盖�
 6. **UDS 畸形帧/慢连接/首帧超时/连接上限/响应预算** → 期望受控错误、资源有界、非法首帧不进入 Controller。
 7. **Cancel（含错误签名/重复/未知 id）** → 期望 pre-send 零 Fake、post-send 保守结算或 uncertain、错误签名不被静默吞掉。
 8. **断连/中断** → 期望不产生成功 finish；不把“生成器 close 的 abort”当作 durable cancel 证据。
+9. **P1-2 双进程冷启动（二次复核必做）** → Reviewer 自己构造 ≥20 轮两个 Controller 同时冷启动（同一 workdir/socket/journal）：期望每轮 1 个成功 + 1 个受控拒绝（`CONTROLLER_SINGLETON_LOCKED` exit 5，或按实现的 3/4 受控码），0 traceback，Fake counter=1，Attempt `SETTLED`；不得只引用 Owner 的 `concurrency-coldstart-*.json`。记录自己的 argv/UTC/exit/日志。
 
 ### R3 — 真实 DSH 复跑（固定 rootfs，无 Key）
 
@@ -56,8 +74,10 @@ Reviewer 必须自行构造并记录 argv/UTC/exit/原始输出，至少覆盖�
 2. Tool 两轮（`--scenario tool`）→ 2 个独立 call/reservation/claim/attempt/receipt，第二请求带真实 tool result。
 3. 新进程 Resume → 历史 session 恢复，旧 Attempt 不重发。
 4. 至少一个 Crash + reconcile、一个 Cancel、一个 Deadline/timeout、一个 Streaming（`stream_slow`）。
-5. 记录 Reviewer 自己的 `reviewer-*` trace/日志/UTC/exit；不得沿用 Owner 的 `*-fixed` 文件冒充新运行。
+5. 记录 Reviewer 自己的 `reviewer-*` trace/日志/UTC/exit；不得沿用 Owner 的 `*-fixed` 或 `pr1/*` 文件冒充新运行。
 6. 复跑后检查 `podman ps -a` 空、无残留 broker/fake/controller 进程；rootfs/deps canonical 不变。
+7. **P1-1 证据类型核验（二次复核必做）**：逐行核对 53 个 PASS 行——real DSH 必须同时有 `dsh-result.json` 与 DSH 事件；raw-UDS 不得写成 DSH；container reconcile 不得写成 DSH；host pytest 不得写成 DSH。重点复核原 8 行（C1-01A、C1-04、C2-02D/E、C3-01B/C、C3-02A/B）与 C-END-01 summary 的子 trace 链接。
+8. **P1-3 矩阵路径审计（二次复核必做）**：独立解析 docs 矩阵 + 工作矩阵的 `db_or_receipt_path`/`log_path`/`command_argv`，确认 missing=0；核对 D 行 16 条与 v1 冻结字节一致；抽查 C1-01A/C-END-01/C2-04。
 
 ### R4 — DB/Receipt 对账
 
@@ -82,13 +102,14 @@ Reviewer 必须自行构造并记录 argv/UTC/exit/原始输出，至少覆盖�
 
 ```bash
 cd "/root/Autonomous Teacher"
-git rev-parse HEAD                         # e6fde1cdf0bec9e957e98d569b257c8f17dfa363
-git rev-parse bb5bd0b e107e22 e6fde1c
-git diff --check bb5bd0b e6fde1c
-git diff --binary bb5bd0b e6fde1c | sha256sum   # 对比 packet manifest.diff_sha256
-cd artifacts/review-packet-g3c-e6fde1cdf0bec9e957e98d569b257c8f17dfa363
+git rev-parse HEAD                         # 最终 docs commit（见 Packet v2 manifest.docs_sha）
+git rev-parse bb5bd0b e107e22 e6fde1c b2f6af0
+git diff --check bb5bd0b b2f6af0
+git diff --binary bb5bd0b b2f6af0 | sha256sum   # 对比 manifest.diff_sha256
+git diff --binary bb5bd0b <docs_sha> | sha256sum # 对比 manifest.docs_diff_sha256
+cd artifacts/review-packet-g3c-b2f6af054555705192c4e1ae3019a68078764736
 sha256sum -c hashes.sha256
-python3 -c "import json;m=json.load(open('manifest.json'));print(m['base_sha'],m['g0_sha'],m['impl_sha'],m['docs_sha'],m['file_count'])"
+python3 -c "import json;m=json.load(open('manifest.json'));print(m['base_sha'],m['g0_sha'],m['impl_sha'],m['docs_sha'],m['file_count'],m['previous_review']['verdict'])"
 ```
 
 ### 2.2 宿主 Python（必须 `-B`，禁止写 bytecode）
@@ -104,17 +125,25 @@ export PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="src:artifacts/foundation/deps"
 /root/.local/bin/python3.11 -B -m ruff check src tests spikes/g3b-trusted-bridge/run_c3
 ```
 
-预期：105 / 31 / 14 / 280 全 PASS；host full 768 passed + 2 个既有宿主环境失败（可写 config mode、硬编码 `/project`）+ 1 skipped；Ruff 通过。
+预期：g3c **110** / g3_bridge **31** / gates **14** / G2 **280** 全 PASS；host full **773 passed + 2 个既有宿主环境失败（可写 config mode、硬编码 `/project`）+ 1 skipped**（776 collected；exit 1 是这两个环境失败）；Ruff 通过。实际以 Reviewer 自己的运行日志为准；若计数不同，请记录差异原因。
 
 ### 2.3 固定 rootfs（Node/DSH/OCI）
 
 ```bash
 cd "/root/Autonomous Teacher"
 bash scripts/g3c/run-node-tests.sh    # 9/9 adapter + 19/19 guard，rootfs canonical
-bash scripts/g3c/run-oci-full.sh      # 实测 768 passed / 2 failed / 1 skipped
+bash scripts/g3c/run-oci-full.sh      # 实测 773 passed / 2 failed / 1 skipped（PR1 @ b2f6af0）
+
+# P1-2：Reviewer 自己的 ≥20 轮双 Controller 冷启动（改 UTC/label；不要覆盖 Owner 证据）
+UTC=$(date -u +%Y%m%dT%H%M%SZ)
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src:artifacts/foundation/deps \
+  G3C_COLDSTART_EVIDENCE=artifacts/reviewer-g3c/coldstart-$UTC.json \
+  G3C_COLDSTART_LOG_DIR=artifacts/reviewer-g3c/coldstart-$UTC \
+  /root/.local/bin/python3.11 -B -m pytest \
+  tests/integration/g3c/test_c3_05_twocontroller_coldstart.py -q -p no:cacheprovider
 ```
 
-预期：OCI 2 个失败为冻结 rootfs 环境限制（无 `pgrep`；`/tmp` noexec 使 slow-broker wrapper 无法执行），不是产品断言失败；若 Reviewer 用不同挂载参数得到不同结果，请记录自己的 argv/结果并说明差异。
+预期：OCI 2 个失败为冻结 rootfs 环境限制（无 `pgrep`；`/tmp` noexec 使 slow-broker wrapper 无法执行），不是产品断言失败；PR1 后 OCI full 计数为 **773/2/1**（不是 v1 的 768）。若 Reviewer 用不同挂载参数得到不同结果，请记录自己的 argv/结果并说明差异。冷启动期望 20/20：1 成功 + 1 受控 singleton 拒绝、0 traceback、Fake counter=1、Attempt `SETTLED`。
 
 真实 DSH 单例（示例，Reviewer 自行改 label/时间；先建 evidence 目录）：
 
@@ -155,14 +184,17 @@ podman ps -a --format '{{.Names}}'
 
 裁定必须逐行附 `file:line`、命令、期望/实际与证据路径；**不得**只签“全部 PASS”。本请求不要求、也不允许签署任何 G3-D 或 Live 范围裁定。
 
+**枚举口径（二次复核）**：v1 的最后一个独立裁定是 `PARTIAL`；PR1 修复不等于自动 PASS。二次 Reviewer 只有在独立复验 P1-1/P1-2/P1-3 与 R1/R2/R4 后才可给 `PASS_FOR_G3C_NO_KEY_CONTRACT_RECOVERY_SCOPE`；若仍有 P1/P2 残余影响主张，仍应给 `PARTIAL` 或 `BLOCKED`，不得用“Owner 已修”替代自己的证据。`FAIL` 用于发现 P0/P1 语义或证据缺陷（包括把 Fake 已收写成 FREE、crash 重发、recovery 覆盖已结算、伪造计数、把 raw-UDS/host 写成 DSH）。
+
 ## 4. 禁止事项
 
 - 禁止使用真实 Key/真实模型/外部 HTTP/生产 Live；禁止解锁 `gates.py`/`run_live.sh`；禁止用宿主 Node 替代固定 rootfs。
 - 禁止修改、覆盖、移动 Owner 的 trace/log/matrix/receipt/ledger；复核只能在 Reviewer 自己的目录写 `reviewer-*` 证据。
 - 禁止用 `sqlite3` CLI 打开 Packet 内 SQLite 副本（会因 `-shm` 改变字节）；只读副本或仅 `sha256sum`。
-- 禁止把 Owner 的矩阵/报告文字当作自己的复核结论，禁止复制粘贴式“独立复验”。
-- 禁止 push、amend、重写历史；禁止改 G3-B packet/33 行矩阵/独立 Review/errata。
-- 禁止把 host-level 测试写成 real-DSH；禁止把 Fake synthetic usage 写成真实账单；禁止把 16 个 D NOT_RUN 写成通过。
+- 禁止把 Owner 的矩阵/报告文字当作自己的复核结论，禁止复制粘贴式“独立复验”；禁止把 v1 `PARTIAL`、PR1 的“已修复”或 Owner 的 20 轮 JSON 直接改写为二次 PASS。
+- 禁止修改 v1 报告/本请求/errata 的既有文字、Packet v1、Packet v2 payload；二次复核只能在 Reviewer 自己的 `artifacts/reviewer-g3c/` 写新证据。
+- 禁止 push、amend、重写历史；禁止改 G3-B packet/33 行矩阵/独立 Review/G3-B errata。
+- 禁止把 host-level 测试写成 real-DSH；禁止把 raw-UDS/container reconcile 写成 real-DSH；禁止把 Fake synthetic usage 写成真实账单；禁止把 16 个 D NOT_RUN 写成通过。
 
 ## 5. 非主张清单
 
@@ -171,15 +203,19 @@ podman ps -a --format '{{.Names}}'
 - 不主张对 DSH runtime/插件/内核的完整安全审计；Guard 19/19、adapter 9/9 仅定向测试。
 - 不主张历史 G3-B 裁定被改变；不主张本 Packet 含 D0 实现或 G3-B 历史文件。
 - 不主张 host full 的 2 个宿主环境失败已被修复（它们是既有环境限制，不是本轮产品缺陷）；也不掩盖 OCI 的 2 个环境失败。
+- 不主张 PR1 已被二次复核为 PASS：本请求发出时二次复核尚未执行；v1 的最后独立裁定仍是 `PARTIAL`。
+- 不主张 PR1 补齐了 real-DSH replay 或双真实 DSH 同 Claim；P1-1 只是更正/缩小主张，P1-2 覆盖 Controller/socket/Broker/Fake/SQLite 级冷启动。
+- 不主张 v1 报告/errata 的文字被修改；v1 报告原字节 sha256 `4744c61f…`，packet v1 冻结 1713/1713。
 
 ## 6. 证据索引（Packet 内）
 
-| 内容 | Packet 路径 |
+| 内容 | Packet v2 路径 |
 |---|---|
-| Manifest / 校验 | `manifest.json`、`hashes.sha256`、`packet-integrity-report.txt` |
-| Diff | `diff.patch`（`bb5bd0b..e6fde1c`，含新文件） |
-| Docs | `docs/M0_G3C_IMPLEMENTATION_REPORT.md`、`docs/M0_G3C_REVIEW_REQUEST.md`、`docs/M0_G3C_FINDINGS_AND_DISPOSITION.md` |
-| 矩阵 | `matrix/Autonomous_Teacher_M0_G3C_G3D_Test_Evidence_Matrix_v1.0.csv`、`matrix/evidence-matrix-g3c.csv` |
-| 证据 | `evidence/env/`、`evidence/commands.jsonl`、`evidence/traces/`、`evidence/logs/`、`evidence/ledger/`、`evidence/receipts/`、`evidence/evidence/`、`evidence/regression/` |
-| 复现 | `reproduce/`（命令、预期、canonical 脚本） |
+| Manifest / 校验 | `manifest.json`（含 `previous_review`）、`hashes.sha256`、`packet-integrity-report.txt` |
+| Diff | `diff.patch`（`bb5bd0b..b2f6af0`，含新文件）；`docs-diff.patch`（`bb5bd0b..<docs_sha>`，含 docs 变更） |
+| v1 复核 | `review/REVIEW_G3C_INDEPENDENT.md`（原字节，339 行）、`review/REVIEW_ERRATA.md`、`review/RUN_INDEX.md`、`review/V1_EVIDENCE_INDEX.md` |
+| Docs | `docs/M0_G3C_IMPLEMENTATION_REPORT.md`、`docs/M0_G3C_REVIEW_REQUEST.md`、`docs/M0_G3C_FINDINGS_AND_DISPOSITION.md`、`docs/M0_G3C_REVIEW_ERRATA.md`、matrix |
+| 矩阵 | `matrix/Autonomous_Teacher_M0_G3C_G3D_Test_Evidence_Matrix_v1.0.csv`、`matrix/evidence-matrix-g3c.csv`、`matrix/matrix-path-audit-pr1.txt` |
+| 证据 | `evidence/env/`、`evidence/commands.jsonl`、`evidence/traces/`、`evidence/logs/`（含 coldstart-*）、`evidence/ledger/`、`evidence/receipts/`、`evidence/evidence/`（含 `concurrency-coldstart-*.json`、`matrix-path-audit-pr1.txt`）、`evidence/regression/`、`evidence/pr1/`（含 `pr1/traces/{echo,tool}`） |
+| 复现 | `reproduce/`（R0–R5、P1-1/2/3 专项、canonical/DSH 命令） |
 | 安全非主张 | `security-nonclaims.md` |

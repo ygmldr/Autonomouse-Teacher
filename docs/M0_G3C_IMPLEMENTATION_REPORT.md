@@ -295,7 +295,8 @@ b2f6af0 fix: G3-C deterministic two-controller cold start (no-key)
 
 ```bash
 cd "/root/Autonomous Teacher"
-git rev-parse HEAD                      # b2f6af054555705192c4e1ae3019a68078764736（PR1 fix）
+git rev-parse HEAD                      # 最终 docs commit（含本文件/Errata；见 Packet v2 manifest.docs_sha）
+git rev-parse b2f6af0                    # PR1 implementation fix
 git rev-parse b2f6af0^                  # 78be77c
 git status --porcelain -uall            # 仅本任务 docs/scripts（提交前）
 git diff --stat bb5bd0b..b2f6af0
