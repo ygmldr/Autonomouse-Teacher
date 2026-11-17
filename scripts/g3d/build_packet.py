@@ -376,7 +376,7 @@ def copy_d2(out: Path) -> None:
         src = D2 / case
         dst = out / "d2" / case
         assert_true(src.is_dir(), f"missing D2 case: {src}")
-        for rel in ("summary.json", "LEVELS.json", "d2/case.json",
+        for rel in ("summary.json", "LEVELS.json",
                     "run/checks.json", "state/pre.json", "state/final.json",
                     "mountinfo/candidate.txt", "run/run-summary.txt",
                     "run/exits.json"):
@@ -1139,10 +1139,10 @@ def build(args: argparse.Namespace) -> int:
         "nonclaims": "review/security-nonclaims.md",
         "remaining_risk_register": "review/remaining-risk-register.md",
         "packet_builder": {"path": "scripts/g3d/build_packet.py",
-                           "git_blob": git_blob_sha(docs_sha, "scripts/g3d/build_packet.py")
-                           if git("ls-tree", "-r", "--name-only", docs_sha,
-                                  "--", "scripts/g3d/build_packet.py").strip()
-                           else None},
+                           "git_blob": git_blob_sha(
+                               git("rev-parse", "HEAD").strip(),
+                               "scripts/g3d/build_packet.py"),
+                           "note": "builder commit is at HEAD; docs_sha is the docs/matrix commit"},
     }
     write_readme(out, manifest)
     # README is payload; recompute count after it exists.
