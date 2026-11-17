@@ -44,8 +44,16 @@ WORK_MATRIX = EVIDENCE / "evidence/evidence-matrix-g3c.csv"
 
 DEFAULT_BASE = "bb5bd0bf83e22130ed0d81c54f54a4673654cfe3"
 DEFAULT_G0 = "e107e22"
-DEFAULT_IMPL = "e6fde1cdf0bec9e957e98d569b257c8f17dfa363"
+DEFAULT_IMPL = "b2f6af054555705192c4e1ae3019a68078764736"
 MAX_PACKET_BYTES = 100 * 1024 * 1024
+
+REVIEW_REPORT = "docs/REVIEW_G3C_INDEPENDENT.md"
+REVIEW_REPORT_SHA = "4744c61f1561c6f92634b29ef9a6a0f7ca82c4627aef31ba3d0163e4886d23b1"
+REVIEW_REPORT_BYTES = 32720
+REVIEW_RUN_INDEX = ARTIFACTS / "reviewer-g3c/RUN_INDEX.md"
+REVIEW_PACKET_V1 = "review-packet-g3c-e6fde1cdf0bec9e957e98d569b257c8f17dfa363"
+MATRIX_AUDIT = EVIDENCE / "evidence/matrix-path-audit-pr1.txt"
+PR1_REGRESSION = EVIDENCE / "regression/pr1-summary-regression.json"
 
 DSH_RUNTIME = DEPS / "deepseek_harness_runtime/runtime/deepseek-harness-sdk-runtime-linux-x64"
 ROOTFS_CANON = "25491e45aa3dc54c526db9b9d46d18b31c7840150473e2fdb4d8b882f02fe9c0"
@@ -56,9 +64,11 @@ DOC_SPECS = [
     ("M0_G3C_IMPLEMENTATION_REPORT.md", "IMPLEMENTATION_REPORT.md"),
     ("M0_G3C_REVIEW_REQUEST.md", "REVIEW_REQUEST.md"),
     ("M0_G3C_FINDINGS_AND_DISPOSITION.md", "FINDINGS_AND_DISPOSITION.md"),
+    ("M0_G3C_REVIEW_ERRATA.md", "REVIEW_ERRATA.md"),
 ]
 DOC_BLOBS = [f"docs/{src}" for src, _ in DOC_SPECS] + [
     "docs/Autonomous_Teacher_M0_G3C_G3D_Test_Evidence_Matrix_v1.0.csv",
+    REVIEW_REPORT,
 ]
 
 SENSITIVE = [
@@ -190,27 +200,32 @@ def secret_scan(files: list[Path], out: Path) -> list[str]:
 
 
 def check_docs_committed(docs_sha: str) -> None:
-    dirty = git("status", "--porcelain", "--", *DOC_BLOBS).strip()
+    dirty = git("status", "--porcelain", "-uall", "--", "docs").strip()
     if dirty:
         raise BuildError("docs files are dirty; commit them before building the "
                          f"packet:\n{dirty}")
-    head_docs = git("log", "-1", "--format=%H", "--", *DOC_BLOBS).strip()
+    head_docs = git("log", "-1", "--format=%H", "--", "docs").strip()
     if head_docs != docs_sha:
-        raise BuildError(f"docs_sha {docs_sha} is not the last commit touching the "
-                         f"docs files ({head_docs}); pass the right --docs-sha")
+        raise BuildError(f"docs_sha {docs_sha} is not the last commit touching "
+                         f"docs/ ({head_docs}); pass the right --docs-sha")
 
 
 def write_readme(out: Path, manifest: dict) -> None:
-    text = f"""# G3-C review packet ({manifest['impl_sha'][:12]})
+    previous = manifest["previous_review"]
+    text = f"""# G3-C review packet v2 ({manifest['impl_sha'][:12]})
 
 No-key, Fake-provider, fixed-rootfs evidence packet for M0 G3-C
 (contract / recovery / cancel / deadline / IPC-resource / streaming scope).
 It is **not** a G3-D OS-boundary packet and **not** a Live/GO authorization.
+This is the PR1 packet after the independent v1 review returned `PARTIAL`
+(no P0; P1-1/P1-2/P1-3).  It does not itself claim a PASS; the second review
+must re-verify the P1 fixes independently.
 
 - Base: `{manifest['base_sha']}`
 - G0: `{manifest['g0_sha']}`
-- Impl: `{manifest['impl_sha']}`
-- Docs: `{manifest['docs_sha']}`
+- Impl: `{manifest['impl_sha']}` (parent `{manifest['impl_parent_sha']}`)
+- Docs: `{manifest['docs_sha']}` (parent `{manifest['docs_parent_sha']}`)
+- Previous review: `{previous['verdict']}`, P0={previous['p0_count']}, P1={len(previous['p1'])}
 - Matrix: `{manifest['matrix']['rows']}` rows, `{manifest['matrix']['status_counts']}`
 - Rootfs: `{manifest['rootfs_hash']}`
 - Deps: `{manifest['deps_hash']}`
@@ -220,15 +235,17 @@ Layout:
 
 ```text
 README.md
-manifest.json
-diff.patch                  # git diff --binary base..impl
-hashes.sha256               # all payload files + manifest.json
-packet-integrity-report.txt # counts + sha256sum -c result (not self-hashed)
-matrix/                     # docs matrix (69 rows) + work matrix
-docs/                       # IMPLEMENTATION_REPORT / REVIEW_REQUEST / FINDINGS
+manifest.json                  # identity + previous_review/P1 index
+diff.patch                     # git diff --binary base..impl
+docs-diff.patch                # git diff --binary base..docs (includes docs)
+hashes.sha256                  # all payload files + manifest.json
+packet-integrity-report.txt    # counts + sha256sum -c result (not self-hashed)
+review/                        # v1 report original bytes, errata, run index
+matrix/                        # docs matrix + work matrix + P1-3 path audit
+docs/                          # IMPLEMENTATION_REPORT / REVIEW_REQUEST / FINDINGS / ERRATA
 evidence/
-  env/ commands.jsonl traces/ logs/ ledger/ receipts/ evidence/ regression/
-reproduce/                  # commands + expected results
+  env/ commands.jsonl traces/ logs/ ledger/ receipts/ evidence/ regression/ pr1/
+reproduce/                     # R0-R5, P1-specific and DSH commands
 security-nonclaims.md
 ```
 
@@ -248,19 +265,20 @@ Do not use the `sqlite3` CLI on copied sqlite files; verify bytes with
 
 def write_reproduce(out: Path, manifest: dict) -> None:
     packet = out.name
-    readme = f"""# G3-C packet reproduction
+    readme = f"""# G3-C packet v2 reproduction (R0-R5 + P1 checks)
 
 Packet: `{packet}`
 Impl: `{manifest['impl_sha']}`
 Docs: `{manifest['docs_sha']}`
 Base: `{manifest['base_sha']}`
+Previous independent verdict: `{manifest['previous_review']['verdict']}` (P0 none; P1-1/P1-2/P1-3)
 
 All commands are host-side and must not use real keys, a real model, external
 HTTP or Live.  Host Python **must** be run with `PYTHONDONTWRITEBYTECODE=1` and
 `-B` so the frozen deps tree is not modified.  Node/DSH run only inside the
 fixed rootfs.
 
-## 1. Packet integrity (from the packet root)
+## R0. Packet integrity and identity
 
 ```bash
 sha256sum -c hashes.sha256
@@ -268,24 +286,24 @@ python3 - <<'PY'
 import json
 m=json.load(open('manifest.json'))
 print(m['impl_sha'], m['docs_sha'], m['file_count'])
+print(m['previous_review']['verdict'], m['previous_review']['p1'])
 PY
-```
-
-Expected: every line ends with `OK`.  `hashes.sha256` covers every payload file
-plus `manifest.json`; `hashes.sha256` and `packet-integrity-report.txt` are
-metadata and are not self-hashed.  See `manifest.file_count`.
-
-## 2. Identity / diff
-
-```bash
 cd "/root/Autonomous Teacher"
-git rev-parse {manifest['impl_sha'][:12]}
-git diff --binary {manifest['base_sha'][:12]}..{manifest['impl_sha'][:12]} | sha256sum
+git rev-parse {manifest['impl_sha']} {manifest['docs_sha']}
+git diff --binary {manifest['base_sha']}..{manifest['impl_sha']} | sha256sum
 # compare to manifest.diff_sha256
+git diff --binary {manifest['base_sha']}..{manifest['docs_sha']} | sha256sum
+# compare to manifest.docs_diff_sha256
 git status --porcelain -uall
 ```
 
-## 3. Host Python (no bytecode)
+Expected: every line ends with `OK`; `manifest.file_count` equals the disk file
+count; `diff.patch` and `docs-diff.patch` hashes match the manifest.
+`hashes.sha256` covers every payload file plus `manifest.json`;
+`hashes.sha256` and `packet-integrity-report.txt` are metadata and are not
+self-hashed.
+
+## R1. Static / host regression
 
 ```bash
 cd "/root/Autonomous Teacher"
@@ -298,33 +316,168 @@ export PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="src:artifacts/foundation/deps"
 /root/.local/bin/python3.11 -B -m ruff check src tests spikes/g3b-trusted-bridge/run_c3
 ```
 
-Expected: 105 / 31 / 14 / 280 pass; host full 768 passed + 2 known host-env
-failures + 1 skipped; Ruff pass.
+Expected: **110 / 31 / 14 / 280** pass; host full **773 passed / 2 failed / 1
+skipped** (the 2 failures are the documented writable-config and hard-coded
+`/project` host-env limits); Ruff `All checks passed!`.
 
-## 4. Fixed rootfs
+## R2. P1-2: two-controller simultaneous cold start (>=20 rounds)
 
 ```bash
-bash scripts/g3c/run-node-tests.sh   # 9/9 adapter, 19/19 guard
-bash scripts/g3c/run-oci-full.sh     # 768 passed / 2 env-only failed / 1 skipped
+cd "/root/Autonomous Teacher"
+export PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="src:artifacts/foundation/deps"
+UTC=$(date -u +%Y%m%dT%H%M%SZ)
+G3C_COLDSTART_EVIDENCE=artifacts/reviewer-g3c/coldstart-$UTC.json \
+G3C_COLDSTART_LOG_DIR=artifacts/reviewer-g3c/coldstart-$UTC \
+/root/.local/bin/python3.11 -B -m pytest \
+  tests/integration/g3c/test_c3_05_twocontroller_coldstart.py -q -p no:cacheprovider
 ```
 
-## 5. Canonical identity / absence
+Expected: 20/20 rounds with one winner and one controlled rejection
+(`CONTROLLER_SINGLETON_LOCKED` exit 5; a replay loser may use exit 3 and a
+journal failure exit 4), **0 traceback**, Fake counter=1, Attempt `SETTLED`.
+Do not reuse the Owner JSON as a substitute for your own run.
+
+## R3. P1-1: real-DSH label verification
 
 ```bash
+cd "/root/Autonomous Teacher"
+python3 reproduce/check_p1_labels.py "/root/Autonomous Teacher"
+# C1-01A must be raw-UDS, not DSH:
+test -f artifacts/g3c/traces/probe-replay/probe-result.json
+test ! -f artifacts/g3c/traces/probe-replay/dsh-result.json
+grep -E 'C1-01A|C1-04|C2-02D|C2-02E|C3-01B|C3-01C|C3-02A|C3-02B|C-END-01' \
+  matrix/Autonomous_Teacher_M0_G3C_G3D_Test_Evidence_Matrix_v1.0.csv
+```
+
+Expected: the 8 corrected rows are labelled raw-UDS/container reconcile/summary;
+real DSH rows have a `dsh-result.json` under their trace directory; host pytest
+rows say `host-level (not DSH)`.
+
+## R4. P1-3: matrix path audit
+
+```bash
+cd "/root/Autonomous Teacher"
+python3 reproduce/check_matrix_paths.py "/root/Autonomous Teacher"
+```
+
+Expected: both the docs matrix and the working matrix report `missing=0` for
+`db_or_receipt_path`/`log_path`; the 16 D rows are still `NOT_RUN` and their raw
+row hashes are unchanged from the v1 freeze (`matrix/matrix-path-audit-pr1.txt`
+records the Owner before/after audit: 25 -> 0).
+
+## R5. Real DSH Echo / Tool / Stream / Crash / reconcile (fixed rootfs)
+
+```bash
+cd "/root/Autonomous Teacher"
+STAGE=$PWD/artifacts/g3c/stage
+DEPS=$PWD/artifacts/foundation/deps
+ROOTFS=$PWD/artifacts/security/rootfs
+run_dsh() {{
+  name=$1; prompt=$2; shift 2
+  ev=$PWD/artifacts/g3c/traces/reviewer-$name
+  mkdir -p "$ev"; chmod 0777 "$ev"
+  podman run --rm --name "reviewer-$name" \
+    --network none --http-proxy=false --unsetenv-all \
+    --env PATH=/opt/python/bin:/usr/bin --env HOME=/work \
+    --env PYTHONPATH=/probe/src:/deps --env PYTHONDONTWRITEBYTECODE=1 --env TMPDIR=/tmp \
+    --read-only --read-only-tmpfs=false --cap-drop ALL --security-opt no-new-privileges \
+    --user 65534:65534 --pids-limit 160 --memory 1g --memory-swap 1g --cpus 1 \
+    --tmpfs /tmp:rw,noexec,nosuid,nodev,size=64m,mode=1777 \
+    --tmpfs /work:rw,noexec,nosuid,nodev,size=512m,mode=1777 \
+    --workdir /work --timeout 180 --systemd=false \
+    --mount "type=bind,src=$STAGE,dst=/probe,ro=true" \
+    --mount "type=bind,src=$DEPS,dst=/deps,ro=true" \
+    --mount "type=bind,src=$ev,dst=/evidence,rw=true" \
+    --rootfs "$ROOTFS" /opt/python/bin/python3.11 -B /probe/run_c3/worker_c3.py \
+    --label "reviewer-$name" --prompt "$prompt" "$@" --evidence /evidence
+}}
+run_dsh echo "G3C_ECHO"
+run_dsh tool "Use skill_lookup to look up binary_search" --scenario tool
+run_dsh stream-slow "G3C_STREAM" --scenario stream_slow
+```
+
+Crash (then reconcile the same trace directory; the seed used by the Owner is
+`traces/crash-after_response_before_settlement-fixed`, copy it to a Reviewer
+directory and mount it read-only as `/seed`):
+
+```bash
+# crash: provider response observed, controller exits before settlement
+podman run --rm --name reviewer-crash \
+  --network none --http-proxy=false --unsetenv-all \
+  --env PATH=/opt/python/bin:/usr/bin --env HOME=/work \
+  --env PYTHONPATH=/probe/src:/deps --env PYTHONDONTWRITEBYTECODE=1 --env TMPDIR=/tmp \
+  --env G3B_TEST_MODE=1 --env G3B_CRASH_HOOK=after_response_before_settlement \
+  --read-only --read-only-tmpfs=false --cap-drop ALL --security-opt no-new-privileges \
+  --user 65534:65534 --pids-limit 160 --memory 1g --memory-swap 1g --cpus 1 \
+  --tmpfs /tmp:rw,noexec,nosuid,nodev,size=64m,mode=1777 \
+  --tmpfs /work:rw,noexec,nosuid,nodev,size=512m,mode=1777 \
+  --workdir /work --timeout 150 --systemd=false \
+  --mount "type=bind,src=$STAGE,dst=/probe,ro=true" \
+  --mount "type=bind,src=$DEPS,dst=/deps,ro=true" \
+  --mount "type=bind,src=$PWD/artifacts/g3c/traces/reviewer-crash,dst=/evidence,rw=true" \
+  --rootfs "$ROOTFS" /opt/python/bin/python3.11 -B /probe/run_c3/worker_c3.py \
+  --label reviewer-crash --prompt G3C_CRASH --evidence /evidence
+# reconcile: seed is a copy of the crash work dir, never the live trace
+podman run --rm --name reviewer-reconcile \
+  --network none --http-proxy=false --unsetenv-all \
+  --env PATH=/opt/python/bin:/usr/bin --env HOME=/work \
+  --env PYTHONPATH=/probe/src:/deps --env PYTHONDONTWRITEBYTECODE=1 --env TMPDIR=/tmp \
+  --read-only --read-only-tmpfs=false --cap-drop ALL --security-opt no-new-privileges \
+  --user 65534:65534 --pids-limit 160 --memory 1g --memory-swap 1g --cpus 1 \
+  --tmpfs /tmp:rw,noexec,nosuid,nodev,size=64m,mode=1777 \
+  --tmpfs /work:rw,noexec,nosuid,nodev,size=512m,mode=1777 \
+  --workdir /work --timeout 120 --systemd=false \
+  --mount "type=bind,src=$STAGE,dst=/probe,ro=true" \
+  --mount "type=bind,src=$DEPS,dst=/deps,ro=true" \
+  --mount "type=bind,src=$PWD/artifacts/g3c/traces/reviewer-reconcile,dst=/evidence,rw=true" \
+  --mount "type=bind,src=$PWD/artifacts/g3c/traces/reviewer-crash/work,dst=/seed,ro=true" \
+  --rootfs "$ROOTFS" /opt/python/bin/python3.11 -B /probe/run_c3/reconcile_c3.py \
+  --seed /seed --run-id reviewer-reconcile --evidence /evidence
+```
+
+Expected: Echo 1 Attempt/Claim/Receipt/SETTLED; Tool 2 independent Attempts
+(SETTLED); Stream first chunk before Fake exit; Crash has no successful finish
+and no resend; reconcile is conservative (`SETTLEMENT_UNCERTAIN` without a
+receipt, settle once with a receipt).  Real-DSH runs still use the Fake provider,
+not a model.
+
+## R6. Node / Guard / OCI full
+
+```bash
+cd "/root/Autonomous Teacher"
+bash scripts/g3c/run-node-tests.sh   # 9/9 adapter, 19/19 guard
+bash scripts/g3c/run-oci-full.sh     # 773 passed / 2 env-only failed / 1 skipped
+```
+
+Expected: the OCI 2 failures are the documented no-`pgrep` and `/tmp` noexec
+wrapper limits, not product assertion failures.
+
+## R7. Canonical / absence / LiveGate
+
+```bash
+cd "/root/Autonomous Teacher"
 tar --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner -cf - -C artifacts/security/rootfs . | sha256sum
 tar --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner -cf - -C artifacts/foundation/deps . | sha256sum
+tar --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner -cf - -C artifacts/g3c/stage . | sha256sum
 podman ps -a --format '{{{{.Names}}}}'
+bash scripts/run_live.sh; echo RUN_LIVE_EXIT=$?
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src /root/.local/bin/python3.11 -B -c \
+  "from autoteacher_m0.security.gates import LiveGate; print(LiveGate().inspect(live_requested=True))"
 ```
 
-Expected: `{manifest['rootfs_hash']}`, `{manifest['deps_hash']}`, empty.
+Expected: `{manifest['rootfs_hash']}`, `{manifest['deps_hash']}`,
+`{manifest['stage_hash']}`, empty `podman ps -a`, `RUN_LIVE_EXIT=3`,
+`GateDecision(status='BLOCKED', ...)`, no Key env and no `.env`.
 
-## 6. Evidence
+## R8. Evidence and sqlite safety
 
 `evidence/commands.jsonl` records argv/UTC/exit/rootfs/deps/stage for every
 container case; `evidence/traces/` holds raw per-case JSON; `evidence/logs/`
 holds raw stdout; `evidence/regression/` holds this round's full regression
-logs and JUnit XML.  Do **not** open copied sqlite files with the `sqlite3` CLI;
-use `sha256sum` only (G3-B `-shm` drift lesson).
+logs and JUnit XML; `evidence/pr1/` holds the PR1 traces/logs/src snapshot.
+**Do not** open copied sqlite files with the `sqlite3` CLI (it can touch `-shm`
+and change bytes).  Copy to `/tmp` first if a query is unavoidable, or use
+`sha256sum` only.
 """
     write_text(out / "reproduce/README.md", readme)
     verify = """#!/bin/sh
@@ -338,18 +491,189 @@ m = json.load(open("manifest.json"))
 print("impl_sha=", m["impl_sha"])
 print("docs_sha=", m["docs_sha"])
 print("file_count=", m["file_count"])
+print("previous_review=", m["previous_review"]["verdict"])
 PY
 """
     write_text(out / "reproduce/verify_packet.sh", verify, 0o755)
 
+    matrix_check = '''#!/usr/bin/env python3
+"""Check every matrix db_or_receipt_path/log_path exists in the repo.
+
+Usage: python3 reproduce/check_matrix_paths.py "/root/Autonomous Teacher"
+Read-only; no sqlite is opened.
+"""
+import csv
+import sys
+from pathlib import Path
+
+root = Path(sys.argv[1] if len(sys.argv) > 1 else ".").resolve()
+matrices = [
+    root / "docs/Autonomous_Teacher_M0_G3C_G3D_Test_Evidence_Matrix_v1.0.csv",
+    root / "artifacts/g3c/evidence/evidence-matrix-g3c.csv",
+]
+failed = False
+for matrix in matrices:
+    if not matrix.is_file():
+        print("MISSING_MATRIX", matrix)
+        failed = True
+        continue
+    missing = []
+    rows = 0
+    with matrix.open(encoding="utf-8-sig", newline="") as handle:
+        reader = csv.DictReader(handle)
+        for row in reader:
+            rows += 1
+            if row.get("status") != "PASS":
+                continue
+            for field in ("db_or_receipt_path", "log_path"):
+                value = (row.get(field) or "").strip()
+                if not value:
+                    continue
+                for part in value.split(";"):
+                    part = part.strip()
+                    if not part or not part.startswith("artifacts/"):
+                        continue
+                    if not (root / part).exists():
+                        missing.append((row.get("case_id"), field, part))
+    print(f"{matrix.name}: rows={rows} missing={len(missing)}")
+    for case, field, value in missing:
+        print("  MISSING", case, field, value)
+    if missing:
+        failed = True
+sys.exit(1 if failed else 0)
+'''
+    write_text(out / "reproduce/check_matrix_paths.py", matrix_check, 0o755)
+
+    label_check = '''#!/usr/bin/env python3
+"""Spot-check the P1-1 real-DSH labels and evidence types.
+
+Usage: python3 reproduce/check_p1_labels.py "/root/Autonomous Teacher"
+Read-only; does not run DSH or open sqlite.
+"""
+import csv
+import re
+import sys
+from pathlib import Path
+
+root = Path(sys.argv[1] if len(sys.argv) > 1 else ".").resolve()
+matrix = root / "docs/Autonomous_Teacher_M0_G3C_G3D_Test_Evidence_Matrix_v1.0.csv"
+expected = {
+    "C1-01A": "raw-UDS",
+    "C1-04": "raw-UDS",
+    "C3-01B": "raw-UDS",
+    "C3-01C": "raw-UDS",
+    "C3-02A": "raw-UDS",
+    "C3-02B": "raw-UDS",
+    "C2-02D": "container reconcile",
+    "C2-02E": "container reconcile",
+    "C1-01D": "host-level",
+    "C2-04": "host-level",
+}
+rows = {}
+with matrix.open(encoding="utf-8-sig", newline="") as handle:
+    for row in csv.DictReader(handle):
+        rows[row["case_id"]] = row
+failed = False
+for case, needle in expected.items():
+    row = rows.get(case)
+    if row is None:
+        print("MISSING_ROW", case); failed = True; continue
+    observed = row.get("observed", "")
+    if needle not in observed:
+        print("BAD_LABEL", case, "expected", needle, "observed", observed[:160])
+        failed = True
+    else:
+        print("OK_LABEL", case, needle)
+
+# Every matrix row that is claimed real DSH must link a trace with dsh-result.
+for case, row in rows.items():
+    if row.get("status") != "PASS" or case == "C-END-02":
+        continue
+    observed = row.get("observed", "")
+    if "real DSH" not in observed or "raw-UDS" in observed:
+        continue
+    value = (row.get("db_or_receipt_path") or "").strip()
+    if not value:
+        continue
+    found = False
+    for part in value.split(";"):
+        part = part.strip()
+        if not part.startswith("artifacts/"):
+            continue
+        target = root / part
+        if target.is_dir():
+            target = target / "dsh-result.json"
+        if target.exists():
+            found = True
+            break
+    if not found:
+        print("MISSING_DSH_RESULT", case, value)
+        failed = True
+print("P1_1_LABEL_CHECK", "FAILED" if failed else "OK")
+sys.exit(1 if failed else 0)
+'''
+    write_text(out / "reproduce/check_p1_labels.py", label_check, 0o755)
+
+
+def write_review(out: Path, docs_sha: str, manifest: dict) -> None:
+    """Archive the v1 report byte-for-byte plus errata and evidence pointers."""
+    report = git_show(docs_sha, REVIEW_REPORT)
+    if sha256_bytes(report) != REVIEW_REPORT_SHA:
+        raise BuildError("archived v1 review report hash mismatch: "
+                         f"{sha256_bytes(report)} != {REVIEW_REPORT_SHA}")
+    if len(report) != REVIEW_REPORT_BYTES:
+        raise BuildError(f"archived v1 review report size mismatch: {len(report)}")
+    write_bytes(out / "review/REVIEW_G3C_INDEPENDENT.md", report)
+    write_bytes(out / "review/REVIEW_ERRATA.md",
+                git_show(docs_sha, "docs/M0_G3C_REVIEW_ERRATA.md"))
+    copy_file(REVIEW_RUN_INDEX, out / "review/RUN_INDEX.md")
+    index = f"""# v1 Reviewer evidence index (pointer only)
+
+The full 13 MB / 748-file Reviewer evidence tree is **not** copied into this
+packet.  The paths below are relative to the repository root and remain at
+`artifacts/reviewer-g3c/` (Git-ignored; Lead must archive it explicitly if
+needed).
+
+- Report (original bytes): `docs/REVIEW_G3C_INDEPENDENT.md` (339 lines,
+  sha256 `{REVIEW_REPORT_SHA}`); packet copy `review/REVIEW_G3C_INDEPENDENT.md`.
+- Errata: `docs/M0_G3C_REVIEW_ERRATA.md`; packet copy `review/REVIEW_ERRATA.md`.
+- Run index: `artifacts/reviewer-g3c/RUN_INDEX.md`; packet copy `review/RUN_INDEX.md`.
+
+| v1 finding | Reviewer evidence (repo path) | Packet counterpart |
+|---|---|---|
+| R0 identity / packet / matrix | `artifacts/reviewer-g3c/r0-identity/identity.txt`, `matrix-protected.txt`, `final-canonical.txt`, `livegate.txt`, `network-key-scan.txt` | `matrix/`, `evidence/regression/pr1-canonical-after.log` |
+| P1-1 real-DSH labels | `artifacts/reviewer-g3c/r1-static/matrix-label-audit.txt`; `r3-dsh/commands.jsonl`, `r3-dsh/traces/reviewer-*/` | `docs/M0_G3C_FINDINGS_AND_DISPOSITION.md` §4; `matrix/` |
+| P1-2 cold start | `artifacts/reviewer-g3c/r2/p2c-startup-lock.log`, `r2/summary.json`, `r2/p2c-session-identity.log` | `evidence/evidence/concurrency-coldstart-*.json`, `evidence/logs/coldstart-*`, `evidence/regression/pr1-coldstart.log` |
+| P1-3 matrix paths | `artifacts/reviewer-g3c/r1-static/matrix-path-audit.txt` | `matrix/matrix-path-audit-pr1.txt`, `evidence/evidence/matrix-path-audit-pr1.txt` |
+| R2 probes | `artifacts/reviewer-g3c/r2/probe_suite.py`, `r2/work/<case>/case.json`, `r2/probe-suite.log` | not copied; run from `artifacts/reviewer-g3c/` |
+| R3 real DSH | `artifacts/reviewer-g3c/r3-dsh/{{commands.jsonl,traces,env,summary.txt}}` | `evidence/traces/`, `evidence/pr1/traces/` |
+| R4 cross-check | `artifacts/reviewer-g3c/r4-crosscheck/crosscheck.json`, `crosscheck.log` | `evidence/ledger/`, `evidence/receipts/` |
+
+Packet v1 (frozen, for the v1 identity only):
+`artifacts/{REVIEW_PACKET_V1}/` (docs_sha `78be77c`, 1713/1713 hashes OK).
+"""
+    write_text(out / "review/V1_EVIDENCE_INDEX.md", index)
+
 
 def write_nonclaims(out: Path, manifest: dict) -> None:
-    text = f"""# G3-C security non-claims
+    text = f"""# G3-C packet v2 security non-claims
 
 This packet is a **no-key, Fake Provider, fixed-rootfs** evidence bundle for
-G3-C contract/recovery review.  It is **not** an authorization or a security
-proof beyond its stated scope.
+G3-C contract/recovery review after the v1 independent `PARTIAL`.  It is
+**not** an authorization, a PASS, or a security proof beyond its stated scope.
 
+- v1 independent review is archived unchanged (`review/REVIEW_G3C_INDEPENDENT.md`,
+  sha256 `{REVIEW_REPORT_SHA}`); its last verdict is `PARTIAL`.  This packet
+  records Owner fixes and evidence for a **second** review; it does not replace
+  that review and does not change the v1 text.
+- P1-1 is a **label/claim correction**, not a new real-DSH replay.  C1-01A is
+  raw-UDS; C1-04/C3-01B/C/C3-02A/B are raw-UDS; C2-02D/E are container
+  reconcile; host rows are host pytest.  No real Provider/model was used.
+- P1-2 is a code fix for two Controller cold starts (busy_timeout before WAL,
+  bounded retries, per-socket `flock` singleton, controlled exits 5/4/3).  It
+  does **not** cover two real DSH clients competing for the same Claim.
+- P1-3 is a matrix path-index correction (25 missing -> 0); it does not prove
+  every row's assertion was independently re-run by this packet.
 - OS trust boundary: `BLOCKED` (`B0-02`).  No G3-D isolation, candidate attack,
   different OS principal, namespace or kernel-deny evidence exists here.  The
   16 G3-D rows in the matrix are `NOT_RUN`.
@@ -370,7 +694,7 @@ proof beyond its stated scope.
   touch `-shm` and change bytes); verify with `sha256sum` only.
 
 Packet: `{manifest['packet']}`; impl `{manifest['impl_sha']}`; docs
-`{manifest['docs_sha']}`.
+`{manifest['docs_sha']}`; previous review `{manifest['previous_review']['verdict']}`.
 """
     write_text(out / "security-nonclaims.md", text)
 
@@ -380,7 +704,7 @@ def build(args: argparse.Namespace) -> int:
     g0 = resolve(args.g0_sha)
     impl = resolve(args.impl_sha)
     docs_sha = resolve(args.docs_sha) if args.docs_sha else \
-        git("log", "-1", "--format=%H", "--", *DOC_BLOBS).strip()
+        git("log", "-1", "--format=%H", "--", "docs").strip()
 
     if not docs_sha:
         raise BuildError("cannot resolve docs_sha; commit the docs first")
@@ -407,9 +731,11 @@ def build(args: argparse.Namespace) -> int:
     out.mkdir(parents=True)
 
     created = utc_now()
-    # 1) diff.patch (new files included; binary-safe)
+    # 1) diff.patch (impl) + docs-diff.patch (impl + docs)
     diff = git("diff", "--binary", f"{base}..{impl}", binary=True)
     write_bytes(out / "diff.patch", diff)
+    docs_diff = git("diff", "--binary", f"{base}..{docs_sha}", binary=True)
+    write_bytes(out / "docs-diff.patch", docs_diff)
 
     # 2) docs from the committed docs_sha (byte-exact)
     for src, dst in DOC_SPECS:
@@ -417,6 +743,8 @@ def build(args: argparse.Namespace) -> int:
     write_bytes(out / "matrix" / MATRIX_DOC.name,
                 git_show(docs_sha, f"docs/{MATRIX_DOC.name}"))
     copy_file(WORK_MATRIX, out / "matrix" / WORK_MATRIX.name)
+    copy_file(MATRIX_AUDIT, out / "matrix" / MATRIX_AUDIT.name)
+    write_review(out, docs_sha, {"impl_sha": impl, "docs_sha": docs_sha})
 
     # 3) evidence tree (copy only; never move)
     copy_tree(EVIDENCE / "env", out / "evidence/env")
@@ -427,6 +755,7 @@ def build(args: argparse.Namespace) -> int:
     copy_tree(EVIDENCE / "receipts", out / "evidence/receipts")
     copy_tree(EVIDENCE / "evidence", out / "evidence/evidence")
     copy_tree(EVIDENCE / "regression", out / "evidence/regression")
+    copy_tree(EVIDENCE / "pr1", out / "evidence/pr1")
 
     # 4) stable local metadata for the manifest
     stage_hash = tar_hash(STAGE)
@@ -439,12 +768,36 @@ def build(args: argparse.Namespace) -> int:
     runtime_sha = sha256_file(DSH_RUNTIME) if DSH_RUNTIME.is_file() else "MISSING"
     runtime_size = DSH_RUNTIME.stat().st_size if DSH_RUNTIME.is_file() else 0
     matrix = matrix_summary()
-    regression_path = EVIDENCE / "regression/summary-regression.json"
+    regression_path = PR1_REGRESSION if PR1_REGRESSION.is_file() else \
+        EVIDENCE / "regression/summary-regression.json"
     regression = json.loads(regression_path.read_text()) if regression_path.is_file() else None
+    coldstart_evidence = sorted(EVIDENCE.glob("evidence/concurrency-coldstart-*.json"))
+    latest_coldstart = coldstart_evidence[-1].name if coldstart_evidence else None
+    previous_review = {
+        "verdict": "PARTIAL",
+        "p0_count": 0,
+        "report": REVIEW_REPORT,
+        "report_sha256": REVIEW_REPORT_SHA,
+        "report_lines": 339,
+        "errata": "docs/M0_G3C_REVIEW_ERRATA.md",
+        "reviewer_evidence_root": "artifacts/reviewer-g3c/",
+        "packet_v1": REVIEW_PACKET_V1,
+        "packet_v1_docs_sha": "78be77c3c63fce62527dccd7ec8c1458047d81bf",
+        "p1": [
+            {"id": "P1-1", "summary": "real-DSH coverage over-claimed; C1-01A was raw-UDS",
+             "fix": "docs relabel (9ffa0b1/bea0fc3); no new real-DSH replay claimed"},
+            {"id": "P1-2", "summary": "two-controller cold start raised database is locked",
+             "fix": "impl b2f6af0 + 20-round controlled coldstart evidence"},
+            {"id": "P1-3", "summary": "25/53 matrix evidence paths did not exist",
+             "fix": "matrix paths + audit (25 -> 0); D rows byte-identical"},
+        ],
+        "second_review": "NOT_PERFORMED (Lead must assign; this packet does not claim PASS)",
+        "coldstart_evidence": latest_coldstart,
+    }
 
     # 4b) manifest/readme (README is payload; counts include all metadata)
     manifest = {
-        "schema": "m0.g3c.review-packet.v1",
+        "schema": "m0.g3c.review-packet.v2",
         "packet": out.name,
         "created_utc": created,
         "base_sha": base,
@@ -455,6 +808,8 @@ def build(args: argparse.Namespace) -> int:
         "docs_sha": docs_sha,
         "docs_parent_sha": git_parent(docs_sha),
         "diff_sha256": sha256_bytes(diff),
+        "docs_diff_sha256": sha256_bytes(docs_diff),
+        "previous_review": previous_review,
         "rootfs_hash": rootfs_hash,
         "deps_hash": deps_hash,
         "stage_hash": stage_hash,
@@ -513,12 +868,17 @@ def build(args: argparse.Namespace) -> int:
     total_bytes = sum(path.stat().st_size for path in out.rglob("*") if path.is_file())
     if total_bytes > MAX_PACKET_BYTES:
         raise BuildError(f"packet too large: {total_bytes} bytes")
-    report = f"""G3-C review packet integrity report
+    report = f"""G3-C review packet v2 integrity report
 packet={out.name}
 created_utc={created}
 impl_sha={impl}
 docs_sha={docs_sha}
 diff_sha256={manifest['diff_sha256']}
+docs_diff_sha256={manifest['docs_diff_sha256']}
+previous_review_verdict={manifest['previous_review']['verdict']}
+previous_review_p0={manifest['previous_review']['p0_count']}
+previous_review_p1={','.join(p['id'] for p in manifest['previous_review']['p1'])}
+second_review={manifest['previous_review']['second_review']}
 
 file_count_total={total_files}
 manifest_file_count={manifest['file_count']}
