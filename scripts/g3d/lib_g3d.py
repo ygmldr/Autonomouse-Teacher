@@ -83,8 +83,11 @@ ALLOWED_DIRTY_PREFIXES = (
     "config/g3d/",
     "tests/integration/g3d/test_d1_launcher_contract.py",
     "tests/integration/g3d/test_d2_",
+    "tests/integration/g3d/test_d3_",
     "docs/M0_G3D_D1B_REPORT.md",
     "docs/M0_G3D_D2",
+    "docs/M0_G3D_D3",
+    "docs/Autonomous_Teacher_M0_G3D_Test_Evidence_Matrix_v1.0.csv",
 )
 
 # D2 adversarial probes are audited candidate-stage Python files. They are the
@@ -115,7 +118,23 @@ TRUSTED_CRASH_HOOKS = frozenset({
     "after_attempt_start_before_fake_send",
     "after_fake_receive_before_response",
     "after_response_before_settlement",
+    "after_broker_settle_before_journal_mark",
+    "after_journal_mark_before_sdk_finish",
 })
+
+# D3 recovery probes: trusted crash/reconcile, cancel, deadline and same-claim
+# negative probes. They live in a separate exact allow-list so the D2 probe
+# contract (which is frozen) stays byte-for-byte exact.
+D3_PROBE_DIR = "run/d3-probes"
+D3_PROBE_FILES = frozenset({
+    "d3_request_once.py",
+    "d3_kill_before_send.py",
+    "d3_cancel.py",
+    "d3_half_close.py",
+    "d3_deadline.py",
+    "d3_same_claim.py",
+})
+D3_PROBE_PATHS = frozenset(f"{D3_PROBE_DIR}/{name}" for name in D3_PROBE_FILES)
 
 FAIL_REASONS = {
     EXIT_PREFLIGHT_IDENTITY: "PREFLIGHT_IDENTITY",
@@ -1260,7 +1279,9 @@ def forbidden_candidate_reasons(relpaths: Iterable[str]) -> list[str]:
         if name.endswith(".py") and "site-packages" not in relative:
             # The candidate stage carries exactly one audited entrypoint plus
             # the exact D2 probe allow-list; anything else fails the stage.
-            if relative != "run/candidate_entry.py" and relative not in D2_PROBE_PATHS:
+            if (relative != "run/candidate_entry.py"
+                    and relative not in D2_PROBE_PATHS
+                    and relative not in D3_PROBE_PATHS):
                 reasons.append(f"unexpected_python:{relative}")
     return sorted(set(reasons))
 

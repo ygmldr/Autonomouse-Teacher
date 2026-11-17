@@ -42,7 +42,7 @@ MAX_TRACE = 2000
 GROUP_SOCKET = 2000
 SOCKET_MODE = 0o660
 KEY_MARKERS = ("KEY", "TOKEN", "SECRET", "CREDENTIAL", "PASSWORD")
-SCENARIOS = frozenset({"echo", "tool", "resume"})
+SCENARIOS = frozenset({"echo", "tool", "resume", "stream"})
 LABEL_PATTERN = re.compile(r"[a-z0-9][a-z0-9-]{0,32}\Z")
 
 
@@ -311,7 +311,8 @@ def trace_event(record: list[dict], notification: object) -> None:
         return
     payload = getattr(notification, "payload", None) or {}
     event = payload.get("event") if isinstance(payload, dict) else None
-    entry = {"epoch_ms": int(time.time() * 1000), "utc": utc(),
+    entry = {"epoch_ms": int(time.time() * 1000),
+             "monotonic_ms": int(time.monotonic() * 1000), "utc": utc(),
              "method": getattr(notification, "method", None)}
     if isinstance(event, dict):
         entry["event_type"] = event.get("type")
@@ -388,8 +389,11 @@ def scenario_verdict(result: dict | None, scenario: str) -> tuple[bool, str | No
         return False, "NO_RESULT", detail
     detail["final_response"] = result.get("final_response")
     detail["finish_reason"] = result.get("finish_reason")
-    if result.get("final_response") != "ok" or result.get("finish_reason") != "completed":
-        return False, "DSH_ECHO" if scenario == "echo" else "DSH_TOOL", detail
+    expected_final = "early" if scenario == "stream" else "ok"
+    if (result.get("final_response") != expected_final
+            or result.get("finish_reason") != "completed"):
+        return False, ("DSH_STREAM" if scenario == "stream" else
+                       "DSH_ECHO" if scenario == "echo" else "DSH_TOOL"), detail
     summary = result.get("event_summary")
     if not isinstance(summary, dict):
         return False, "EVENT_SUMMARY", detail
@@ -401,6 +405,32 @@ def scenario_verdict(result: dict | None, scenario: str) -> tuple[bool, str | No
     detail["usages"] = usages
     detail["tool_calls"] = summary.get("tool_calls") or []
     detail["tool_results"] = summary.get("tool_results") or []
+    if scenario == "stream":
+        # First-chunk timing is asserted by the Host D3 runner against the
+        # trusted Fake's monotonic sidecar; the Candidate only records what the
+        # real DSH runtime actually reported.
+        events = result.get("events") if isinstance(result.get("events"), list) else []
+        stream_times = []
+        for event in events:
+            if not isinstance(event, dict):
+                continue
+            if isinstance(event.get("stream_time0"), list):
+                stream_times.extend(value for value in event["stream_time0"]
+                                    if isinstance(value, int))
+            data = event.get("data")
+            if isinstance(data, dict) and isinstance(data.get("stream"), list):
+                for item in data["stream"]:
+                    if isinstance(item, dict) and isinstance(item.get("time0"), int):
+                        stream_times.append(item["time0"])
+        detail["stream_time0"] = stream_times
+        detail["first_stream_time0"] = stream_times[0] if stream_times else None
+        clock = result.get("clock") if isinstance(result.get("clock"), dict) else {}
+        detail["clock"] = clock
+        if not usages or not isinstance(usages[-1], dict):
+            return False, "USAGE_MISSING", detail
+        if not stream_times:
+            return False, "STREAM_TIMING_MISSING", detail
+        return True, None, detail
     if scenario == "echo":
         if not usages or not isinstance(usages[-1], dict):
             return False, "USAGE_MISSING", detail
@@ -485,6 +515,7 @@ def run_dsh(*, scenario: str, session_id: str, prompt: str,
 
     started = utc()
     started_monotonic = time.monotonic()
+    started_epoch = time.time()
     notifications: list[dict] = []
     result = None
     error = None
@@ -537,6 +568,13 @@ def run_dsh(*, scenario: str, session_id: str, prompt: str,
         "started_utc": started,
         "finished_utc": finished,
         "wall_seconds": round(time.monotonic() - started_monotonic, 3),
+        "clock": {
+            "started_monotonic": started_monotonic,
+            "started_epoch_s": started_epoch,
+            "offset_monotonic_minus_epoch_s": started_monotonic - started_epoch,
+            "finished_monotonic": time.monotonic(),
+            "finished_epoch_s": time.time(),
+        },
         "final_response": None if result is None else result.final_response,
         "finish_reason": None if result is None else result.finish_reason,
         "event_count": 0 if result is None else len(result.events),

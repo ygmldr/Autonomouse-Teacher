@@ -461,7 +461,26 @@ def _assemble_stage(*, base: str, stage_dir: Path, identity: dict,
             "source": {**_source_worktree(f"scripts/g3d/probes/{source_path.name}"),
                        "path": f"scripts/g3d/probes/{source_path.name}"},
         })
-    patch_source = "config/g3d/candidate/bridge.patch.yml"
+    # D3 recovery/cancel/deadline/same-claim probes use their own exact
+    # allow-list; the frozen D2 probe set above stays unchanged.
+    d3_probe_root = lib.REPO_ROOT / "scripts" / "g3d" / "d3_probes"
+    d3_probe_sources = sorted(d3_probe_root.glob("*.py"))
+    d3_found = {path.name for path in d3_probe_sources}
+    if d3_found != set(lib.D3_PROBE_FILES):
+        fail(lib.EXIT_STAGE_INVALID, "D3 probe set does not match the allow-list",
+             missing=sorted(set(lib.D3_PROBE_FILES) - d3_found),
+             extra=sorted(d3_found - set(lib.D3_PROBE_FILES)))
+    for source_path in d3_probe_sources:
+        relative = f"run/d3-probes/{source_path.name}"
+        written = _write_stage_file(candidate / "run" / "d3-probes" / source_path.name,
+                                    source_path.read_bytes())
+        candidate_rows.append({
+            "path": relative, "sha256": written["sha256"],
+            "bytes": written["bytes"],
+            "source": {**_source_worktree(
+                f"scripts/g3d/d3_probes/{source_path.name}"),
+                "path": f"scripts/g3d/d3_probes/{source_path.name}"},
+        })
     patch_source = "config/g3d/candidate/bridge.patch.yml"
     patch_bytes = (lib.REPO_ROOT / patch_source).read_bytes()
     if b"/probe/" in patch_bytes or b"/work/state" in patch_bytes:

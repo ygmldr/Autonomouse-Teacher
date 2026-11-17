@@ -102,12 +102,34 @@ SCENARIO_ADMISSION = {
     "attack": {"fake_scenario": "ok_usage", "max_calls": 8},
     # D2-11 Resume is exactly two real DSH turns in one persisted session.
     "resume": {"fake_scenario": "ok_usage", "max_calls": 2},
+    # D3 recovery/cancel/deadline scenarios. Each one is an explicit synthetic
+    # admission override; no product default or protocol field is changed.
+    "stream": {"fake_scenario": "stream_slow", "max_calls": 1},
+    "cancel": {"fake_scenario": "slow_usage", "max_calls": 8,
+               "deadline_ms": 15000},
+    "deadline_broker": {"fake_scenario": "ok_usage", "max_calls": 2,
+                        "deadline_ms": 2500},
+    "deadline_fake": {"fake_scenario": "timeout", "max_calls": 1,
+                      "deadline_ms": 3500},
+    "deadline_stall": {"fake_scenario": "slow_usage", "max_calls": 1,
+                       "deadline_ms": 800},
+    "recover": {"fake_scenario": "ok_usage", "max_calls": 2},
+    "same_claim": {"fake_scenario": "ok_usage", "max_calls": 2},
+    "c11": {"fake_scenario": "ok_usage", "max_calls": 2},
 }
 SCENARIO_PROMPT = {
     "echo": "G3D_ECHO",
     "tool": "Use skill_lookup to look up binary_search",
     "attack": "G3D_D2_ATTACK",
     "resume": "G3D_RESUME_ALPHA 7f3a9c",
+    "stream": "G3D_STREAM_EARLY_CHUNK",
+    "cancel": "G3D_CANCEL_STREAM",
+    "deadline_broker": "G3D_DEADLINE_BROKER",
+    "deadline_fake": "G3D_DEADLINE_FAKE",
+    "deadline_stall": "G3D_DEADLINE_STALL",
+    "recover": "G3D_RECOVER_REQUEST",
+    "same_claim": "G3D_SAME_CLAIM",
+    "c11": "G3D_C11_SAME_REQUEST_7c1e",
 }
 REQUIRED_CONTROLLER_KEYS = {
     "admission_path", "broker_config_path", "fake_script", "receipt_dir",
@@ -712,6 +734,11 @@ class Launcher:
         # D1-C scenario limits are applied on the parsed document so the frozen
         # template stays byte-identical; no protocol field is added or removed.
         admission["limits"]["max_calls"] = overrides["max_calls"]
+        if "deadline_ms" in overrides:
+            # Shorter than the frozen 30s default: a stricter deadline for the
+            # bounded D3 watchdog cases. It is still inside the admission
+            # schema bounds (100..30000).
+            admission["limits"]["deadline_ms"] = overrides["deadline_ms"]
         if admission.get("launcher", {}).get("uid") != lib.NOBODY_UID:
             self.fail(lib.EXIT_STAGE_INVALID, "admission launcher uid must be 65534")
         if admission.get("synthetic") is not True:
@@ -720,6 +747,9 @@ class Launcher:
             self.fail(lib.EXIT_STAGE_INVALID, "admission fake_scenario mismatch")
         if admission.get("limits", {}).get("max_calls") != overrides["max_calls"]:
             self.fail(lib.EXIT_STAGE_INVALID, "admission max_calls mismatch")
+        if "deadline_ms" in overrides and admission.get("limits", {}).get(
+                "deadline_ms") != overrides["deadline_ms"]:
+            self.fail(lib.EXIT_STAGE_INVALID, "admission deadline_ms mismatch")
         if admission.get("route") != {"route_id": "offline-test-only-g3b",
                                        "provider": "offline-test-only-g3b",
                                        "model": "fixture-bridge-v1"}:
