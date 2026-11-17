@@ -185,6 +185,10 @@ def reg01(root: Path) -> dict:
                              cwd=str(REPO), stdout=subprocess.PIPE, check=True)
     subprocess.run(["tar", "-x", "-C", str(project)], input=archive.stdout,
                    check=True)
+    # The read-only-text contract is about file modes; git archive extracts
+    # writable modes. Make the disposable fixture read-only like the repo's
+    # frozen contract (pytest writes only under /tmp and /evidence).
+    subprocess.run(["chmod", "-R", "a-w", str(project)], check=True)
     evidence = folder / "oci"
     evidence.mkdir(mode=0o777, exist_ok=True)
     os.chmod(evidence, 0o777)
@@ -216,15 +220,24 @@ def reg01(root: Path) -> dict:
     record = lib.run_command(argv, log_dir=folder, name="oci-full", timeout=1200)
     counts = {"tests": 0, "failures": 0, "errors": 0, "skipped": 0}
     failed_cases = []
+    skipped_cases = []
     if junit.is_file():
         tree = ET.parse(junit)
         root_element = tree.getroot()
-        counts = {
-            "tests": int(root_element.get("tests") or 0),
-            "failures": int(root_element.get("failures") or 0),
-            "errors": int(root_element.get("errors") or 0),
-            "skipped": int(root_element.get("skipped") or 0),
-        }
+        for case in root_element.iter("testcase"):
+            counts["tests"] += 1
+            if case.find("failure") is not None:
+                counts["failures"] += 1
+            if case.find("error") is not None:
+                counts["errors"] += 1
+            skipped = case.find("skipped")
+            if skipped is not None:
+                counts["skipped"] += 1
+                skipped_cases.append({
+                    "classname": case.get("classname"),
+                    "name": case.get("name"),
+                    "message": (skipped.get("message") or "")[:500],
+                })
         for case in root_element.iter("testcase"):
             for kind in ("failure", "error"):
                 node = case.find(kind)
@@ -239,6 +252,7 @@ def reg01(root: Path) -> dict:
         "schema": "m0.g3d.d3.reg01.v1", "argv": argv,
         "utc_start": started, "utc_end": utc(), "exit": record["exit"],
         "counts": counts, "failed_cases": failed_cases,
+        "skipped_cases": skipped_cases,
         "unexpected_failures": counts["failures"] + counts["errors"],
         "status": "PASS" if record["exit"] == 0 and counts["failures"] == 0
         and counts["errors"] == 0 else "FAIL",
@@ -293,6 +307,22 @@ def reg03(root: Path, pre: dict, stage: Path) -> dict:
     folder.mkdir(parents=True, exist_ok=True)
     names = ps_snapshot()
     residual = residual_processes()
+    # crun creates an empty mount target ``rootfs/evidence`` for the OCI
+    # ``--mount ... dst=/evidence`` run. The frozen canonical excludes only this
+    # empty directory (the same transient drift documented at D-G0). Refuse to
+    # remove it unless it is empty and root-owned; never clean anything else.
+    rootfs_evidence = lib.ROOTFS / "evidence"
+    cleanup_record = {"path": str(rootfs_evidence), "removed": False}
+    try:
+        if (rootfs_evidence.is_dir() and not rootfs_evidence.is_symlink()
+                and not any(rootfs_evidence.iterdir())
+                and os.stat(rootfs_evidence).st_uid == 0):
+            rootfs_evidence.rmdir()
+            cleanup_record["removed"] = True
+        elif rootfs_evidence.exists():
+            cleanup_record["reason"] = "nonempty_or_foreign"
+    except OSError as exc:
+        cleanup_record["error"] = type(exc).__name__
     post = {
         "utc": utc(),
         "rootfs": {"sha256": lib.sha256_tree(lib.ROOTFS),
@@ -308,6 +338,7 @@ def reg03(root: Path, pre: dict, stage: Path) -> dict:
     document = {
         "schema": "m0.g3d.d3.reg03.v1", "utc": utc(),
         "pre": pre, "post": post,
+        "rootfs_runtime_cleanup": cleanup_record,
         "containers": names,
         "no_at_g3d_containers": not any(n.startswith(lib.CONTAINER_PREFIX)
                                         for n in names),

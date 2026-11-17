@@ -8,8 +8,11 @@ evidence in artifacts/g3d/d3/ and never substitute for it.
 from __future__ import annotations
 
 from pathlib import Path
+import shutil
 import subprocess
 import sys
+
+import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(REPO_ROOT / "scripts" / "g3d"))
@@ -127,6 +130,8 @@ def test_restart_before_attempt_and_after_attempt_are_distinct() -> None:
     assert d3.CASES["d3-c06"]["restarts"] == 2
 
 
+@pytest.mark.skipif(shutil.which("git") is None,
+                    reason="fixed OCI rootfs has no git; host pytest covers this diff")
 def test_runner_does_not_modify_product_src() -> None:
     diff = subprocess.run(
         ["git", "diff", "--quiet", lib.PRODUCT_BASE, "--", "src"],
