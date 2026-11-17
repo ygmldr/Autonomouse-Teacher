@@ -256,7 +256,6 @@ D3_GLOBS = [
     ("state", "*.json"), ("recover", "*.json"), ("recover", "*.log"),
     ("receipt", "*.json"),
     ("stream", "*.json"), ("final", "*.json"), ("run", "argv-*.json"),
-    ("cleanup", "*.json"),
 ]
 
 SOURCE_PATHS = [
