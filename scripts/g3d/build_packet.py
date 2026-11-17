@@ -862,7 +862,7 @@ from pathlib import Path
 root = Path(__file__).resolve().parents[1]
 lines = [line for line in (root / "hashes.sha256").read_text().splitlines()
          if line and not line.endswith("  manifest.json")]
-digest = hashlib.sha256(("\\n".join(sorted(lines)) + "\\n").encode()).hexdigest()
+digest = hashlib.sha256(("\\n".join(lines) + "\\n").encode()).hexdigest()
 print(digest)
 ''', 0o755)
 
