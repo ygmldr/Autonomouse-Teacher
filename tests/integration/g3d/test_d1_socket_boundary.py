@@ -712,8 +712,6 @@ def test_controller_main_rejects_invalid_socket_config(
 
 
 # -- business vs OS peer UID separation -----------------------------------
-@pytest.mark.skipif(os.geteuid() != 0,
-                    reason="expected_peer_uid=0 is only a valid acceptance case for a host-root test process")
 def test_admission_launcher_uid_is_not_the_socket_peer_uid(
         tmp_path: Path) -> None:
     controller, broker, fake, attempts = _controller(tmp_path)

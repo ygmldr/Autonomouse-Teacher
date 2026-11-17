@@ -19,7 +19,6 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
-import shutil
 import socket
 import stat
 import sys
@@ -340,8 +339,6 @@ def _mini_stage(tmp_path: Path) -> tuple[Path, dict]:
     return stage, manifest
 
 
-@pytest.mark.skipif(shutil.which("tar") is None,
-                    reason="fixed OCI rootfs has no tar; host covers the tar-based tree hash")
 def test_manifest_tree_accepts_matching_stage(tmp_path: Path) -> None:
     stage, manifest = _mini_stage(tmp_path)
     result = lib.validate_manifest_tree(stage, manifest)
@@ -349,8 +346,6 @@ def test_manifest_tree_accepts_matching_stage(tmp_path: Path) -> None:
     assert result["sections"]["candidate"]["file_count"] == 1
 
 
-@pytest.mark.skipif(shutil.which("tar") is None,
-                    reason="fixed OCI rootfs has no tar; host covers the tar-based tree hash")
 def test_manifest_tree_detects_unknown_extra_and_tamper(tmp_path: Path) -> None:
     stage, manifest = _mini_stage(tmp_path)
     extra = stage / "candidate" / "run" / "unexpected.py"
@@ -365,8 +360,6 @@ def test_manifest_tree_detects_unknown_extra_and_tamper(tmp_path: Path) -> None:
     assert any("sha_mismatch" in problem for problem in result["problems"])
 
 
-@pytest.mark.skipif(shutil.which("tar") is None,
-                    reason="fixed OCI rootfs has no tar; host covers the tar-based tree hash")
 def test_manifest_tree_detects_symlink(tmp_path: Path) -> None:
     stage, manifest = _mini_stage(tmp_path)
     link = stage / "candidate" / "run" / "link.py"
