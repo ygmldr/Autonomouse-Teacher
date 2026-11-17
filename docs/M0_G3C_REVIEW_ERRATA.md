@@ -152,3 +152,92 @@ v1 裁定 `PARTIAL` 的理由不是产品语义失败：Reviewer 在自己的 11
 ---
 
 *本 errata 由 G3-C Packet v2/PR1 归档 Agent 追加；不 push、不 amend、不修改 v1 packet、G3-B 历史、Reviewer 原始证据或其他 artifacts。*
+
+---
+
+## 8. v2 Final Review（Reviewer #2，G3-C 最终复核）
+
+> 本节为 **append-only 追加**：不删除、不改写上文任何字节。v1 报告 `docs/REVIEW_G3C_INDEPENDENT.md`（339 行，sha256 `4744c61f1561c6f92634b29ef9a6a0f7ca82c4627aef31ba3d0163e4886d23b1`）保持原字节；Packet v1/v2 均未因本节重建或改写。本节记录 G3-C 范围内的最终独立复核结论，**不是** G3-D/Live/G4/G5/M0 GO 授权。
+
+### 8.1 Reviewer #2 身份、输入与最终裁定
+
+| 项 | 事实 |
+|---|---|
+| Reviewer | Autonomous Teacher M0 **独立 G3-C Reviewer #2**（二次复核）；未参与 G3-C 实现、证据生成、PR1 修复或 Packet 构建，未复用 Owner/v1 Reviewer 的结论文字 |
+| 复核窗口（UTC） | 2026-11-17T16:31Z – 2026-11-17T17:05Z |
+| 输入身份 | Base `bb5bd0bf83e22130ed0d81c54f54a4673654cfe3`；G0 `e107e22d32ee0fd25c597a95ae447898f4a52a85`；v1 impl `e6fde1c`；**PR1 impl `b2f6af054555705192c4e1ae3019a68078764736`**；docs HEAD `751af360bce1824e6e7facc0a0f8578e6aa44596` |
+| 输入 Packet | v2 `artifacts/review-packet-g3c-b2f6af054555705192c4e1ae3019a68078764736/`（2017 files；`sha256sum -c` 2015/2015 OK）；v1 Packet 冻结（1713/1713 OK） |
+| v2 报告 | `docs/REVIEW_G3C_INDEPENDENT_v2.md`，341 行，sha256 `f66f58c7b518a84117e520c220be907e885dde296d53eec503c8dc8091c7f71d`；原字节归档，本 errata 不改变其任何字节 |
+| 独立证据根 | `artifacts/reviewer-g3c-v2/`（Git 忽略目录）：`r0-identity/`、`r1-static/`、`r2-probes/`、`r3-dsh/`、`r4-crosscheck/`、`logs/`、`RUN_INDEX.md` |
+| **最终裁定** | **`PASS_FOR_G3C_NO_KEY_CONTRACT_RECOVERY_SCOPE`** |
+| P0 | **0**（未授权/重复发送、假结算、丢保守账本、假成功 finish、绕过 Claim 均未发现） |
+| 新 P1 | **0**；v1 的 P1-1/P1-2/P1-3 **全部 CLOSED** |
+| P2 | **5 项**，记录性、不阻断本裁定；逐条处置见 §8.3 |
+| §8.3 五条 PASS 规则 | 5/5 满足（v2 报告 §9） |
+| 范围 | 仅 G3-C 无 Key / Fake Provider / 固定 rootfs 的契约、恢复、取消、deadline、IPC 资源与增量流；不含 G3-D、Live、真实 Provider/Key/模型/外网、远端 exactly-once、账单、G4/G5/M0 GO |
+
+Reviewer #2 的 20 轮 host 冷启动、5 轮固定 rootfs 冷启动、20 轮 journal 初始化竞争、5 个 crash 窗口、8 类恶意/负例探针、真实 DSH 复跑与 DB/Receipt 对账均由 Reviewer #2 自建脚本产生；Owner 的 JSON 只用于事后比对数字，未作为 Reviewer 的独立结果。
+
+### 8.2 v1 P1 关闭表（G3-C 范围内）
+
+| v1 P1 | v2 判定 | 独立证据摘要 |
+|---|---|---|
+| P1-1 真实 DSH 覆盖过度声明 / C1-01A | **CLOSED** | Reviewer #2 解析 docs 矩阵 53 个 PASS 行并展开磁盘证据，得到 **19 real DSH + 1 real DSH summary + 6 raw-UDS + 2 container reconcile + 23 host + 2 G0/regression = 53**；C1-01A 只有 `probe-result.json`、无 `dsh-result.json`；反向检查 `dsh_leaks=0`。这是标注/主张修正，不是新增 real-DSH replay。证据：`artifacts/reviewer-g3c-v2/r1-static/matrix-audit.{json,txt}`、v2 报告 §2.1。 |
+| P1-2 双 Controller 冷启动 `database is locked` | **CLOSED** | Reviewer #2 自建 **host 20/20 + 固定 rootfs 5/5** 两 Controller 同时冷启动：每轮 **1 winner + 1 loser**，loser 全部 **exit 5**、stderr `CONTROLLER_SINGLETON_LOCKED`、**traceback=0**；**Fake counter=1**、1 receipt、Attempt `SETTLED`、reservation `OK`、claim `COMPLETED`、admission=1。另：journal 根因层 20/20、迁移竞争吸收 `duplicate column`、journal 耗尽受控 `ATTEMPT_JOURNAL_UNAVAILABLE`/exit 4、crash 后锁可重取 5/5。边界：只覆盖同一 socket 路径的 Controller 冷启动，**不覆盖**两个真实 DSH 客户端同 Claim。证据：`r2-probes/coldstart-host-20.json`、`r2-probes/rootfs-out/coldstart-rootfs-5.json`、`r2-probes/journal-race.json`、v2 报告 §2.2/§5.1。 |
+| P1-3 矩阵证据索引 25/53 路径不存在 | **CLOSED** | 从 `git show 78be77c:docs/…csv` 独立重建 v1 矩阵，复算 **25 missing**；当前 docs 矩阵与工作矩阵均 **0 missing**；16 个 D 行原字节未动：docs 矩阵 D 行 hash `db7b5fd92ff4d8d5343a9d9e5f170bf327a64a04ce55843577bf1be3ec36ec6e`、工作矩阵 `13510d161275164ed2ab8eb29ca2b791874a399d83c1a1fca39ad009ac0e37a9`，v1/当前一致；抽查 C1-01A、C-END-01、C2-04 的 argv/log/junit 正确。证据：`r1-static/matrix-audit.txt`、`artifacts/g3c/evidence/matrix-path-audit-pr1.txt`、v2 报告 §2.3。 |
+
+### 8.3 P2 逐条处置（不阻断；不把 P2 写成已修复）
+
+| ID | 处置 | 本 errata 的结论 |
+|---|---|---|
+| **P2-1** Packet v2 `reproduce/` R5 只挂 frozen stage，而 `stage/src` 是 e6fde1c 旧码 | **已新增正确的复现辅助脚本**：`scripts/g3c/reproduce-coldstart-with-src-overlay.sh`（配套 `scripts/g3c/coldstart_overlay_probe.py`，仅在运行时复制进临时 overlay，不是产品代码）。脚本在 canonical rootfs/deps/stage 上，把 `git archive b2f6af0 src` overlay 到 stage 的临时副本，再以 `--network none`、uid 65534、只读 rootfs 跑 N 轮双 Controller 冷启动；不联网、不改仓库产品代码/证据/Packet、不动 canonical stage。用法与预期见 §8.4。另对 `scripts/g3c/build_packet.py` 的 R5 模板做了**最小** overlay 修正，仅影响未来 v3 的 `reproduce/README.md` 生成；未重建 Packet v2。 | **P2-1 仍是 Packet v2 已冻结文件的复现限制，不声称 Packet v2 已修复**。旧命令 stage-only 会复现 v1 P1-2 旧码 traceback（v2 报告 §5.2 与 `artifacts/reviewer-g3c-v2/r2-probes/rootfs-stale-stage/`）；新脚本给出正确 overlay 路径，归档 Agent 已在当前固定环境自检 1 轮与 5 轮均通过（canonical 前后一致）。该自检是复现辅助验证，不是新的独立复核。 |
+| **P2-2** Report §8.1 对 guard-invalid 的描述不准确 | **报告文字勘误**：实际为 **Controller exit 0、DSH 客户端启动、guard precheck 以 `RBG_GUARD_BOOT_INVALID` 失败关闭、admission 被消费、0 attempt / 0 receipt**；不是“Controller 启动失败关闭（无 DSH）”。 | Report 原文保留；**以本 errata 为准**。这是低报/表述精度问题，不构成 real-DSH 过度声明，不改变 guard 失败关闭语义。 |
+| **P2-3** Report §13 证据计数陈旧 | **报告文字勘误**：磁盘实为 **77 个 trace 目录、55 个 `dsh-result.json`**；报告写 75/51。差额来自新增的 `pr1v2-{echo,tool}` 与 `pr1/traces/{echo,tool}` 四个 DSH 结果；§12 只列“51 + pr1/traces 2”，漏计 pr1v2 两轮。 | Report 原文保留；**以本 errata 的 77/55 为准**。属计数低报，不是过度声明。 |
+| **P2-4** Findings §8 “另 3×20 轮压力复跑”无证据文件 | **报告文字勘误/证据降级**：Packet 内无对应 JSON/日志可核；v2 裁定不依赖该句（Reviewer #2 有自己的 20 轮 host 与 5 轮 rootfs 证据）。 | Findings 原文保留；**以本 errata 为准：该句不构成可复核证据主张**，不得作为 PASS 依据。 |
+| **P2-5** 矩阵 `impl_sha` 统一 `b2f6af0`，多数旧 trace 来自 `e6fde1c` 批次 | **provenance 限制说明**：矩阵 `impl_sha` 是当前实现标记，不等于每个 trace 的生成批次；按 trace 内 `argv.json`/`commands.jsonl` 区分批次；PR1 只新增 Echo/Tool 冒烟（`artifacts/g3c/pr1/traces/{echo,tool}`）；C2-04 指向 105 用例的 `evidence/junit-g3c.xml`（e6fde1c 批次），不是 PR1 的 110 用例 junit。 | 与 Errata §4.4 一致；**不把旧 trace 当作 b2f6af0 新运行**。已披露的追溯性限制，不阻断。 |
+
+### 8.4 P2-1 复现脚本（新增；仅辅助复现）
+
+**主脚本**：`scripts/g3c/reproduce-coldstart-with-src-overlay.sh`
+**辅助 probe**：`scripts/g3c/coldstart_overlay_probe.py`（主脚本运行时复制到临时 overlay 的 `/probe/run_c3/` 下；不写入仓库产品代码）
+
+```bash
+# P2-1 smoke: 5 rounds (expected 5/5)
+bash scripts/g3c/reproduce-coldstart-with-src-overlay.sh --rounds 5
+
+# P1-2 evidence-grade run: >=20 rounds, fresh output dir
+bash scripts/g3c/reproduce-coldstart-with-src-overlay.sh \
+  --impl b2f6af054555705192c4e1ae3019a68078764736 --rounds 20 \
+  --out "artifacts/g3c/repro-coldstart-$(date -u +%Y%m%dT%H%M%SZ)"
+```
+
+脚本行为与断言：
+
+1. 校验 canonical rootfs `25491e45…`、deps `e07729d7…`、stage `fcdb0de4…`；不匹配则 exit 2。
+2. 复制 frozen stage 到 `mktemp` 临时目录，删除 `src/`，用 `git archive b2f6af0 src` 解出；校验 overlay `attempts.py` 与 `b2f6af0` blob 一致、含 `INIT_BUSY_TIMEOUT_MS = 250`/`_initialize`，且与 frozen stage 旧 `attempts.py`（sha `33017e75…`）不同。
+3. 以固定 rootfs、`--network none --http-proxy=false --unsetenv-all`、uid 65534、只读 rootfs、ceiling 资源，把 overlay 挂到 `/probe`，执行 `/probe/run_c3/coldstart_overlay_probe.py`；probe 只用现有 Controller/Broker/Fake 路径与 Fake Provider。
+4. 每轮断言：**1 winner + 1 loser；loser exit 5 且 stderr `CONTROLLER_SINGLETON_LOCKED`；0 traceback；请求 finish；Fake counter=1；1 receipt；Attempt `SETTLED`；reservation `OK`；claim `COMPLETED`；admission=1；winner SIGTERM exit 0；socket 删除**。
+5. 运行后校验 rootfs/deps/stage canonical 未变；临时 overlay 删除；不修改已有 evidence/Packet。
+
+预期（b2f6af0、无 Key、Fake）：
+
+```text
+SUMMARY {"attempt_states": ["SETTLED"], "fail": 0, "fake_counters": [1],
+         "loser_codes": ["CONTROLLER_SINGLETON_LOCKED"], "loser_exits": [5],
+         "pass": 5, "rounds_completed": 5, "rounds_requested": 5,
+         "tracebacks": 0}
+COLDSTART_OVERLAY_OK ...
+```
+
+归档 Agent 自检（非独立复核）：`--rounds 1`（1/1）与 `--rounds 5`（5/5）均返回 exit 0；rootfs/deps/stage 前后 canonical 一致，`podman ps -a` 空。
+
+**P2-1 的 Packet v2 限定**：Packet v2 的 `reproduce/README.md` R5 原文仍指向 frozen stage-only 命令；该文件属于已冻结 Packet，**不因本脚本或 builder 修改而改写**。照抄 Packet v2 R5 会跑 e6fde1c 旧码；请改用本节脚本（或自行按上面的 overlay 步骤替换 `/probe` 挂载）。`scripts/g3c/build_packet.py` 的修改仅为未来 v3 生成模板的最小修正，未重新生成 Packet v2、未改动 v2 manifest/hash。
+
+### 8.5 范围限制与冻结说明
+
+- **范围仅 G3-C（无 Key / Fake / 固定 rootfs）**：不签 G3-D、Live、真实 Provider/Key/模型/外网、远端 exactly-once、账单/限流、G4/G5/M0 GO。
+- **G3-D 16 行仍 `NOT_RUN`**：D0-01、D1-01、D2-01..12、D3-01、D-REVIEW-01；`OS_TRUST_BOUNDARY=B0-02=BLOCKED`。没有候选攻击、不同 OS 主体、namespace/kernel deny 证据。
+- **无 Live/GO**：`scripts/run_live.sh` 仍 exit 3，`LiveGate().inspect(live_requested=True)` 仍 `BLOCKED`；0 真实 Key/模型/外网；Fake usage/cost 仍为 `synthetic_fixture_only`。
+- **不主张**：两个真实 DSH 客户端同 Claim；host full 的 2 个既有环境失败已修复；OCI/Node/G2 由 Reviewer #2 完整重跑；SIGTERM 终态、断连 cancel、SRC-12 等 P2 残余已消除。
+- **Packet v2 冻结**：`artifacts/review-packet-g3c-b2f6af054555705192c4e1ae3019a68078764736/` 的 `manifest.docs_sha = 751af36`，构建于本 v2 报告/errata 之前（post-packet 归档），**不包含** `docs/REVIEW_G3C_INDEPENDENT_v2.md` 与本 errata 的最终字节。Packet v2 的 `previous_review.second_review` 仍为 `NOT_PERFORMED`；不得据此改写/重建 Packet，也不得把 Packet v2 当作 v2 PASS 的载体。
+- **最终记录**：v2 报告（原字节 `f66f58c7…`）与本 errata 的 §8 是 G3-C 的最终 C Gate 记录；v1 报告与 Packet v1/v2 的冻结字节不变。本 errata 由 G3-C 归档 Agent 追加，只 add 自身路径；未 amend、未 push、未修改实现/证据/Packet/历史 docs 文字。

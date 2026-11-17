@@ -370,6 +370,13 @@ records the Owner before/after audit: 25 -> 0).
 ```bash
 cd "/root/Autonomous Teacher"
 STAGE=$PWD/artifacts/g3c/stage
+# P2-1: frozen stage/src is the pre-PR1 source.  Overlay the reviewed impl on a
+# throw-away copy so the Controller actually runs {manifest['impl_sha']}.
+OVERLAY=$(mktemp -d)
+cp -a "$STAGE/." "$OVERLAY/"
+rm -rf "$OVERLAY/src"
+git archive {manifest['impl_sha']} src | tar -x -C "$OVERLAY"
+trap 'rm -rf "$OVERLAY"' EXIT
 DEPS=$PWD/artifacts/foundation/deps
 ROOTFS=$PWD/artifacts/security/rootfs
 run_dsh() {{
@@ -385,7 +392,7 @@ run_dsh() {{
     --tmpfs /tmp:rw,noexec,nosuid,nodev,size=64m,mode=1777 \
     --tmpfs /work:rw,noexec,nosuid,nodev,size=512m,mode=1777 \
     --workdir /work --timeout 180 --systemd=false \
-    --mount "type=bind,src=$STAGE,dst=/probe,ro=true" \
+    --mount "type=bind,src=$OVERLAY,dst=/probe,ro=true" \
     --mount "type=bind,src=$DEPS,dst=/deps,ro=true" \
     --mount "type=bind,src=$ev,dst=/evidence,rw=true" \
     --rootfs "$ROOTFS" /opt/python/bin/python3.11 -B /probe/run_c3/worker_c3.py \
@@ -403,6 +410,12 @@ directory and mount it read-only as `/seed`):
 ```bash
 cd "/root/Autonomous Teacher"
 STAGE=$PWD/artifacts/g3c/stage
+# P2-1: same src overlay as R5; the frozen stage/src alone would run e6fde1c.
+OVERLAY=$(mktemp -d)
+cp -a "$STAGE/." "$OVERLAY/"
+rm -rf "$OVERLAY/src"
+git archive {manifest['impl_sha']} src | tar -x -C "$OVERLAY"
+trap 'rm -rf "$OVERLAY"' EXIT
 DEPS=$PWD/artifacts/foundation/deps
 ROOTFS=$PWD/artifacts/security/rootfs
 mkdir -p artifacts/g3c/traces/reviewer-crash; chmod 0777 artifacts/g3c/traces/reviewer-crash
@@ -417,7 +430,7 @@ podman run --rm --name reviewer-crash \
   --tmpfs /tmp:rw,noexec,nosuid,nodev,size=64m,mode=1777 \
   --tmpfs /work:rw,noexec,nosuid,nodev,size=512m,mode=1777 \
   --workdir /work --timeout 150 --systemd=false \
-  --mount "type=bind,src=$STAGE,dst=/probe,ro=true" \
+  --mount "type=bind,src=$OVERLAY,dst=/probe,ro=true" \
   --mount "type=bind,src=$DEPS,dst=/deps,ro=true" \
   --mount "type=bind,src=$PWD/artifacts/g3c/traces/reviewer-crash,dst=/evidence,rw=true" \
   --rootfs "$ROOTFS" /opt/python/bin/python3.11 -B /probe/run_c3/worker_c3.py \
@@ -433,7 +446,7 @@ podman run --rm --name reviewer-reconcile \
   --tmpfs /tmp:rw,noexec,nosuid,nodev,size=64m,mode=1777 \
   --tmpfs /work:rw,noexec,nosuid,nodev,size=512m,mode=1777 \
   --workdir /work --timeout 120 --systemd=false \
-  --mount "type=bind,src=$STAGE,dst=/probe,ro=true" \
+  --mount "type=bind,src=$OVERLAY,dst=/probe,ro=true" \
   --mount "type=bind,src=$DEPS,dst=/deps,ro=true" \
   --mount "type=bind,src=$PWD/artifacts/g3c/traces/reviewer-reconcile,dst=/evidence,rw=true" \
   --mount "type=bind,src=$PWD/artifacts/g3c/traces/reviewer-crash/work,dst=/seed,ro=true" \
