@@ -1547,17 +1547,42 @@ def _acquire_controller_singleton(socket_path: Path) -> int | None:
     return fd
 
 
-def main(argv: list[str] | None = None) -> int:
+def _bridge_options(config: Mapping) -> dict[str, int | None]:
+    """Validate the additive D1-A socket-boundary config.
+
+    Absent fields keep the legacy 0600/root/no-peer-check behaviour. The
+    business ``expected_uid`` (Admission launcher) is intentionally not read
+    here: OS peer UID and Admission launcher UID are separate contracts.
+    """
+    mode = config.get("socket_mode", 0o600)
+    if type(mode) is not int or mode not in (0o600, 0o660):
+        raise SystemExit("CONFIG_INVALID")
+    gid = config.get("socket_gid")
+    peer_uid = config.get("expected_peer_uid")
+    for value in (gid, peer_uid):
+        if value is not None and (type(value) is not int or not 0 <= value <= 0xFFFFFFFE):
+            raise SystemExit("CONFIG_INVALID")
+    if gid is not None and not mode & 0o060:
+        raise SystemExit("CONFIG_INVALID")
+    return {"socket_mode": mode, "socket_gid": gid, "expected_peer_uid": peer_uid}
+
+
+def main(argv: list[str] | None = None, *,
+         on_ready: Callable[[], None] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", required=True)
     args = parser.parse_args(argv)
     config = json.loads(Path(args.config).read_text())
     required = {"admission_path", "broker_config_path", "fake_script", "receipt_dir",
                 "attempt_db", "socket_path", "python", "expected_uid"}
-    if not isinstance(config, dict) or set(config) - (required | {"fake_python"}):
+    optional = {"fake_python", "socket_mode", "socket_gid", "expected_peer_uid"}
+    if not isinstance(config, dict) or set(config) - (required | optional):
         raise SystemExit("CONFIG_INVALID")
     if required - set(config):
         raise SystemExit("CONFIG_INVALID")
+    if on_ready is not None and not callable(on_ready):
+        raise ValueError("on_ready must be callable")
+    bridge_options = _bridge_options(config)
     for key in ("admission_path", "broker_config_path", "fake_script", "receipt_dir",
                 "attempt_db", "socket_path"):
         value = config[key]
@@ -1573,8 +1598,9 @@ def main(argv: list[str] | None = None) -> int:
     fake: FakeBackend | None = None
     attempts: AttemptJournal | None = None
     try:
-        if os.path.lexists(socket_path):
-            socket_path.unlink()
+        # Stale-socket cleanup belongs to BridgeServer (D1-A): it only removes
+        # a verified AF_UNIX socket at this configured path and rejects
+        # symlinks, regular files and foreign owners instead of blind unlink.
         admission = load_admission(config["admission_path"],
                                    expected_uid=config.get("expected_uid", 65534))
         broker = BrokerClient(config_path=config["broker_config_path"],
@@ -1605,7 +1631,8 @@ def main(argv: list[str] | None = None) -> int:
                 sys.stderr.write(ERROR_ADMISSION_REPLAYED_AFTER_RECOVERY + "\n")
                 return EXIT_ADMISSION_REPLAYED
             raise
-        server = BridgeServer(controller, config["socket_path"])
+        server = BridgeServer(controller, config["socket_path"],
+                              on_ready=on_ready, **bridge_options)
 
         def _stop(_signum, _frame):
             server.shutdown()
