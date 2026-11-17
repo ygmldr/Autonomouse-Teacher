@@ -22,6 +22,7 @@ import argparse
 import hashlib
 import json
 import os
+import queue
 import signal
 import sys
 import threading
@@ -30,7 +31,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Mapping
+from typing import Callable, Mapping
 
 from autoteacher_m0.bridge.admission import Admission, AdmissionError, load_admission
 from autoteacher_m0.accounting.observation import (
@@ -62,6 +63,13 @@ _CANCEL_PRUNE_TARGET = 128
 _USAGE_FIELDS = frozenset({"inputTokens", "cacheReadTokens", "cacheWriteTokens",
                            "outputTokens", "reasoningTokens", "totalTokens"})
 _FINISH_KINDS = frozenset({"stop", "tool-calls", "max-tokens", "aborted", "error", "blocked"})
+# Real-time streaming bridge between the single-flight provider worker and the
+# IPC-facing generator. The queue is deliberately shallow: a stalled consumer
+# must backpressure the Fake pipe instead of accumulating frames in memory.
+_STREAM_QUEUE_FRAMES = 8
+_STREAM_POLL_SECONDS = 0.05
+_STREAM_JOIN_SECONDS = 5.0
+_STREAM_TERMINAL_GRACE_SECONDS = 1.0
 
 # Broker v1 raw code -> (preferred additive G3-C protocol code, existing-code
 # fallback used until Agent A's additive protocol enum is merged). The preferred
@@ -373,14 +381,26 @@ class TrustedController:
 
     # -- envelope handling --------------------------------------------
     def handle_envelope(self, env: Envelope):
+        """Yield response Envelopes while the Fake stream is still running.
+
+        The trusted Fake is read incrementally on a single-flight worker thread;
+        every validated ``chunk`` frame is forwarded to the IPC layer as soon as
+        it is observed, so the DSH SDK can receive the first chunk before the
+        Fake process exits. Receipt verification, the Observation journal and
+        Broker settle/fail still happen after the stream; they decide only the
+        terminal ``usage``/``finish``/``error`` frames. A failure after some
+        chunks were already forwarded ends with an error terminal, never a
+        synthetic success finish.
+        """
         if not isinstance(env, Envelope):
             raise BridgeError("BAD_TYPE")
         transport_id = getattr(env, "transport_id", "")
         state = self._state_for_start(transport_id) if isinstance(transport_id, str) else None
         deadline = time.monotonic() + self.deadline_seconds
+        seq = env.seq + 1
         try:
             if state is not None and state.event.is_set():
-                yield self._error_envelope(env, "CANCELLED")
+                yield self._error_envelope(env, "CANCELLED", seq=seq)
                 return
             try:
                 validate_request_payload(env.payload)
@@ -389,53 +409,173 @@ class TrustedController:
                 if isinstance(env.payload, Mapping) and set(env.payload) & {
                         "call_id", "reservation_id", "request_digest", "authorized", "admission"}:
                     code = "ADMISSION_SELF_AUTH_DENIED"
-                yield self._error_envelope(env, code)
+                yield self._error_envelope(env, code, seq=seq)
+                return
+            events: queue.Queue = queue.Queue(maxsize=_STREAM_QUEUE_FRAMES)
+            abort = threading.Event()
+            worker = threading.Thread(
+                target=self._handle_payload_stream,
+                args=(env.payload, transport_id, deadline, state, events, abort),
+                name="g3c-controller-stream", daemon=True)
+            worker.start()
+            try:
+                while True:
+                    try:
+                        event = events.get(timeout=_STREAM_POLL_SECONDS)
+                    except queue.Empty:
+                        if not worker.is_alive():
+                            break
+                        if time.monotonic() > deadline:
+                            yield self._error_envelope(
+                                env, deadline_protocol_code(), seq=seq)
+                            return
+                        continue
+                    kind = event[0]
+                    if kind == "chunk":
+                        # Already validated with protocol.validate_chunk_payload
+                        # by the worker before it was queued.
+                        yield Envelope(1, "chunk", env.transport_id, seq,
+                                       {"chunk": event[1]}, None)
+                        seq += 1
+                    elif kind == "usage":
+                        payload = {"chunk": {"type": "usage", "usage": dict(event[1])}}
+                        try:
+                            validate_chunk_payload(payload)
+                        except Exception:
+                            yield self._error_envelope(env, "INTERNAL", seq=seq)
+                            return
+                        yield Envelope(1, "chunk", env.transport_id, seq, payload, None)
+                        seq += 1
+                    elif kind == "finish":
+                        if state is not None and state.event.is_set():
+                            # Post-send cancellation has already completed
+                            # conservative accounting; never emit a success
+                            # finish after the client cancelled.
+                            yield self._error_envelope(env, "CANCELLED", seq=seq)
+                            return
+                        yield Envelope(1, "finish", env.transport_id, seq,
+                                       {"reason": event[1]}, None)
+                        return
+                    elif kind == "error":
+                        yield self._error_envelope(env, event[1], seq=seq)
+                        return
+                    elif kind == "end":
+                        break
+                # Worker vanished without any terminal frame: fail closed.
+                yield self._error_envelope(env, "INTERNAL", seq=seq)
+            finally:
+                abort.set()
+                if worker.is_alive() and isinstance(transport_id, str):
+                    # IPC closed/abandoned this stream: observe it as a cancel so
+                    # the Fake stream stops and accounting stays conservative.
+                    try:
+                        self.cancel(transport_id=transport_id, reason="stream_closed")
+                    except (TypeError, ValueError):
+                        pass
+                worker.join(timeout=_STREAM_JOIN_SECONDS)
+        finally:
+            if isinstance(transport_id, str):
+                self._finish_transport(transport_id)
+
+    def _handle_payload_stream(self, payload: Mapping[str, object],
+                               transport_id: str, deadline: float,
+                               state: _CancelState | None,
+                               events: queue.Queue,
+                               abort: threading.Event) -> None:
+        """Single-flight worker: trusted request path plus frame publication."""
+        def emit(event: tuple[str, object]) -> None:
+            self._publish_event(events, abort, state, deadline, event)
+
+        try:
+            with self._send_lock:
+                self._handle_payload_serial(payload, transport_id, deadline,
+                                            state, emit)
+        except _Cancelled:
+            emit(("error", "CANCELLED"))
+        except _DeadlineExceeded:
+            emit(("error", deadline_protocol_code()))
+        except BaseException as exc:  # noqa: BLE001 - always produce a terminal
+            emit(("error", self._exception_code(exc)))
+        finally:
+            emit(("end",))
+
+    @staticmethod
+    def _publish_event(events: queue.Queue, abort: threading.Event,
+                       state: _CancelState | None, deadline: float,
+                       event: tuple[str, object]) -> None:
+        """Queue one response event with bounded memory (driver backpressure)."""
+        kind = event[0]
+        if kind == "end":
+            try:
+                events.put_nowait(event)
+            except queue.Full:
+                pass
+            return
+        terminal = kind in {"finish", "error"}
+        terminal_deadline = deadline + _STREAM_TERMINAL_GRACE_SECONDS
+        while True:
+            if abort.is_set():
                 return
             try:
-                frames = self._handle_payload(env.payload, transport_id, deadline, state)
-            except _Cancelled:
-                yield self._error_envelope(env, "CANCELLED")
+                events.put(event, timeout=_STREAM_POLL_SECONDS)
                 return
-            except _DeadlineExceeded:
-                yield self._error_envelope(env, deadline_protocol_code())
-                return
-            except Exception as exc:
-                yield self._error_envelope(env, self._exception_code(exc))
-                return
-            seq = env.seq + 1
-            for frame in frames:
-                if state is not None and state.event.is_set() and frame.get("kind") == "finish":
-                    # Post-send cancellation has already completed conservative
-                    # accounting; do not emit a success finish after the client
-                    # cancelled. The accounting state (not this frame) is truth.
-                    yield self._error_envelope(env, "CANCELLED")
+            except queue.Full:
+                if abort.is_set():
                     return
-                kind = frame.get("kind")
-                if kind == "receipt":
-                    continue
-                if kind == "chunk":
-                    payload = {"chunk": frame["chunk"]}
-                    try:
-                        validate_chunk_payload(payload)
-                    except Exception:
-                        yield self._error_envelope(env, "REQUEST_INVALID")
+                now = time.monotonic()
+                if terminal:
+                    if now > terminal_deadline:
                         return
-                elif kind == "finish":
-                    payload = {"reason": frame["reason"]}
-                elif kind == "error":
-                    payload = frame["payload"]
-                else:
                     continue
-                yield Envelope(1, kind, env.transport_id, seq, payload, None)
-                seq += 1
-        finally:
-            self._finish_transport(transport_id) if isinstance(transport_id, str) else None
+                # Chunks/usage are dropped under backpressure once the stream is
+                # cancelled or past its deadline: the Fake must observe the
+                # cancel itself instead of the Controller buffering unboundedly.
+                if now > deadline:
+                    return
+                if state is not None and state.event.is_set():
+                    return
 
-    def _error_envelope(self, env: Envelope, code: object) -> Envelope:
+    def _handle_payload(self, payload: Mapping[str, object], transport_id: str,
+                        deadline: float, state: _CancelState | None) -> list[dict]:
+        """Backward-compatible buffered collection of the streamed events."""
+        frames: list[dict] = []
+
+        def collect(event: tuple[str, object]) -> None:
+            frame = self._event_to_frame(event)
+            if frame is not None:
+                frames.append(frame)
+
+        with self._send_lock:
+            self._handle_payload_serial(payload, transport_id, deadline, state,
+                                        collect)
+        return frames
+
+    @staticmethod
+    def _event_to_frame(event: tuple[str, object]) -> dict | None:
+        kind = event[0]
+        if kind == "chunk":
+            return {"kind": "chunk", "chunk": event[1]}
+        if kind == "usage":
+            return {"kind": "chunk",
+                    "chunk": {"type": "usage", "usage": dict(event[1])}}
+        if kind == "finish":
+            return {"kind": "finish", "reason": event[1]}
+        if kind == "error":
+            safe = event[1] if isinstance(event[1], str) else "INTERNAL"
+            if safe not in ERROR_CODES:
+                safe = broker_protocol_code(safe)
+            if safe not in ERROR_CODES:
+                safe = "INTERNAL"
+            return {"kind": "error", "payload": validate_error_payload(safe)}
+        return None
+
+    def _error_envelope(self, env: Envelope, code: object, *,
+                        seq: int | None = None) -> Envelope:
         safe = self._normalize_code(code) if isinstance(code, str) else "INTERNAL"
         if safe not in ERROR_CODES:
             safe = "INTERNAL"
-        return Envelope(1, "error", env.transport_id, env.seq + 1,
+        return Envelope(1, "error", env.transport_id,
+                        env.seq + 1 if seq is None else seq,
                         validate_error_payload(safe), None)
 
     @staticmethod
@@ -459,14 +599,10 @@ class TrustedController:
         return "INTERNAL"
 
     # -- main request path --------------------------------------------
-    def _handle_payload(self, payload: Mapping[str, object], transport_id: str,
-                        deadline: float, state: _CancelState | None) -> list[dict]:
-        with self._send_lock:
-            return self._handle_payload_serial(payload, transport_id, deadline, state)
-
     def _handle_payload_serial(self, payload: Mapping[str, object], transport_id: str,
-                               deadline: float,
-                               state: _CancelState | None) -> list[dict]:
+                               deadline: float, state: _CancelState | None,
+                               emit: Callable[[tuple[str, object]], None]
+                               ) -> None:
         attempt_id: str | None = None
         intent_id: str | None = None
         call_id: str | None = None
@@ -555,13 +691,33 @@ class TrustedController:
             self._checkpoint(state, deadline, "before_send")
             holder: dict[str, object] = {}
 
+            def on_fake_frame(frame: object) -> None:
+                """Forward one validated Fake chunk while the child still runs."""
+                if not isinstance(frame, Mapping) or frame.get("kind") != "chunk":
+                    return
+                if getattr(self.fake, "last_receipt", None) is None:
+                    # The trusted Fake writes its atomic receipt before any
+                    # frame. Never forward model-visible bytes before that
+                    # receipt is observable; fail closed instead.
+                    raise BridgeError("FAKE_RECEIPT_MISMATCH")
+                chunk = frame.get("chunk")
+                payload_view = {"chunk": chunk}
+                try:
+                    validate_chunk_payload(payload_view)
+                except Exception:
+                    # Malformed chunk is never forwarded; the final analysis
+                    # turns the same frame into a terminal error.
+                    return
+                emit(("chunk", dict(chunk)))
+
             def provider(_req):
                 if state is not None and state.event.is_set():
                     holder["cancelled_before_send"] = True
                     raise _Cancelled(state.reason or "aborted")
                 try:
                     receipt, frames = self._invoke_fake(payload_bytes, nonce,
-                                                        deadline, state)
+                                                        deadline, state,
+                                                        on_frame=on_fake_frame)
                 except _DeadlineExceeded:
                     holder["deadline"] = True
                     raise
@@ -654,7 +810,7 @@ class TrustedController:
                 raise _Cancelled(state.reason or "aborted")
             if time.monotonic() > deadline:
                 raise _DeadlineExceeded("after_settlement")
-            return self._terminal_frames(analysis)
+            self._emit_terminal(emit, analysis)
         except (AdmissionError, BridgeError, BrokerClientError, ValueError,
                 _Cancelled, _DeadlineExceeded) as exc:
             if intent_id is not None:
@@ -694,7 +850,8 @@ class TrustedController:
 
     # -- Fake invocation ----------------------------------------------
     def _invoke_fake(self, payload_bytes: bytes, nonce: str, deadline: float,
-                     state: _CancelState | None):
+                     state: _CancelState | None,
+                     on_frame: Callable[[dict], None] | None = None):
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             raise _DeadlineExceeded("before_fake")
@@ -707,6 +864,10 @@ class TrustedController:
                               cancel_event=state.event if state is not None else None)
             for frame in iterator:
                 frames.append(frame)
+                if on_frame is not None:
+                    # Incremental forwarding happens before the next read; the
+                    # FakeBackend checks cancel/deadline between frames.
+                    on_frame(frame)
                 if time.monotonic() > deadline:
                     raise _DeadlineExceeded("fake_stream")
             receipt = getattr(self.fake, "last_receipt", None)
@@ -887,22 +1048,28 @@ class TrustedController:
                              failure, terminal_error)
 
     @staticmethod
-    def _terminal_frames(analysis: _FakeAnalysis) -> list[dict]:
-        frames = list(analysis.chunks)
+    def _terminal_events(analysis: _FakeAnalysis) -> list[tuple[str, object]]:
+        """Terminal events after trusted settlement; chunks are already sent."""
+        events: list[tuple[str, object]] = []
         if analysis.authoritative and not analysis.terminal_error:
             if analysis.usage is not None:
-                frames.append({"kind": "chunk",
-                               "chunk": {"type": "usage", "usage": dict(analysis.usage)}})
+                events.append(("usage", dict(analysis.usage)))
             kind = analysis.finish_kind if analysis.finish_kind in {
                 "stop", "tool-calls", "max-tokens", "blocked"} else "stop"
-            frames.append({"kind": "finish", "reason": {"kind": kind}})
-            return frames
+            events.append(("finish", {"kind": kind}))
+            return events
         code = analysis.failure_code or "FAKE_PROVIDER_ERROR"
-        frames.append({"kind": "finish", "reason": {
+        events.append(("finish", {
             "kind": "error",
             "failure": {"code": code, "message": "synthetic fake provider did not produce "
-                                                 "authoritative usage"}}})
-        return frames
+                                                 "authoritative usage"}}))
+        return events
+
+    @classmethod
+    def _emit_terminal(cls, emit: Callable[[tuple[str, object]], None],
+                       analysis: _FakeAnalysis) -> None:
+        for event in cls._terminal_events(analysis):
+            emit(event)
 
     # -- observation document -----------------------------------------
     def _make_observation(self, receipt_id: str, raw_sha256: str, usage: object,

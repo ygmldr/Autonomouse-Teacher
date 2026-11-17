@@ -11,8 +11,10 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
+import socket
 import subprocess
 import sys
+import threading
 import time
 
 import pytest
@@ -20,6 +22,9 @@ import pytest
 from autoteacher_m0.bridge.fake_backend import (
     FakeBackend, FakeCancelled, FakeError, FakeReceipt,
 )
+from autoteacher_m0.bridge.ipc_server import BridgeServer
+from autoteacher_m0.bridge.protocol import Envelope, encode_envelope, parse_envelope
+from test_c1_03_admission import make_harness, payload, request_env
 
 FAKE = Path(__file__).resolve().parents[3] / "spikes/g3b-trusted-bridge/fake/fake_provider.py"
 
@@ -273,3 +278,105 @@ def test_c3_04e_stream_does_not_buffer_with_communicate() -> None:
     assert "MAX_FAKE_FRAMES = 256" in text
     assert "MAX_FAKE_TOTAL_BYTES = 1024 * 1024" in text
     assert "MAX_FAKE_FRAME_BYTES = 64 * 1024" in text
+
+
+def _timing_marks(root: Path) -> dict:
+    marks: dict = {}
+    for path in sorted((root / "receipts").glob("timing-*.json")):
+        try:
+            document = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        for mark in document.get("marks", []):
+            if isinstance(mark, dict) and isinstance(mark.get("name"), str):
+                marks[mark["name"]] = mark
+    return marks
+
+
+def test_c3_04a_controller_yields_first_chunk_before_fake_exit(
+        tmp_path: Path) -> None:
+    """Controller generator (not just FakeBackend) must stream incrementally.
+
+    ``stream_slow`` emits one chunk, flushes its timing mark, sleeps 2 s, then
+    emits usage/finish and exits. The first yielded Envelope must be that chunk
+    while the Fake child is still running and no ``exit_after_finish`` mark
+    exists; buffered replay would yield it only after the child exits.
+    """
+    harness = make_harness(tmp_path, scenario="stream_slow")
+    try:
+        iterator = harness.controller.handle_envelope(request_env(payload()))
+        first = next(iterator)
+        assert first.kind == "chunk", first
+        assert first.payload["chunk"]["type"] == "text-delta"
+        assert first.payload["chunk"]["text"] == "early"
+        # Trusted receipt is already durable before the first forwarded chunk.
+        assert harness.fake.last_receipt is not None
+        assert list((tmp_path / "receipts").glob("rcpt-*.json"))
+        marks = _timing_marks(tmp_path)
+        assert "frames_start" in marks
+        # The chunk can reach the Controller before the child's own timing mark
+        # is durable; what matters is that the child has not finished/exited.
+        assert "exit_after_finish" not in marks
+        rest = list(iterator)
+        assert [env.kind for env in rest][-1] == "finish"
+        assert rest[-1].payload["reason"] == {"kind": "stop"}
+        after = _timing_marks(tmp_path)
+        assert "first_chunk_flushed" in after
+        assert "exit_after_finish" in after
+        rows = harness.attempts_rows()
+        assert [row["state"] for row in rows] == ["SETTLED"]
+    finally:
+        harness.close()
+
+
+def test_c3_04a_ipc_server_forwards_first_chunk_before_fake_exit(
+        tmp_path: Path) -> None:
+    """End-to-end host path: BridgeServer sendall per frame, not a replay."""
+    harness = make_harness(tmp_path, scenario="stream_slow")
+    socket_path = tmp_path / "bridge.sock"
+    server = BridgeServer(harness.controller, str(socket_path))
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    client.settimeout(15)
+    try:
+        deadline = time.monotonic() + 5
+        while not socket_path.exists() and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert socket_path.exists()
+        client.connect(str(socket_path))
+        request = Envelope(1, "request", "tr-" + "b" * 32, 0, payload(), None)
+        client.sendall(encode_envelope(request) + b"\n")
+        buffer = b""
+        frames: list[Envelope] = []
+        received_at: list[float] = []
+        while not frames or frames[-1].kind not in {"finish", "error"}:
+            chunk = client.recv(65536)
+            assert chunk, "bridge closed before terminal frame"
+            buffer += chunk
+            while b"\n" in buffer:
+                line, buffer = buffer.split(b"\n", 1)
+                if not line:
+                    continue
+                frames.append(parse_envelope(line + b"\n"))
+                received_at.append(time.monotonic())
+        kinds = [frame.kind for frame in frames]
+        assert kinds[0] == "ack"
+        assert kinds[-1] == "finish", kinds
+        assert frames[-1].payload["reason"] == {"kind": "stop"}
+        chunk_index = kinds.index("chunk")
+        chunk_frame = frames[chunk_index]
+        assert chunk_frame.payload["chunk"]["type"] == "text-delta"
+        assert chunk_frame.payload["chunk"]["text"] == "early"
+        # The chunk was written while the Fake still had ~2 s of sleep left.
+        settle_elapsed = received_at[-1] - received_at[chunk_index]
+        assert settle_elapsed >= 1.0, (kinds, settle_elapsed)
+        assert received_at[chunk_index] < received_at[-1] - 1.0
+        assert list((tmp_path / "receipts").glob("rcpt-*.json"))
+        rows = harness.attempts_rows()
+        assert [row["state"] for row in rows] == ["SETTLED"]
+    finally:
+        client.close()
+        server.shutdown()
+        thread.join(timeout=5)
+        harness.close()
