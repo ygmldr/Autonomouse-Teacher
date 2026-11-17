@@ -18,7 +18,8 @@ def utc() -> str:
 
 
 def usage_for(mode: str) -> dict | None:
-    if mode in {"ok_usage", "tool_once", "tool_final"}:
+    if mode in {"ok_usage", "tool_once", "tool_final", "slow_usage", "usage_conflict",
+                "usage_after_finish", "multi_usage"}:
         return {"inputTokens": 11, "cacheReadTokens": 2, "cacheWriteTokens": 0,
                 "outputTokens": 5, "reasoningTokens": 0, "totalTokens": 18}
     if mode == "partial_usage":
@@ -106,6 +107,26 @@ def main() -> int:
             {"kind": "usage", "usage": receipt["usage"]},
             {"kind": "finish", "reason": {"kind": "tool-calls"}},
         ]
+    elif mode == "slow_usage":
+        # Used only by deterministic deadline/cancel tests: the receipt is
+        # already durable (receipt-first) before this bounded synthetic delay.
+        import time as _time
+        _time.sleep(1.2)
+        frames = [{"kind": "chunk", "chunk": {"type": "text-delta", "index": 0, "text": "slow"}},
+                  {"kind": "usage", "usage": receipt["usage"]},
+                  {"kind": "finish", "reason": {"kind": "stop"}}]
+    elif mode == "usage_conflict":
+        conflicting = dict(receipt["usage"])
+        conflicting["outputTokens"] = 999
+        frames = [{"kind": "usage", "usage": conflicting},
+                  {"kind": "finish", "reason": {"kind": "stop"}}]
+    elif mode == "multi_usage":
+        frames = [{"kind": "usage", "usage": receipt["usage"]},
+                  {"kind": "usage", "usage": receipt["usage"]},
+                  {"kind": "finish", "reason": {"kind": "stop"}}]
+    elif mode == "usage_after_finish":
+        frames = [{"kind": "finish", "reason": {"kind": "stop"}},
+                  {"kind": "usage", "usage": receipt["usage"]}]
     elif mode == "error":
         frames = [{"kind": "finish", "reason": {"kind": "error"}}]
     else:

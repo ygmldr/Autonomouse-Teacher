@@ -421,6 +421,47 @@ class BudgetLedger:
     def fail(self, reservation: Reservation | str, usage: Usage | None = None) -> dict:
         return self.settle(reservation, usage, status="FAILED")
 
+    def reservation_status(self, reservation_id: str) -> dict:
+        """Read-only status snapshot; never mutates or settles a reservation.
+
+        G3-C recovery uses this as the single Broker authority for a durable
+        Attempt whose final state may be unknown after a crash.
+        """
+        if not isinstance(reservation_id, str) or not self._IDENTIFIER.fullmatch(reservation_id):
+            return {"found": False, "code": "INVALID_RESERVATION_ID"}
+        with self._transaction() as database:
+            row = database.execute(
+                "SELECT * FROM budget_reservations WHERE scope_id=? AND reservation_id=?",
+                (self.scope_id, reservation_id)).fetchone()
+            if row is None:
+                return {"found": False}
+            call_id = None
+            try:
+                link = database.execute(
+                    "SELECT call_id FROM budget_call_links WHERE scope_id=? AND reservation_id=?",
+                    (self.scope_id, reservation_id)).fetchone()
+                call_id = None if link is None else link[0]
+            except sqlite3.OperationalError:
+                call_id = None
+            return {
+                "found": True,
+                "reservation_id": row["reservation_id"],
+                "call_id": call_id,
+                "status": row["status"],
+                "route_id": row["route_id"],
+                "model": row["model"],
+                "task_id": row["task_id"],
+                "input_bound": row["input_bound"],
+                "output_bound": row["output_bound"],
+                "input_used": row["input_used"],
+                "output_used": row["output_used"],
+                "reserved_cost": row["reserved_cost"],
+                "cost": row["cost"],
+                "estimated": bool(row["estimated"]),
+                "settlement_json": None if row["settlement_json"] is None
+                else json.loads(row["settlement_json"]),
+            }
+
     def snapshot(self) -> dict:
         with self._transaction() as database:
             rows, blocked = self._state(database)

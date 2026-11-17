@@ -10,7 +10,8 @@ from typing import Mapping
 ADMISSION_PATH = Path("/work/g3b/admission.json")
 ALLOWED_SCENARIOS = frozenset({"ok_usage", "partial_usage", "no_usage", "error", "eof",
                                "timeout", "cancel", "tool", "tool_once", "tool_final",
-                               "usage_invalid", "receipt_conflict"})
+                               "usage_invalid", "receipt_conflict", "usage_conflict",
+                               "usage_after_finish", "multi_usage", "slow_usage"})
 ROUTE = ("offline-test-only-g3b", "fixture-bridge-v1")
 
 

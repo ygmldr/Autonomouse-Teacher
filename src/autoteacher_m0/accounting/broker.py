@@ -149,6 +149,12 @@ class BookkeepingBroker:
         common = {"v", "id", "op"}
         if op == "snapshot":
             return _keys(message, common)
+        if op == "reservation_status":
+            # Additive G3-C read-only op. It never consumes journal capacity and
+            # never changes v1 reserve/claim/settle/fail behavior.
+            _keys(message, common | {"reservation_id"})
+            _identifier(message["reservation_id"])
+            return message
         if op == "reserve":
             _keys(message, common | {"task_id", "route_id", "model", "purpose", "input_tokens",
                                      "output_tokens", "retry"}, {"call_id"})
@@ -210,6 +216,11 @@ class BookkeepingBroker:
         # response size are bounded by the protocol loop, not by journal storage.
         if op == "snapshot":
             return envelope(identity, ok=True, code="SNAPSHOT", snapshot=self.ledger.snapshot())
+        if op == "reservation_status":
+            status = self.ledger.reservation_status(request["reservation_id"])
+            if not status.get("found"):
+                return envelope(identity, code=status.get("code", "UNKNOWN_RESERVATION"))
+            return envelope(identity, ok=True, code="RESERVATION_STATUS", **status)
         if op in {"settle", "fail"}:
             # Completing an already-counted PENDING reservation is capacity that
             # was reserved when the reservation was admitted. It must remain
@@ -311,6 +322,11 @@ class BookkeepingBroker:
             # remains available after the journal cap. Frequency and size are
             # bounded by the serial serve loop and MAX_FRAME.
             if request["op"] == "snapshot":
+                with self.ledger._transaction() as database:
+                    return self._operate(database, request)
+            # G3-C read-only status: not journaled, so it can never consume the
+            # fixed completion capacity or be replayed as a settlement.
+            if request["op"] == "reservation_status":
                 with self.ledger._transaction() as database:
                     return self._operate(database, request)
             # ADR-002: claim is an additive v1 op with its own durable unique
