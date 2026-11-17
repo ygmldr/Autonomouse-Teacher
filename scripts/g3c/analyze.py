@@ -944,8 +944,10 @@ def absence_record() -> dict:
         key_env.extend(env.get("key_env", []))
         unexpected.update(env.get("unexpected_env", []))
         traces.append(directory.name)
+    test_only = {"G3B_TEST_MODE", "G3B_CRASH_HOOK"}
     return {"utc": utc(), "key_env_found": sorted(set(key_env)),
-            "unexpected_env_found": sorted(unexpected),
+            "test_only_crash_hook_env": sorted(set(unexpected) & test_only),
+            "unexpected_env_found": sorted(set(unexpected) - test_only),
             "container_network": "podman --network none --http-proxy=false (argv in commands.jsonl)",
             "adapter_socket": "/work/g3b/bridge.sock (frozen AF_UNIX only)",
             "fake_receipts_http_calls": 0, "live_gate": "unchanged BLOCKED; run_live.sh exit 3 (G0)",
