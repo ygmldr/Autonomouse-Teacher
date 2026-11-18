@@ -2,7 +2,7 @@
 
 - **任务**：G4-B-01..11（`docs/Autonomous_Teacher_M0_G4_PreLive_NoKey_Agent_Execution_Plan_v1.0.md` §5 / §8 / §10 / §12–§14；矩阵 `G4-B-01..11`）
 - **执行者**：G4-B Frozen Inventory / Tool Registry Agent（实现 + 证据，不改 `src/`）
-- **执行时间（UTC）**：2026-11-18T15:56Z → 17:0xZ
+- **执行时间（UTC）**：2026-11-18T15:56Z → 16:58Z
 - **性质**：**no-key / no-model / no-network / no-live**。0 真实 Key、0 模型调用、0 外部 HTTP/TCP、0 计费请求；未执行 `podman pull`；容器全程 `--network none`，结束 `podman ps -a` 为空。
 - **本轮裁定**：G4-B 的 **B01/B02/B04/B05/B06/B08/B09/B10/B11 成立**；**B03 为 `UNVERIFIED`（DSH 无权威 merged registry 导出）+ Controller 严格白名单兜底成立**；**B07 部分成立**（compaction/files/fallback PASS，session-log `PARTIAL`，session-title `BLOCKED`，mcp-resources `UNVERIFIED`，全部要求 Controller per-dispatch 兜底）。
 - **本文件不是**授权、不是 G4 PASS、不是 E5-PreLive Full、不是 Live 批准。`LiveGate` 仍 `BLOCKED`，`G4-H` 仍 `NOT_AUTHORIZED`。
