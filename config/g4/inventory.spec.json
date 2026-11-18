@@ -1,0 +1,140 @@
+{
+  "schema": "m0.g4b.inventory.spec.v1",
+  "purpose": "Deterministic closure of the bytes that the G4-B frozen runtime actually loads or is configured by. No key, no model, no network, no container start.",
+  "canonicalization": {
+    "json_sort_keys": true,
+    "json_separators": [",", ":"],
+    "json_ensure_ascii": false,
+    "json_allow_nan": false,
+    "trailing_newline": true,
+    "path_sort": "unicode-codepoint-ascending on POSIX relative path",
+    "path_separator": "/",
+    "mode_format": "4-digit octal from lstat (no follow)",
+    "digest": "sha256 over canonical JSON of {schema,canonicalization,anchor,inputs,derived}",
+    "self_reference": "manifest.json and manifest.sha256 are never listed and never hashed; the digest is stored beside the manifest",
+    "provenance_excluded": true,
+    "default_stage": "artifacts/g3d/stage-20261117T221955Z"
+  },
+  "roots": [
+    {
+      "root_id": "trusted_src",
+      "kind": "worktree_tree",
+      "root": "src/autoteacher_m0",
+      "suffixes": [".py"],
+      "exclude_dirs": ["__pycache__"],
+      "source_commit": "cf40c6bfb84ceae98e795db19efa955aa3035991",
+      "note": "Trusted product tree that the stage is built from; every row must equal git show cf40c6b:<path>."
+    },
+    {
+      "root_id": "trusted_stage",
+      "kind": "stage_section",
+      "section": "trusted",
+      "tree_prefixes": [],
+      "note": "Stage copy that the trusted container actually mounts at /project."
+    },
+    {
+      "root_id": "candidate_stage",
+      "kind": "stage_section",
+      "section": "candidate",
+      "tree_prefixes": ["node_modules", "native-cache", "pkg-cache"],
+      "note": "Explicit allow-list stage mounted read-only at /project for the candidate."
+    },
+    {
+      "root_id": "adapter_build",
+      "kind": "file_set",
+      "paths": [
+        "spikes/g3b-trusted-bridge/src/index.ts",
+        "spikes/g3b-trusted-bridge/fake/fake_provider.py",
+        "scripts/g3c/build-adapter.mjs"
+      ],
+      "note": "Adapter source and build recipe; the built bytes are candidate_stage runtime/bridge/lib/index.js verified against build-meta."
+    },
+    {
+      "root_id": "repo_config",
+      "kind": "file_set",
+      "paths": [
+        "config/budgets.yaml",
+        "config/dsh/sdk-minimal.patch.yml",
+        "config/dsh/target-broker-policy.json",
+        "config/dsh/target-runtime-opencode-go.patch.yml",
+        "config/dsh/target-runtime.patch.yml",
+        "config/models.example.yaml"
+      ],
+      "note": "Declarative policy inputs present in the repo. Some are NOT parsed by any runtime code (see docs/M0_G4_B_RUNTIME_INVENTORY.md)."
+    },
+    {
+      "root_id": "plugins",
+      "kind": "file_set",
+      "paths": [
+        "plugins/skill-lookup/package.json",
+        "plugins/skill-lookup/cordis.patch.yml",
+        "plugins/skill-lookup/src/index.ts",
+        "plugins/offline-fixture/package.json",
+        "plugins/offline-fixture/cordis.patch.yml",
+        "plugins/offline-fixture/src/index.ts",
+        "plugins/runtime-budget-guard/package.json",
+        "plugins/runtime-budget-guard/src/index.ts"
+      ],
+      "note": "Plugin sources. Only the built skill artifact is loaded by the frozen stage; the others are recorded so a swap is visible."
+    },
+    {
+      "root_id": "harness",
+      "kind": "file_set",
+      "paths": [
+        "scripts/g3d/launch.py",
+        "scripts/g3d/build_stage.py",
+        "scripts/g3d/lib_g3d.py",
+        "scripts/g3d/stage/trusted_entry.py",
+        "scripts/g3d/stage/candidate_entry.py",
+        "scripts/g4/lib_g4.py",
+        "scripts/g4/build_manifest.py",
+        "scripts/g4/verify_manifest.py",
+        "scripts/g4/probe_runtime.py",
+        "scripts/g4/probe_admission_contract.py",
+        "scripts/g4/run_g4_b.py"
+      ],
+      "note": "Host harness bytes. Not loaded by the candidate/trusted runtime, but they produce the evidence, so their drift must be visible."
+    },
+    {
+      "root_id": "policy",
+      "kind": "file_set",
+      "paths": [
+        "config/g4/runtime-policy.json",
+        "config/g4/inventory.spec.json",
+        "config/g3d/candidate/bridge.patch.yml",
+        "config/g3d/trusted/admission.template.json",
+        "config/g3d/trusted/broker.template.json",
+        "config/g3d/trusted/controller.template.json"
+      ],
+      "note": "The approved-policy binding plus the source overlays/templates the stage copies from."
+    },
+    {
+      "root_id": "stage_manifest",
+      "kind": "file_set",
+      "paths": ["artifacts/g3d/stage-20261117T221955Z/manifest.json"],
+      "note": "The frozen stage manifest is itself an input: it is the per-file source of truth reused above."
+    },
+    {
+      "root_id": "runtime_rootfs",
+      "kind": "canonical_tree",
+      "path": "artifacts/security/rootfs",
+      "expected": "25491e45aa3dc54c526db9b9d46d18b31c7840150473e2fdb4d8b882f02fe9c0"
+    },
+    {
+      "root_id": "runtime_deps",
+      "kind": "canonical_tree",
+      "path": "artifacts/foundation/deps",
+      "expected": "e07729d7997944417b1c25531749b3e6e5e34aa4248f01dc8f370282082ecb98"
+    },
+    {
+      "root_id": "runtime_dsh",
+      "kind": "file",
+      "path": "artifacts/foundation/deps/deepseek_harness_runtime/runtime/deepseek-harness-sdk-runtime-linux-x64"
+    },
+    {
+      "root_id": "runtime_node",
+      "kind": "file",
+      "path": "artifacts/security/rootfs/usr/bin/node"
+    }
+  ]
+}

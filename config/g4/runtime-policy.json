@@ -1,0 +1,75 @@
+{
+  "schema": "m0.g4b.runtime.policy.v1",
+  "policy_id": "g4b-frozen-offline-001",
+  "synthetic_only": true,
+  "billable_send_authorized": false,
+  "live_gate_effect": "NONE_BLOCKED",
+  "registry_status": "UNVERIFIED_NO_AUTHORITATIVE_MERGED_EXPORT",
+  "registry_reason": "DSH 0.2.2-rc.2 exposes no authoritative merged tool registry/schema export; --dump-config returns a Cordis entry list only (docs/M0_G4_00_BASELINE.md §9).",
+  "route": {
+    "route_id": "offline-test-only-g3b",
+    "provider": "offline-test-only-g3b",
+    "model": "fixture-bridge-v1"
+  },
+  "approved_tools": [
+    {
+      "name": "skill_lookup",
+      "sha256": "c984bef0ae31771da16a12ef2e7972b289cde6014b7f8ad12349f16c4f77b704"
+    }
+  ],
+  "tool_schema_source": "candidate/fixtures/capture-tools.json",
+  "tool_admission_rule": "DENY_ANY_TOOL_WHOSE_CANONICAL_JSON_SHA256_IS_NOT_LISTED_ABOVE_BEFORE_RESERVE_OR_CLAIM",
+  "forbidden_tool_prefixes": ["bash", "pwsh", "terminal", "fs_", "file_", "web_",
+                              "subagent", "workflow", "agent", "mcp_", "image_"],
+  "admission_limits": {
+    "max_calls": 8,
+    "max_attempts": 1,
+    "max_input_tokens": 100000,
+    "max_output_tokens": 1024,
+    "deadline_ms": 30000
+  },
+  "broker_limits": {
+    "soft_usd": "3",
+    "hard_usd": "10",
+    "per_call_usd": "0.2",
+    "max_requests": 50,
+    "max_input_tokens": 2500000,
+    "max_output_tokens": 600000,
+    "max_steps": 8,
+    "max_retries": 0
+  },
+  "price": {
+    "route_id": "offline-test-only-g3b",
+    "model": "fixture-bridge-v1",
+    "price": {
+      "version": "fixture-v1",
+      "source": "synthetic fixture",
+      "captured_at": "2026-11-16",
+      "input_per_million": "1",
+      "output_per_million": "2",
+      "cached_input_per_million": "0.5"
+    },
+    "known_extra_fee_usd": "0.001",
+    "usage_policy": {
+      "cache_write": "input_rate",
+      "reasoning": "included_in_output"
+    }
+  },
+  "stage_binding": {
+    "stage_dir": "artifacts/g3d/stage-20261117T221955Z",
+    "manifest_sha256": "644823d46adaef28810ba13bb97547371616177bbc4b8138b1eaed5d9a28eb03",
+    "tree_sha256": "e1ff14496e06dcb1c887badfb93b858012373be9fe739e61bb04587885e9f9c5",
+    "adapter_built_js_sha256": "2cb424616b7380bff61f8ce760e229a0c1d2b32c4a5f2954cdf66c3937bf74ba"
+  },
+  "environment_binding": {
+    "rootfs_sha256": "25491e45aa3dc54c526db9b9d46d18b31c7840150473e2fdb4d8b882f02fe9c0",
+    "deps_sha256": "e07729d7997944417b1c25531749b3e6e5e34aa4248f01dc8f370282082ecb98",
+    "dsh_runtime_sha256": "1cc41d5a8745a5b9d47c8604e44f23eb8af2d8ca02b2afa0be101d5f71be6ea4",
+    "dsh_runtime_version": "0.2.2-rc.2",
+    "node_version": "v22.23.2",
+    "python_version": "3.11.15"
+  },
+  "approved_manifest_digest": null,
+  "approved_manifest_note": "Null because the manifest contains this policy file: a committed digest of a document that includes it would be circular. The concrete digest is recorded at build time in artifacts/g4/runtime/baseline.json and in docs/M0_G4_B_RUNTIME_INVENTORY.md; require_manifest_match() also re-derives every fact from the manifest.",
+  "dispatch_rule": "A synthetic dispatch may proceed only if verify_manifest() reports no problems AND require_manifest_match() returns ok. This is not a live authorization and never unlocks LiveGate."
+}
