@@ -38,6 +38,7 @@ PROBE = SCRIPTS / "e5_probe.py"
 SENTINEL_PROBE = SCRIPTS / "secret_sentinel_probe.py"
 CANDIDATE_PROBE = SCRIPTS / "probes" / "g4d_candidate_iso_probe.py"
 LAUNCHER = SCRIPTS / "launch_c.py"
+LAUNCH_D = SCRIPTS / "launch_d.py"
 PYTHON = sys.executable
 SENTINEL = "TEST_ONLY_NEVER_VALID_SECRET_SENTINEL"
 
@@ -105,8 +106,11 @@ def launcher_argv(*, case: str, stage: Path, run_id: str, evidence: Path,
                   scenario: str = "echo", session: str | None = None,
                   candidate_mode: str = "hold", steps: str | None = None,
                   hold_seconds: int = 300, timeout: float = 300.0,
-                  keep_run: bool = True) -> list[str]:
-    argv = [PYTHON, "-B", str(LAUNCHER), "--case", case, "--scenario", scenario,
+                  keep_run: bool = True, driver: str = "c",
+                  probe_phase: str | None = None,
+                  probe_delay: float = 1.0) -> list[str]:
+    driver_path = LAUNCH_D if driver == "d" else LAUNCHER
+    argv = [PYTHON, "-B", str(driver_path), "--case", case, "--scenario", scenario,
             "--session", session or f"g4d-{case}", "--stage", str(stage),
             "--run-id", run_id, "--evidence-dir", str(evidence),
             "--candidate-mode", candidate_mode, "--timeout", str(int(timeout))]
@@ -116,6 +120,10 @@ def launcher_argv(*, case: str, stage: Path, run_id: str, evidence: Path,
         argv.extend(["--hold-seconds", str(hold_seconds)])
     if steps:
         argv.extend(["--steps", steps])
+    if driver == "d":
+        argv.extend(["--probe-delay", str(probe_delay)])
+        if probe_phase:
+            argv.extend(["--probe-phase", probe_phase])
     return argv
 
 
@@ -188,7 +196,7 @@ def case_d01(stage: Path) -> dict:
     run_id = f"g4d-d01-{lib3d.utc_compact()}"
     directory = RUNS / "d01"
     launcher = launcher_argv(case="d01", stage=stage, run_id=run_id,
-                             evidence=directory / "launcher")
+                             evidence=directory / "launcher", driver="d")
     watchdog_args = ["--run-id", run_id, "--run-dir", str(run_dir_for(run_id)),
                      "--rootfs-target", str(lib.ROOTFS / "g4c"),
                      "--deadline", "90", "--kill-after-up", "4",
@@ -203,7 +211,8 @@ def case_d02(stage: Path) -> dict:
     run_id = f"g4d-d02-{lib3d.utc_compact()}"
     directory = RUNS / "d02"
     launcher = launcher_argv(case="d02", stage=stage, run_id=run_id,
-                             evidence=directory / "launcher", steps="valid")
+                             evidence=directory / "launcher", driver="d",
+                             probe_phase="valid", probe_delay=1.0)
     watchdog_args = ["--run-id", run_id, "--run-dir", str(run_dir_for(run_id)),
                      "--rootfs-target", str(lib.ROOTFS / "g4c"),
                      "--deadline", "90", "--kill-after-up", "8",
@@ -218,9 +227,9 @@ def case_d02(stage: Path) -> dict:
 def case_d03(stage: Path) -> dict:
     run_id = f"g4d-d03-{lib3d.utc_compact()}"
     directory = RUNS / "d03"
-    launcher = launcher_argv(case="d03", stage=stage, run_id=run_id,
+    launcher = launcher_argv(case="c01", stage=stage, run_id=run_id,
                              evidence=directory / "launcher",
-                             candidate_mode="dsh", keep_run=False)
+                             scenario="echo", candidate_mode="dsh", keep_run=False)
     probe_paths = {
         "trusted_state": str(run_dir_for(run_id) / "state" / "controller.json"),
         "trusted_write": str(run_dir_for(run_id) / "state" / "injected.json"),
@@ -257,7 +266,7 @@ def case_d08a(stage: Path) -> dict:
         "esac\n", encoding="utf-8")
     wrapper.chmod(0o755)
     launcher = launcher_argv(case="d08a", stage=stage, run_id=run_id,
-                             evidence=directory / "launcher")
+                             evidence=directory / "launcher", driver="d")
     watchdog_args = ["--run-id", run_id, "--run-dir", str(run_dir_for(run_id)),
                      "--rootfs-target", str(lib.ROOTFS / "g4c"),
                      "--engine", str(wrapper), "--deadline", "90",
@@ -393,7 +402,7 @@ def case_d15(stage: Path) -> dict:
     if previous.is_file():
         previous_run = json.loads(previous.read_text()).get("run_id") or ""
     launcher = launcher_argv(case="d15", stage=stage, run_id=run_id,
-                             evidence=directory / "launcher")
+                             evidence=directory / "launcher", driver="d")
     probe_paths = {
         "trusted_state": str(run_dir_for(run_id) / "state" / "controller.json"),
         "trusted_write": str(run_dir_for(run_id) / "state" / "injected.json"),

@@ -219,7 +219,8 @@ class ExternalWatchdogRunner:
             for name, value in limits:
                 which = RLIMITS[name]
                 current = resource.getrlimit(which)
-                hard = os.RLIM_INFINITY if current[1] == os.RLIM_INFINITY else current[1]
+                hard = (resource.RLIM_INFINITY if current[1] == resource.RLIM_INFINITY
+                        else current[1])
                 soft = min(value, hard)
                 resource.setrlimit(which, (soft, hard))
 
