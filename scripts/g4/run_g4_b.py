@@ -89,8 +89,11 @@ if phase == "negatives":
             {"type": "text", "text": "x"},
             {"type": "file", "file": {"path": "/work/session/x"}}]}],
         tools=[approved]))
-    send("self_authorization_field", pc.request_payload(
-        session="g4b-raw-selfauth", tools=[approved], purpose="title"))
+    selfauth = pc.request_payload(session="g4b-raw-selfauth", tools=[approved])
+    selfauth["authorized"] = True
+    send("self_authorization_field", selfauth)
+    send("auxiliary_purpose_title", pc.request_payload(
+        session="g4b-raw-title", tools=[approved], purpose="title"))
 elif phase == "positive":
     send("valid_request_1", pc.request_payload(
         session="g4b-raw-valid-1", tools=[approved]))
@@ -160,6 +163,9 @@ def snapshot_state(run_dir: Path, dest: Path, tag: str) -> dict:
             copied.append({"name": name, "bytes": target.stat().st_size,
                            "sha256": lib.sha256_file(target)})
     result: dict = {"tag": tag, "utc": lib.utc_now(), "files": copied}
+    # The Broker creates ``budget_dispatch_claims`` lazily on the first claim,
+    # so a pre-send snapshot legitimately has no such table.  A missing table is
+    # reported as an empty list plus ``missing_tables``; it is not an error.
     broker = dest / f"{tag}-broker.sqlite3"
     if broker.is_file():
         with sqlite3.connect(f"file:{broker}?mode=ro", uri=True) as conn:
@@ -169,6 +175,8 @@ def snapshot_state(run_dir: Path, dest: Path, tag: str) -> dict:
             result["claims"] = _query(
                 conn, "SELECT call_id,reservation_id,request_digest,status "
                       "FROM budget_dispatch_claims ORDER BY rowid")
+            result["missing_tables"] = _missing_tables(
+                conn, ("budget_reservations", "budget_dispatch_claims"))
     attempts = dest / f"{tag}-attempts.sqlite3"
     if attempts.is_file():
         with sqlite3.connect(f"file:{attempts}?mode=ro", uri=True) as conn:
@@ -179,6 +187,8 @@ def snapshot_state(run_dir: Path, dest: Path, tag: str) -> dict:
             result["intents"] = _query(
                 conn, "SELECT intent_id,call_id,reservation_id,state,reason "
                       "FROM g3b_send_intents ORDER BY created_utc")
+            result.setdefault("missing_tables", []).extend(
+                _missing_tables(conn, ("g3b_attempts", "g3b_send_intents")))
     result["counts"] = {
         "reservations": len(result.get("reservations") or []),
         "claims": len(result.get("claims") or []),
@@ -197,8 +207,19 @@ def snapshot_state(run_dir: Path, dest: Path, tag: str) -> dict:
     return result
 
 
+def _missing_tables(conn: sqlite3.Connection, names: tuple[str, ...]) -> list[str]:
+    present = {row[0] for row in conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table'")}
+    return sorted(name for name in names if name not in present)
+
+
 def _query(conn: sqlite3.Connection, sql: str) -> list[dict]:
-    cursor = conn.execute(sql)
+    try:
+        cursor = conn.execute(sql)
+    except sqlite3.OperationalError as exc:
+        if "no such table" in str(exc):
+            return []
+        raise
     columns = [column[0] for column in cursor.description or ()]
     return [dict(zip(columns, row)) for row in cursor.fetchall()]
 
@@ -493,22 +514,24 @@ def _judge_raw_uds(report: dict) -> dict:
         "quota": report.get("ledger_after_quota") or {},
     }
     expected_negative_codes = {
-        "unapproved_tool_name": "ADMISSION_TOOL_SCHEMA_MISMATCH",
-        "modified_approved_schema": "ADMISSION_TOOL_SCHEMA_MISMATCH",
-        "extra_tool_alongside_approved": "ADMISSION_TOOL_SCHEMA_MISMATCH",
-        "file_block": "REQUEST_INVALID",
-        "self_authorization_field": "BAD_TYPE",
+        "unapproved_tool_name": ("ADMISSION_TOOL_SCHEMA_MISMATCH",),
+        "modified_approved_schema": ("ADMISSION_TOOL_SCHEMA_MISMATCH",),
+        "extra_tool_alongside_approved": ("ADMISSION_TOOL_SCHEMA_MISMATCH",),
+        "file_block": ("REQUEST_INVALID",),
+        "self_authorization_field": ("ADMISSION_SELF_AUTH_DENIED", "UNKNOWN_FIELD"),
+        "auxiliary_purpose_title": ("BAD_TYPE",),
     }
     negative_rows = []
     for case in negatives.get("cases") or []:
         code = case.get("error_code")
+        expected = expected_negative_codes.get(case.get("label"), ())
         negative_rows.append({
             "label": case.get("label"),
-            "expected_code": expected_negative_codes.get(case.get("label")),
+            "expected_code": list(expected),
             "actual_code": code,
             "terminal": case.get("terminal"),
-            "ok": (case.get("terminal") == "error"
-                   and code == expected_negative_codes.get(case.get("label"))),
+            "last_frame": case.get("last_frame"),
+            "ok": case.get("terminal") == "error" and code in expected,
         })
     before = (ledger["negatives"].get("counts") or {})
     positive_row = (positive.get("cases") or [{}])[0]
