@@ -129,7 +129,7 @@ D09 因此标 **PARTIAL**：CPU/AS/NOFILE 与容器 cgroup 限制实测生效；
 - 扫描器按**原始字节**比较 JSON/JSONL/SQLite 页/JUnit/日志；命中只输出 path/offset/count，不输出上下文；`--self-test` 正控必须命中，否则结果不算 clean。
 - 排除项（写死在 `run_g4_d.py`）：哨兵 fixture 本身、`scripts/`（扫描器源码必须含该常量）、以及归档任务书中**定义**哨兵名的那一段；这些都是“定义处”，不是传播面。
 
-### 3.2 D03 真实双主体传播面（D03 run = 完整 c01 echo，launcher PASS 21/21 checks）
+### 3.2 D03 真实双主体传播面（D03 run = 完整 c01 echo，launcher PASS 18/18 checks；watchdog 21/21 checks）
 
 | 面 | 证据 | 结果 |
 |---|---|---|
