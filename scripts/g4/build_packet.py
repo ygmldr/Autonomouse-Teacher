@@ -152,6 +152,8 @@ def git(*args: str, binary: bool = False):
 def sanitize_text(text: str) -> str:
     replacements = [
         (str(ROOT), "<WORKSPACE>"),
+        ("/root/Autonomous\\040Teacher", "<WORKSPACE_ESCAPED>"),
+        ("/root/g4b-baseline", "<G4B_WORKTREE>"),
         ("/root/.local/share/uv/python/cpython-3.11-linux-x86_64-gnu",
          "<UV_PYTHON>"),
         ("/root/.local/share/uv/python/cpython-3.11.15-linux-x86_64-gnu",
@@ -160,6 +162,9 @@ def sanitize_text(text: str) -> str:
         ("/root/.local/bin", "<HOST_BIN>"),
         ("/root/.local/share", "<HOST_SHARE>"),
         ("/root/.cache", "<HOST_CACHE>"),
+        ("/root/.dsh", "<HOST_HOME>/.dsh"),
+        ("/root/.config", "<HOST_HOME>/.config"),
+        ("/opt/miniconda3/envs/quant/bin/python", "<CONDA_PYTHON>"),
     ]
     for old, new in replacements:
         text = text.replace(old, new)
@@ -258,12 +263,15 @@ def payload_tree_hash(rows: list[tuple[str, str]]) -> str:
 def build_changes(out: Path, docs_sha: str) -> None:
     dst = out / "changes"
     write_text(dst / "implementation.diff",
-               git("diff", "--binary", BASE_SHA, IMPL_SHA, "--", "src",
-                   "scripts/g4", "config/g4", "tests/integration/g4_a",
-                   "tests/integration/g4_b", "tests/integration/g4_c",
-                   "tests/integration/g4_d"))
+               sanitize_text(git("diff", "--binary", BASE_SHA, IMPL_SHA, "--",
+                                 "src", "scripts/g4", "config/g4",
+                                 "tests/integration/g4_a",
+                                 "tests/integration/g4_b",
+                                 "tests/integration/g4_c",
+                                 "tests/integration/g4_d")))
     write_text(dst / "docs.diff",
-               git("diff", "--binary", BASE_SHA, docs_sha, "--", "docs"))
+               sanitize_text(git("diff", "--binary", BASE_SHA, docs_sha, "--",
+                                 "docs")))
     lines = ["# Protected-file audit (base to impl)", ""]
     for relative in PROTECTED_PATHS:
         proc = subprocess.run(["git", "diff", "--quiet", BASE_SHA, IMPL_SHA,
@@ -288,6 +296,8 @@ def build_source(out: Path) -> None:
         target = out / "source" / relative
         target.parent.mkdir(parents=True, exist_ok=True)
         copy_text(ROOT / relative, target)
+        if sha256_file(target) != sha256_file(ROOT / relative):
+            raise BuildError(f"source copy changed bytes: {relative}")
         index.append(f"- `{relative}` sha256 `{sha256_file(ROOT / relative)}`")
     refs = [
         "# G4 line references (1-based)",
@@ -318,9 +328,12 @@ def build_source(out: Path) -> None:
         "build_manifest.py:35 manifest builder; verify_manifest.py:41 verifier",
     ]
     builder = ROOT / "scripts" / "g4" / "build_packet.py"
-    copy_text(builder, out / "source" / "scripts" / "g4" / "build_packet.py")
-    index.append(f"- `scripts/g4/build_packet.py` sha256 "
-                 f"`{sha256_file(builder)}` (packet builder; post-impl evidence tool)")
+    builder_copy = out / "source" / "scripts" / "g4" / "build_packet.py"
+    copy_text(builder, builder_copy)
+    index.append(f"- `scripts/g4/build_packet.py` original sha256 "
+                 f"`{sha256_file(builder)}`; packet copy sha256 "
+                 f"`{sha256_file(builder_copy)}` (path-sanitized; original hash "
+                 f"is authoritative)")
     write_text(out / "source" / "INDEX.md", "\n".join(index) + "\n")
     write_text(out / "source" / "line-references.txt", "\n".join(refs) + "\n")
 
@@ -613,8 +626,9 @@ def build_regressions(out: Path) -> None:
 
 def build_matrix(out: Path, docs_sha: str) -> dict:
     raw = git("show", f"{docs_sha}:docs/{MATRIX.name}", binary=True)
-    write_bytes(out / "matrix" / MATRIX.name, raw)
-    rows = list(csv.DictReader(raw.decode("utf-8-sig").splitlines()))
+    text = sanitize_text(raw.decode("utf-8-sig"))
+    write_text(out / "matrix" / MATRIX.name, text)
+    rows = list(csv.DictReader(text.splitlines()))
     counts: dict[str, int] = {}
     for row in rows:
         counts[row["status"]] = counts.get(row["status"], 0) + 1
@@ -625,6 +639,9 @@ def build_matrix(out: Path, docs_sha: str) -> dict:
         "blocked": [row["case_id"] for row in rows if row["status"] == "BLOCKED"],
         "copy": f"matrix/{MATRIX.name}",
         "sha256": sha256_bytes(raw),
+        "copy_sha256_sanitized": sha256_bytes(text.encode("utf-8")),
+        "copy_sanitized": True,
+        "sanitized_note": "workspace/home absolute paths replaced with placeholders; row statuses unchanged",
     }
     write_json(out / "matrix" / "MATRIX_COUNTS.json", document)
     return document
@@ -653,11 +670,11 @@ sha256sum -c hashes.sha256
 python3 -B review/verify_payload_tree.py
 
 # 2. host regression (raw; 4 known environment/frozen failures)
-PYTHONPATH=src:artifacts/foundation/deps /root/.local/bin/python3.11 -B \\
+PYTHONPATH=src:artifacts/foundation/deps <HOST_PYTHON> -B \\
   -m pytest tests -q -p no:cacheprovider
 
 # 3. host regression (explicit known deselects)
-PYTHONPATH=src:artifacts/foundation/deps /root/.local/bin/python3.11 -B \\
+PYTHONPATH=src:artifacts/foundation/deps <HOST_PYTHON> -B \\
   -m pytest tests -q -p no:cacheprovider \\
   --deselect tests/integration/g3d/test_d3_contract.py::test_runner_does_not_modify_product_src \\
   --deselect tests/integration/g4_d/test_d10_d15_e5_subset.py::test_d15_same_uid_known_path_is_denied_by_mode_not_name \\
@@ -669,7 +686,7 @@ PYTHONPATH=src:artifacts/foundation/deps /root/.local/bin/python3.11 -B \\
 #    root replay = 294 passed / 2 deselects (G4-A + unit auth + D05/D06 + sandbox)
 
 # 5. LiveGate negatives
-PYTHONPATH=src:artifacts/foundation/deps /root/.local/bin/python3.11 -B \\
+PYTHONPATH=src:artifacts/foundation/deps <HOST_PYTHON> -B \\
   artifacts/g4/e/regression/livegate_negatives.py
 ```
 
@@ -821,6 +838,9 @@ def build(args: argparse.Namespace) -> int:
         "packet_builder": {
             "path": "scripts/g4/build_packet.py",
             "sha256": sha256_file(ROOT / "scripts/g4/build_packet.py"),
+            "packet_copy_sha256": sha256_file(
+                out / "source" / "scripts" / "g4" / "build_packet.py"),
+            "packet_copy_sanitized": True,
             "git_blob_at_head": git("rev-parse", "HEAD:scripts/g4/build_packet.py").strip(),
             "note": "post-implementation evidence tool; committed separately from impl",
         },
