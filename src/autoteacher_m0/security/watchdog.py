@@ -80,6 +80,33 @@ class ProcessTreeKillResult:
 
 
 @dataclass(frozen=True)
+class ProcessAbsenceReport:
+    """Independent /proc re-check; a signal or ``kill()`` return is not absence."""
+
+    checked: tuple[int, ...]
+    absent: tuple[int, ...]
+    survivors: tuple[int, ...]
+    proc_entries: tuple[int, ...]
+
+    @property
+    def confirmed(self) -> bool:
+        return not self.survivors
+
+
+@dataclass(frozen=True)
+class PathAbsenceReport:
+    """``rm -f`` exit 0 is not proof; each path is re-observed with ``lstat``."""
+
+    checked: tuple[str, ...]
+    present: tuple[str, ...]
+    details: Mapping[str, Mapping[str, object]]
+
+    @property
+    def confirmed(self) -> bool:
+        return not self.present
+
+
+@dataclass(frozen=True)
 class WatchdogOutcome:
     status: RunStatus
     elapsed_seconds: float
@@ -176,13 +203,18 @@ def confirm_container_absence(engine: str | Sequence[str], name: str, *,
     safe_env = {"PATH": "/usr/bin:/bin", "LANG": "C", "HOME": "/work"}
     if env is not None:
         safe_env = dict(env)
-    cleanup = runner([*prefix, "rm", "--force", name], env=safe_env,
-                     stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
-                     stderr=subprocess.DEVNULL, timeout=5, check=False)
-    absence = runner([*prefix, "ps", "--all", "--filter", f"name=^{name}$",
-                      "--format", "{{.Names}}"], env=safe_env,
-                     stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
-                     stderr=subprocess.DEVNULL, timeout=5, check=False)
+    try:
+        cleanup = runner([*prefix, "rm", "--force", name], env=safe_env,
+                         stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                         stderr=subprocess.DEVNULL, timeout=5, check=False)
+        absence = runner([*prefix, "ps", "--all", "--filter", f"name=^{name}$",
+                          "--format", "{{.Names}}"], env=safe_env,
+                         stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                         stderr=subprocess.DEVNULL, timeout=5, check=False)
+    except (subprocess.TimeoutExpired, OSError) as error:
+        # A hung or unavailable engine cannot be interpreted as absence.
+        raise WatchdogViolation(
+            (f"CONTAINER_QUERY_UNAVAILABLE:{type(error).__name__}",)) from error
     evidence: dict[str, object] = {
         "engine": prefix, "name": name, "remove_returncode": cleanup.returncode,
         "absence_returncode": absence.returncode, "names_after": absence.stdout.decode(
@@ -191,6 +223,105 @@ def confirm_container_absence(engine: str | Sequence[str], name: str, *,
     if absence.returncode != 0 or evidence["names_after"]:
         raise WatchdogViolation(("CONTAINER_CLEANUP_NOT_CONFIRMED",))
     return evidence
+
+
+def confirm_process_absence(pids: Sequence[int], *,
+                            proc_root: str | os.PathLike[str] = "/proc",
+                            ) -> ProcessAbsenceReport:
+    """Re-read ``/proc`` for each pid; zombies count as absent (already exited)."""
+    checked: list[int] = []
+    absent: list[int] = []
+    survivors: list[int] = []
+    entries: list[int] = []
+    for raw_pid in pids:
+        pid = int(raw_pid)
+        if pid in checked:
+            continue
+        checked.append(pid)
+        if not Path(proc_root, str(pid)).exists():
+            absent.append(pid)
+            continue
+        entries.append(pid)
+        if _proc_alive(pid):
+            survivors.append(pid)
+        else:
+            absent.append(pid)
+    return ProcessAbsenceReport(tuple(sorted(checked)), tuple(sorted(absent)),
+                                tuple(sorted(survivors)), tuple(sorted(entries)))
+
+
+def confirm_path_absence(paths: Sequence[str | os.PathLike[str]]
+                         ) -> PathAbsenceReport:
+    """Observe socket/run-dir removal instead of trusting the unlink return code."""
+    checked: list[str] = []
+    present: list[str] = []
+    details: dict[str, dict[str, object]] = {}
+    for raw in paths:
+        path = str(raw)
+        if path in checked:
+            continue
+        checked.append(path)
+        try:
+            info = os.lstat(path)
+        except FileNotFoundError:
+            details[path] = {"present": False}
+            continue
+        except OSError as error:
+            details[path] = {"present": True, "error": type(error).__name__}
+            present.append(path)
+            continue
+        present.append(path)
+        details[path] = {"present": True, "mode": info.st_mode,
+                         "uid": info.st_uid, "gid": info.st_gid,
+                         "inode": info.st_ino}
+    return PathAbsenceReport(tuple(checked), tuple(present), details)
+
+
+def scan_marked_processes(markers: Sequence[str], *,
+                          exclude_pids: Sequence[int] = (),
+                          proc_root: str | os.PathLike[str] = "/proc") -> list[dict]:
+    """Find escaped/reparented processes by argv, environ or cwd marker.
+
+    ``kill_process_tree`` follows parent/child and process-group edges. A child
+    that double-forks and detaches from both is still observable through the
+    run-specific markers (run id, run dir, container name); the external
+    watchdog must kill those too before it may claim absence.
+    """
+    excluded = {int(pid) for pid in exclude_pids}
+    raised: list[dict] = []
+    root = Path(proc_root)
+    for entry in root.iterdir():
+        if not entry.name.isdigit():
+            continue
+        pid = int(entry.name)
+        if pid in excluded:
+            continue
+        hits: list[str] = []
+        argv: list[str] = []
+        try:
+            raw = (entry / "cmdline").read_bytes()[:8192]
+        except OSError:
+            continue
+        argv = [part.decode("utf-8", "replace") for part in raw.split(b"\0") if part]
+        joined = "\n".join(argv)
+        hits.extend(marker for marker in markers if marker and marker in joined)
+        if not hits:
+            try:
+                environ = (entry / "environ").read_bytes()[:65536]
+            except OSError:
+                environ = b""
+            text = environ.decode("utf-8", "replace")
+            hits.extend(marker for marker in markers if marker and marker in text)
+        if not hits:
+            try:
+                cwd = os.readlink(entry / "cwd")
+            except OSError:
+                cwd = ""
+            hits.extend(marker for marker in markers if marker and marker in cwd)
+        if hits:
+            raised.append({"pid": pid, "argv": argv[:16],
+                           "markers": sorted(set(hits))[:8]})
+    return raised
 
 
 class ExternalWatchdog:
