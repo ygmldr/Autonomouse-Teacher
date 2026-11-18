@@ -20,9 +20,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
+import hashlib
 import json
-from pathlib import Path
+import os
+from pathlib import Path, PurePosixPath
 import re
+from stat import S_ISDIR, S_ISREG, S_IWGRP, S_IWOTH
 from typing import Any, Mapping
 
 from autoteacher_m0.contracts import ErrorCode, RuntimeFailure
@@ -33,6 +36,12 @@ AUTHORIZATION_SCHEMA = "at-m0/execution-authorization/v1"
 MAX_AUTHORIZATION_BYTES = 64 * 1024
 MAX_KEYS_BYTES = 16 * 1024
 MAX_REVOCATION_BYTES = 64 * 1024
+MAX_BUDGET_POLICY_BYTES = 16 * 1024
+MAX_USE_RECORD_BYTES = 4 * 1024
+MAX_AUTHORIZATION_USES = 4096
+# Host uid of the G3-D candidate process (uid_map 0 65534 1). A trusted file
+# owned by this uid, or writable by group/other, is candidate-writable.
+CANDIDATE_HOST_UID = 65534
 ALLOWED_TOOLS = frozenset({"skill_lookup"})
 BINDING_NAMES = (
     "code_sha256",
@@ -41,12 +50,65 @@ BINDING_NAMES = (
     "plugin_sha256",
     "merged_profile_sha256",
 )
+# The v1 authorization has exactly these five binding fields. Each one is the
+# aggregate root of one named group of runtime-relevant inputs; every component
+# must appear in exactly one group so no runtime input can be left unbound.
+BINDING_CLOSURE: Mapping[str, tuple[str, ...]] = {
+    "code_sha256": (
+        "trusted_controller",
+        "trusted_broker",
+        "egress_boundary",
+        "candidate_adapter",
+        "security_primitives",
+    ),
+    "lock_sha256": (
+        "dependency_lock",
+        "runtime_dependencies",
+    ),
+    "runtime_sha256": (
+        "runtime_binary",
+        "candidate_stage",
+    ),
+    "plugin_sha256": (
+        "plugin_tree",
+        "tool_registry_schema",
+    ),
+    "merged_profile_sha256": (
+        "merged_profile",
+        "route_policy",
+        "budget_policy",
+        "price_snapshot",
+    ),
+}
+BINDING_COMPONENTS = tuple(
+    component for root in BINDING_NAMES for component in BINDING_CLOSURE.get(root, ()))
+# A dispatch admission must re-check the bindings at all three points; one
+# pre-start check is explicitly not enough.
+TOCTOU_CHECKPOINTS = ("pre_start", "pre_reserve", "pre_dispatch")
+_USE_LOG_SCHEMA = "at-m0/authorization-use/v1"
 _DIGEST = re.compile(r"[a-f0-9]{64}\Z")
 _IDENTIFIER = re.compile(r"[A-Za-z0-9._:-]{1,128}\Z")
 _USD = re.compile(r"(?:0|[1-9][0-9]{0,5})(?:\.[0-9]{1,6})?\Z")
+_POLICY_KEY = re.compile(r"[a-z][a-z0-9_]{0,63}\Z")
+_POLICY_SCALAR = re.compile(r"[A-Za-z0-9_.:-]{1,64}\Z")
+_POLICY_NUMBER = re.compile(r"(?:0|[1-9][0-9]{0,9})(?:\.[0-9]{1,6})?\Z")
+_POLICY_INTEGER = re.compile(r"(?:0|[1-9][0-9]{0,9})\Z")
 _UTC_TEXT = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z\Z")
 _MAX_AUTHORIZATION_LIFETIME = timedelta(hours=24)
 _MAX_ISSUED_AGE = timedelta(days=7)
+BUDGET_POLICY_KEYS = (
+    "soft_total_usd",
+    "hard_total_usd",
+    "soft_call_usd",
+    "hard_call_usd",
+    "max_live_requests",
+    "max_steps_per_task",
+    "max_retries_per_task",
+    "max_input_tokens",
+    "max_output_tokens",
+    "live_pricing_snapshot",
+)
+UNVERIFIED_PRICE_SNAPSHOT = "REQUIRED_UNVERIFIED"
 
 
 class AuthorizationRejected(RuntimeFailure):
@@ -91,8 +153,46 @@ def _parse_json_object(raw: bytes, *, label: str) -> dict[str, Any]:
     return value
 
 
+def _require_private_node(info: os.stat_result, *, label: str) -> None:
+    """Reject candidate-writable nodes: group/other write or candidate ownership."""
+    if info.st_mode & (S_IWGRP | S_IWOTH):
+        raise ValueError(f"{label} must not be group/world writable")
+    if info.st_uid == CANDIDATE_HOST_UID:
+        raise ValueError(f"{label} is owned by the candidate host uid")
+
+
+def _trusted_directory(directory: Path, *, repo_root: Path, label: str) -> Path:
+    """Resolve an operator-controlled directory that the candidate cannot write."""
+    if not isinstance(directory, Path) or not directory.is_absolute():
+        raise ValueError(f"{label} directory must be absolute")
+    if directory.is_symlink():
+        raise ValueError(f"{label} directory must not be a symlink")
+    try:
+        resolved = directory.resolve(strict=True)
+        root = repo_root.resolve(strict=True)
+    except OSError as error:
+        raise ValueError(f"{label} directory does not exist") from error
+    if resolved.is_relative_to(root):
+        raise ValueError(f"{label} must live outside the repository")
+    try:
+        info = resolved.stat()
+    except OSError as error:
+        raise ValueError(f"{label} directory is unreadable") from error
+    if not S_ISDIR(info.st_mode):
+        raise ValueError(f"{label} must be a directory")
+    _require_private_node(info, label=f"{label} directory")
+    return resolved
+
+
 def _external_regular_file(path: Path, *, repo_root: Path, label: str,
                            max_bytes: int) -> bytes:
+    """Read one strict external file without following links or trusting a path race.
+
+    The trusted location is an operator-owned directory outside the repository
+    that is neither group/other writable nor owned by the candidate uid. The
+    final open uses ``O_NOFOLLOW`` and re-checks the opened descriptor, so a
+    last-moment symlink or file-type swap cannot redirect the read.
+    """
     if not isinstance(path, Path) or not path.is_absolute():
         raise ValueError(f"{label} path must be absolute")
     if path.is_symlink():
@@ -104,12 +204,34 @@ def _external_regular_file(path: Path, *, repo_root: Path, label: str,
         raise ValueError(f"{label} does not exist") from error
     if resolved.is_relative_to(root):
         raise ValueError(f"{label} must live outside the repository")
-    if not resolved.is_file():
-        raise ValueError(f"{label} must be a regular file")
-    size = resolved.stat().st_size
-    if size <= 0 or size > max_bytes:
-        raise ValueError(f"{label} size is outside the permitted range")
-    return resolved.read_bytes()
+    _trusted_directory(resolved.parent, repo_root=root, label=label)
+    try:
+        descriptor = os.open(resolved, os.O_RDONLY | os.O_NOFOLLOW)
+    except OSError as error:
+        raise ValueError(f"{label} is unreadable") from error
+    try:
+        info = os.fstat(descriptor)
+        if not S_ISREG(info.st_mode):
+            raise ValueError(f"{label} must be a regular file")
+        _require_private_node(info, label=label)
+        if info.st_size <= 0 or info.st_size > max_bytes:
+            raise ValueError(f"{label} size is outside the permitted range")
+        chunks: list[bytes] = []
+        remaining = max_bytes + 1
+        while remaining > 0:
+            chunk = os.read(descriptor, min(remaining, 65536))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        data = b"".join(chunks)
+    except OSError as error:
+        raise ValueError(f"{label} is unreadable") from error
+    finally:
+        os.close(descriptor)
+    if len(data) != info.st_size or len(data) > max_bytes:
+        raise ValueError(f"{label} changed while it was being read")
+    return data
 
 
 def _require_text(value: Any, *, field: str) -> str:
@@ -158,6 +280,16 @@ class ExpectedBindings:
     def as_dict(self) -> dict[str, str]:
         return {name: getattr(self, name) for name in BINDING_NAMES}
 
+    def mismatches(self, observed: "ExpectedBindings") -> tuple[str, ...]:
+        """Stable per-root mismatch codes; never mutates either binding set."""
+        return tuple(f"{name.upper()}_MISMATCH" for name in BINDING_NAMES
+                     if getattr(self, name) != getattr(observed, name))
+
+    @classmethod
+    def from_closure(cls, components: Mapping[str, str]) -> "ExpectedBindings":
+        """Derive the five v1 roots from the complete component closure."""
+        return cls(**closure_digests(components))
+
 
 @dataclass(frozen=True)
 class ApprovedRoute:
@@ -200,9 +332,22 @@ class ExecutionAuthorization:
 
 @dataclass(frozen=True)
 class AuthorizationDecision:
+    """Inspection result.
+
+    ``approved`` only means the offline authorization document verifies. It is
+    deliberately not a dispatch permission: ``billable_send_authorized`` can
+    never be true in this module, and ``LiveGate``/CLI/Adapter still block.
+    """
+
     approved: bool
     reasons: tuple[str, ...]
     authorization: ExecutionAuthorization | None
+    signature_valid: bool = False
+    billable_send_authorized: bool = False
+
+    def __post_init__(self) -> None:
+        if self.billable_send_authorized:
+            raise ValueError("this module can never authorize a billable send")
 
     def require(self) -> ExecutionAuthorization:
         if not self.approved or self.authorization is None:
@@ -210,9 +355,80 @@ class AuthorizationDecision:
         return self.authorization
 
 
-def _canonical_payload(payload: Mapping[str, Any]) -> bytes:
+def _canonical_payload(payload: Any) -> bytes:
     return json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True,
                       allow_nan=False).encode("utf-8")
+
+
+def _validate_binding_closure() -> None:
+    """Import-time guard: every v1 root has components and no component is unbound."""
+    if set(BINDING_CLOSURE) != set(BINDING_NAMES):
+        raise RuntimeError("binding closure must cover exactly the v1 binding roots")
+    seen: list[str] = []
+    for root in BINDING_NAMES:
+        names = BINDING_CLOSURE[root]
+        if not names:
+            raise RuntimeError(f"binding root {root} has no components")
+        seen.extend(names)
+    if len(seen) != len(set(seen)):
+        raise RuntimeError("a binding component may belong to only one root")
+    for name in seen:
+        if (not isinstance(name, str) or not _IDENTIFIER.fullmatch(name)
+                or name != name.lower()):
+            raise RuntimeError(f"invalid binding component name: {name!r}")
+
+
+_validate_binding_closure()
+
+
+def inventory_digest(files: Mapping[str, bytes]) -> str:
+    """Deterministic digest of an explicit ``relative path -> bytes`` inventory."""
+    if not isinstance(files, Mapping) or not files:
+        raise ValueError("an inventory digest requires a nonempty file map")
+    entries: list[list[str]] = []
+    for name, content in files.items():
+        if not isinstance(name, str) or not isinstance(content, bytes):
+            raise TypeError("inventory entries must be (str, bytes)")
+        path = PurePosixPath(name)
+        if (not name or path.is_absolute() or ".." in path.parts or "\\" in name
+                or path.as_posix() != name):
+            raise ValueError("inventory paths must be normalized relative POSIX paths")
+        entries.append([name, hashlib.sha256(content).hexdigest()])
+    entries.sort(key=lambda item: item[0])
+    return hashlib.sha256(_canonical_payload(entries)).hexdigest()
+
+
+def closure_digests(components: Mapping[str, str]) -> dict[str, str]:
+    """Derive the five v1 binding roots from the complete component closure.
+
+    Missing or extra components are rejected: a partial, candidate-selected
+    inventory must never be able to produce an accepted binding set.
+    """
+    if not isinstance(components, Mapping):
+        raise TypeError("components must be a mapping")
+    if set(components) != set(BINDING_COMPONENTS):
+        missing = sorted(set(BINDING_COMPONENTS) - set(components))
+        extra = sorted(set(components) - set(BINDING_COMPONENTS))
+        raise ValueError("closure inventory must cover exactly the declared components; "
+                         f"missing={missing} extra={extra}")
+    for name in BINDING_COMPONENTS:
+        _require_sha(components[name], field=f"binding component {name}")
+    return {
+        root: hashlib.sha256(_canonical_payload(
+            {name: components[name] for name in BINDING_CLOSURE[root]})).hexdigest()
+        for root in BINDING_NAMES
+    }
+
+
+def binding_drift(checkpoint: str, *, approved: ExpectedBindings,
+                  observed: ExpectedBindings) -> tuple[str, ...]:
+    """Re-check the approved bindings at one mandatory TOCTOU checkpoint."""
+    if checkpoint not in TOCTOU_CHECKPOINTS:
+        raise ValueError(f"checkpoint must be one of {TOCTOU_CHECKPOINTS}")
+    if not isinstance(approved, ExpectedBindings) or not isinstance(observed, ExpectedBindings):
+        raise TypeError("approved and observed must be ExpectedBindings")
+    return tuple(f"BINDING_DRIFT:{checkpoint.upper()}:{reason}"
+                 for reason in approved.mismatches(observed))
 
 
 def _load_trusted_keys(raw: bytes) -> dict[str, bytes]:
@@ -247,8 +463,16 @@ def load_execution_authorization(*, authorization_path: Path, trusted_keys_path:
                                  revocation_path: Path, repo_root: Path,
                                  expected: ExpectedBindings, approved_route: ApprovedRoute,
                                  actual_tools: tuple[str, ...], budget_scope: str,
-                                 now: datetime | None = None) -> AuthorizationDecision:
-    """Return a deny decision unless every external-human check passes."""
+                                 now: datetime | None = None,
+                                 observed: ExpectedBindings | None = None,
+                                 checkpoint: str = "pre_start"
+                                 ) -> AuthorizationDecision:
+    """Return a deny decision unless every external-human check passes.
+
+    ``expected`` is the approved binding set; ``observed`` is an optional
+    independently recomputed set. ``checkpoint`` names the TOCTOU point the
+    observation was taken at; any drift is reported and denies the decision.
+    """
     moment = now or datetime.now(timezone.utc)
     if moment.tzinfo is None:
         raise ValueError("now must be timezone-aware")
@@ -290,6 +514,7 @@ def load_execution_authorization(*, authorization_path: Path, trusted_keys_path:
     except ValueError:
         reasons.append("APPROVER_INVALID")
     issued = not_before = expires = moment
+    time_known = True
     try:
         issued = _require_utc(payload["issued_utc"], field="issued_utc")
         not_before = _require_utc(payload["not_before_utc"], field="not_before_utc")
@@ -302,6 +527,7 @@ def load_execution_authorization(*, authorization_path: Path, trusted_keys_path:
             reasons.append("AUTHORIZATION_TOO_OLD")
     except ValueError:
         reasons.append("AUTHORIZATION_TIME_INVALID")
+        time_known = False
         issued = not_before = expires = moment
 
     bindings_payload = payload["bindings"]
@@ -319,6 +545,10 @@ def load_execution_authorization(*, authorization_path: Path, trusted_keys_path:
     for name in BINDING_NAMES:
         if getattr(bindings, name) != actual_bindings[name]:
             reasons.append(f"{name.upper()}_MISMATCH")
+    if observed is not None:
+        if not isinstance(observed, ExpectedBindings):
+            raise TypeError("observed must be ExpectedBindings")
+        reasons.extend(binding_drift(checkpoint, approved=expected, observed=observed))
 
     route_payload = payload["route"]
     if not isinstance(route_payload, dict) or set(route_payload) != {"route_id", "provider",
@@ -422,13 +652,21 @@ def load_execution_authorization(*, authorization_path: Path, trusted_keys_path:
         reasons.append("AUTHORIZATION_NOT_CANONICAL")
         signed_bytes = b""
     public_key = trusted_keys.get(key_id) if isinstance(key_id, str) else None
+    signature_valid = False
     if public_key is None:
         reasons.append("UNKNOWN_APPROVAL_KEY")
-    elif not signature or not ed25519.verify(public_key, signed_bytes, signature):
-        reasons.append("HUMAN_SIGNATURE_INVALID")
+    else:
+        signature_valid = bool(signature) and ed25519.verify(public_key, signed_bytes, signature)
+        if not signature_valid:
+            reasons.append("HUMAN_SIGNATURE_INVALID")
 
     if not (not_before <= moment < expires):
         reasons.append("AUTHORIZATION_NOT_CURRENT")
+        if time_known:
+            # No clock-skew allowance: a verifier clock even slightly before
+            # not_before or at/after expiry is a deny, not a tolerance case.
+            reasons.append("AUTHORIZATION_EXPIRED" if moment >= expires
+                           else "AUTHORIZATION_NOT_YET_VALID")
     if authorization_id in revoked:
         reasons.append("AUTHORIZATION_REVOKED")
 
@@ -440,9 +678,205 @@ def load_execution_authorization(*, authorization_path: Path, trusted_keys_path:
     )
     approved = not reasons
     return AuthorizationDecision(approved, tuple(dict.fromkeys(reasons)),
-                                 authorization if approved else None)
+                                 authorization if approved else None, signature_valid)
 
 
 def require_execution_authorization(**kwargs: Any) -> ExecutionAuthorization:
     """Fail-closed convenience wrapper; no retry and no partial approval."""
     return load_execution_authorization(**kwargs).require()
+
+
+# ---------------------------------------------------------------------------
+# Budget authority: config/budgets.yaml is an agent-writable declarative mirror,
+# never the authority. The frozen constants live in code (and are bound through
+# code_sha256); this parser only makes disagreement impossible to ignore.
+# ---------------------------------------------------------------------------
+def parse_budget_policy(raw: bytes) -> dict[str, str]:
+    """Parse the frozen flat M0 budget file with no YAML coercion or ambiguity."""
+    if not isinstance(raw, bytes) or not raw:
+        raise ValueError("budget policy is empty")
+    if len(raw) > MAX_BUDGET_POLICY_BYTES:
+        raise ValueError("budget policy is too large")
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError as error:
+        raise ValueError("budget policy is not UTF-8") from error
+    policy: dict[str, str] = {}
+    for number, line in enumerate(text.splitlines(), start=1):
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if "\t" in line:
+            raise ValueError(f"budget policy line {number} contains a tab")
+        key, separator, value = line.partition(":")
+        if not separator:
+            raise ValueError(f"budget policy line {number} is not a key/value entry")
+        key, value = key.strip(), value.strip()
+        if not _POLICY_KEY.fullmatch(key):
+            raise ValueError(f"budget policy line {number} has an invalid key")
+        if key not in BUDGET_POLICY_KEYS:
+            raise ValueError(f"budget policy has an unknown field: {key}")
+        if key in policy:
+            raise ValueError(f"budget policy repeats {key}")
+        if not _POLICY_SCALAR.fullmatch(value):
+            raise ValueError(f"budget policy value for {key} is not a plain scalar")
+        policy[key] = value
+    missing = [key for key in BUDGET_POLICY_KEYS if key not in policy]
+    if missing:
+        raise ValueError("budget policy is missing fields: " + ",".join(missing))
+    return policy
+
+
+_NUMERIC_POLICY_FIELDS = (
+    "soft_total_usd",
+    "hard_total_usd",
+    "soft_call_usd",
+    "hard_call_usd",
+    "max_live_requests",
+    "max_steps_per_task",
+    "max_retries_per_task",
+    "max_input_tokens",
+    "max_output_tokens",
+)
+
+
+def budget_policy_drift_reasons(policy: Mapping[str, str], *, expected: BudgetLimits,
+                                soft_call_cap_usd: Decimal,
+                                soft_total_cap_usd: Decimal) -> tuple[str, ...]:
+    """Compare the declarative budget file to the frozen constants; never ignore drift."""
+    reasons: list[str] = []
+    numeric: dict[str, Decimal] = {}
+    for key in _NUMERIC_POLICY_FIELDS:
+        value = policy.get(key)
+        pattern = _POLICY_INTEGER if key.startswith("max_") else _POLICY_NUMBER
+        if not isinstance(value, str) or not pattern.fullmatch(value):
+            reasons.append(f"BUDGET_POLICY_VALUE_INVALID:{key}")
+            continue
+        numeric[key] = Decimal(value)
+    comparisons = (
+        ("hard_call_usd", expected.per_call_cap_usd),
+        ("hard_total_usd", expected.total_cap_usd),
+        ("max_live_requests", Decimal(expected.max_calls)),
+        ("soft_call_usd", soft_call_cap_usd),
+        ("soft_total_usd", soft_total_cap_usd),
+    )
+    for key, frozen in comparisons:
+        if key in numeric and numeric[key] != frozen:
+            reasons.append(f"BUDGET_POLICY_DRIFT:{key}")
+    snapshot = policy.get("live_pricing_snapshot")
+    if snapshot == UNVERIFIED_PRICE_SNAPSHOT:
+        reasons.append("LIVE_PRICING_SNAPSHOT_UNVERIFIED")
+    else:
+        # G4-A cannot verify any price source; claiming one is itself a denial.
+        reasons.append("BUDGET_POLICY_PRICE_SNAPSHOT_UNSUPPORTED")
+    return tuple(dict.fromkeys(reasons))
+
+
+# ---------------------------------------------------------------------------
+# Single-use authorization contract (replay / run-epoch)
+# ---------------------------------------------------------------------------
+@dataclass(frozen=True)
+class AuthorizationUse:
+    authorization_id: str
+    run_epoch: str
+    consumed_utc: str
+    record_path: Path
+
+
+def _read_use_record(path: Path) -> str:
+    if path.is_symlink():
+        raise AuthorizationRejected(("AUTHORIZATION_USE_RECORD_INVALID",))
+    try:
+        info = path.stat()
+    except OSError:
+        raise AuthorizationRejected(("AUTHORIZATION_USE_RECORD_UNREADABLE",)) from None
+    if not S_ISREG(info.st_mode) or not 0 < info.st_size <= MAX_USE_RECORD_BYTES:
+        raise AuthorizationRejected(("AUTHORIZATION_USE_RECORD_INVALID",))
+    try:
+        raw = path.read_bytes()
+    except OSError:
+        raise AuthorizationRejected(("AUTHORIZATION_USE_RECORD_UNREADABLE",)) from None
+    try:
+        parsed = _parse_json_object(raw, label="authorization use record")
+    except ValueError:
+        raise AuthorizationRejected(("AUTHORIZATION_USE_RECORD_INVALID",)) from None
+    epoch = parsed.get("run_epoch")
+    if (set(parsed) != {"schema", "authorization_id", "run_epoch", "consumed_utc"}
+            or parsed.get("schema") != _USE_LOG_SCHEMA
+            or not isinstance(epoch, str) or not _IDENTIFIER.fullmatch(epoch)):
+        raise AuthorizationRejected(("AUTHORIZATION_USE_RECORD_INVALID",))
+    return epoch
+
+
+def _replay_reason(previous_epoch: str, run_epoch: str) -> str:
+    return ("AUTHORIZATION_EPOCH_MISMATCH" if previous_epoch != run_epoch
+            else "AUTHORIZATION_REPLAYED")
+
+
+def consume_execution_authorization(*, use_log_dir: Path, run_epoch: str,
+                                    now: datetime | None = None,
+                                    checkpoint: str = "pre_reserve",
+                                    **load_kwargs: Any) -> AuthorizationUse:
+    """Consume the single use of an authorization at the pre-Reserve checkpoint.
+
+    The full offline verification is repeated here (files, pinned keys,
+    revocation, bindings, time window) and only an accepted decision may create
+    one immutable use record. The record is created with ``O_CREAT|O_EXCL`` so
+    two concurrent admissions cannot both consume the same authorization; a
+    later run must present a newly signed authorization id, never reuse this one.
+    """
+    moment = now or datetime.now(timezone.utc)
+    if moment.tzinfo is None:
+        raise ValueError("now must be timezone-aware")
+    if not isinstance(run_epoch, str) or not _IDENTIFIER.fullmatch(run_epoch):
+        raise AuthorizationRejected(("RUN_EPOCH_INVALID",))
+    repo_root = load_kwargs.get("repo_root")
+    if not isinstance(repo_root, Path):
+        raise AuthorizationRejected(("AUTHORIZATION_USE_LOG_INVALID:missing repo root",))
+    decision = load_execution_authorization(now=moment, checkpoint=checkpoint,
+                                            **load_kwargs)
+    authorization = decision.require()
+    if not (authorization.not_before_utc <= moment < authorization.expires_utc):
+        raise AuthorizationRejected(("AUTHORIZATION_NOT_CURRENT",))
+    try:
+        directory = _trusted_directory(use_log_dir, repo_root=repo_root,
+                                       label="authorization use log")
+    except ValueError as error:
+        raise AuthorizationRejected((f"AUTHORIZATION_USE_LOG_INVALID:{error}",)) from None
+    record_path = directory / (hashlib.sha256(
+        authorization.authorization_id.encode("ascii")).hexdigest() + ".json")
+    if record_path.exists() or record_path.is_symlink():
+        raise AuthorizationRejected((_replay_reason(_read_use_record(record_path),
+                                                    run_epoch),))
+    try:
+        entries = sum(1 for _ in directory.iterdir())
+    except OSError:
+        raise AuthorizationRejected(("AUTHORIZATION_USE_LOG_UNREADABLE",)) from None
+    if entries >= MAX_AUTHORIZATION_USES:
+        raise AuthorizationRejected(("AUTHORIZATION_USE_LOG_FULL",))
+    consumed = moment.strftime("%Y-%m-%dT%H:%M:%SZ")
+    body = _canonical_payload({
+        "schema": _USE_LOG_SCHEMA,
+        "authorization_id": authorization.authorization_id,
+        "run_epoch": run_epoch,
+        "consumed_utc": consumed,
+    })
+    try:
+        descriptor = os.open(record_path,
+                             os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW
+                             | os.O_CLOEXEC, 0o600)
+    except FileExistsError:
+        raise AuthorizationRejected((_replay_reason(_read_use_record(record_path),
+                                                    run_epoch),)) from None
+    except OSError:
+        raise AuthorizationRejected(("AUTHORIZATION_USE_LOG_WRITE_FAILED",)) from None
+    try:
+        written = 0
+        while written < len(body):
+            written += os.write(descriptor, body[written:])
+        os.fsync(descriptor)
+    except OSError:
+        raise AuthorizationRejected(("AUTHORIZATION_USE_LOG_WRITE_FAILED",)) from None
+    finally:
+        os.close(descriptor)
+    return AuthorizationUse(authorization.authorization_id, run_epoch, consumed, record_path)

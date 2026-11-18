@@ -14,6 +14,7 @@ from __future__ import annotations
 import hashlib
 
 _BITS = 256
+_BYTES_TYPES = (bytes, bytearray, memoryview)
 _Q = 2**255 - 19
 _L = 2**252 + 27742317777372353535851937790883648493
 
@@ -104,13 +105,23 @@ def _in_prime_order_subgroup(point: tuple[int, int]) -> bool:
     return _scalar_mult(point, _L) == _IDENTITY
 
 
+def _as_bytes(value: object) -> bytes | None:
+    """Normalize bytes-like input; anything else is rejected, never coerced."""
+    if isinstance(value, bytes):
+        return value
+    if isinstance(value, _BYTES_TYPES):
+        return bytes(value)
+    return None
+
+
 def is_valid_public_key(public: bytes) -> bool:
     """True only for canonical, non-small-order, prime-order Ed25519 public keys."""
-    if len(public) != 32:
+    encoded = _as_bytes(public)
+    if encoded is None or len(encoded) != 32:
         return False
     try:
-        point = _decode_point(public)
-    except ValueError:
+        point = _decode_point(encoded)
+    except (ValueError, TypeError):
         return False
     if _is_small_order(point):
         return False
@@ -153,16 +164,25 @@ def sign(message: bytes, seed: bytes) -> bytes:
 
 
 def verify(public: bytes, message: bytes, signature: bytes) -> bool:
-    """Return True only for a valid RFC 8032 signature; malformed input is False."""
-    if len(public) != 32 or len(signature) != 64:
+    """Return True only for a valid RFC 8032 signature; malformed input is False.
+
+    Every rejection is a plain ``False``: non-bytes input, wrong lengths, bad
+    point decoding, non-canonical encodings, small-order/torsion points and
+    out-of-range scalars never raise out of this function.
+    """
+    public_bytes = _as_bytes(public)
+    message_bytes = _as_bytes(message)
+    signature_bytes = _as_bytes(signature)
+    if (public_bytes is None or message_bytes is None or signature_bytes is None
+            or len(public_bytes) != 32 or len(signature_bytes) != 64):
         return False
     try:
-        point_r = _decode_point(signature[:32])
-        response = int.from_bytes(signature[32:], "little")
+        point_r = _decode_point(signature_bytes[:32])
+        response = int.from_bytes(signature_bytes[32:], "little")
         if response >= _L:
             return False
-        point_a = _decode_point(public)
-    except ValueError:
+        point_a = _decode_point(public_bytes)
+    except (ValueError, TypeError):
         return False
     # Strict Ed25519: both signature R and public A must be canonical,
     # non-small-order and in the prime-order subgroup.
@@ -170,5 +190,5 @@ def verify(public: bytes, message: bytes, signature: bytes) -> bool:
         return False
     if _is_small_order(point_a) or not _in_prime_order_subgroup(point_a):
         return False
-    challenge = _hash_int(signature[:32] + public + message)
+    challenge = _hash_int(signature_bytes[:32] + public_bytes + message_bytes)
     return _scalar_mult(_B, response) == _edwards_add(point_r, _scalar_mult(point_a, challenge))
