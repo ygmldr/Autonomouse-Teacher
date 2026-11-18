@@ -604,7 +604,6 @@ def build_regressions(out: Path) -> None:
         "junit-host-filtered.xml", "junit-oci-full.xml",
         "junit-oci-filtered.xml", "junit-oci-root.xml",
         "junit-host-d15-conda.xml", "module_identity_probe.py",
-        "livegate_negatives.py",
     ]
     for name in names:
         src = ARTIFACTS / "g4/e/regression" / name
