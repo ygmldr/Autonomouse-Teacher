@@ -218,11 +218,12 @@ class ExternalWatchdogRunner:
         def apply() -> None:
             for name, value in limits:
                 which = RLIMITS[name]
-                current = resource.getrlimit(which)
-                hard = (resource.RLIM_INFINITY if current[1] == resource.RLIM_INFINITY
-                        else current[1])
-                soft = min(value, hard)
-                resource.setrlimit(which, (soft, hard))
+                soft_now, hard_now = resource.getrlimit(which)
+                if hard_now == resource.RLIM_INFINITY:
+                    soft = value
+                else:
+                    soft = min(value, hard_now)
+                resource.setrlimit(which, (soft, hard_now))
 
         return apply
 

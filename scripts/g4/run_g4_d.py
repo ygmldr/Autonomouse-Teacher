@@ -314,8 +314,8 @@ def case_d09(stage: Path) -> dict:
             "probe": "SIGXCPU/SIGKILL within the RLIMIT_CPU bound",
         },
         "as": {
-            "rlimit": "as:268435456",
-            "code": ("try:\n    block = bytearray(400 * 1024 * 1024)\n"
+            "rlimit": "as:536870912",
+            "code": ("try:\n    block = bytearray(1536 * 1024 * 1024)\n"
                      "except MemoryError:\n    raise SystemExit(1)\n"),
             "exit_ok": "0,1", "deadline": "20",
             "probe": "MemoryError before anonymous memory exceeds RLIMIT_AS",
