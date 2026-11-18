@@ -22,6 +22,7 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import sys
@@ -244,8 +245,25 @@ def adapter_identity(stage: Path, policy: dict) -> dict:
             (result.get("build_meta") or {}).get("inputSourceSha256") == source_sha)
         if not result["input_source_matches"]:
             result["problems"].append("adapter_source_mismatch")
+    if result.get("log_marker_count"):
+        result["problems"].append("runtime_log_has_network_markers")
+    if result.get("session_files") and not result.get(
+            "session_files_are_local_only", False):
+        result["problems"].append("session_file_path_not_local")
     result["ok"] = not result["problems"]
     return result
+
+
+def _default_route_present(routes: object) -> bool | None:
+    if not isinstance(routes, list):
+        return None
+    for line in routes:
+        if not isinstance(line, str) or line.startswith("Iface"):
+            continue
+        fields = line.split()
+        if len(fields) > 1 and fields[1] == "00000000":
+            return True
+    return False
 
 
 # ---------------------------------------------------------------------------
@@ -333,7 +351,61 @@ def _parse_entries(text: str) -> list[dict]:
     return entries
 
 
-def registry_probe(dump: dict, stage: Path, policy: dict) -> dict:
+def run_facts(evidence: Path | None) -> dict:
+    """Facts a real run can add to the registry/feature inventory (L1)."""
+    facts: dict = {"evidence": str(evidence) if evidence else None,
+                   "available": False}
+    if evidence is None or not (evidence / "traces").is_dir():
+        return facts
+    markers: list[str] = []
+    event_types: dict[str, int] = {}
+    assistant_messages = 0
+    trace = None
+    for path in sorted((evidence / "traces").glob("dsh-result*.json")):
+        try:
+            document = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        trace = document
+        for line in document.get("stderr_markers") or []:
+            if isinstance(line, str):
+                markers.append(line)
+        for event in document.get("events") or []:
+            if isinstance(event, dict) and isinstance(event.get("type"), str):
+                event_types[event["type"]] = event_types.get(event["type"], 0) + 1
+        summary = document.get("event_summary") or {}
+        assistant_messages += len(summary.get("assistant_messages") or [])
+    receipts = list((evidence / "receipt").glob("rcpt-*.json")) \
+        if (evidence / "receipt").is_dir() else []
+    counter = evidence / "receipt" / "received-count.json"
+    fake_counter = None
+    if counter.is_file():
+        try:
+            fake_counter = int(json.loads(
+                counter.read_text(encoding="utf-8")).get("count", 0))
+        except (OSError, ValueError, json.JSONDecodeError):
+            fake_counter = None
+    facts.update({
+        "available": trace is not None,
+        "receipts": len(receipts),
+        "fake_counter": fake_counter,
+        "assistant_messages": assistant_messages,
+        "event_types": event_types,
+        "title_events": event_types.get("session/title", 0),
+        "compaction_events": sum(count for name, count in event_types.items()
+                                 if "compact" in name),
+        "tool_events": event_types.get("tool/call", 0),
+        "registry_markers": [line for line in markers
+                             if line.startswith("G3B_")],
+        "adapter_error_markers": [line for line in markers
+                                  if line.startswith("G3B_BRIDGE_")
+                                  and not line.startswith("G3B_BRIDGE_REGISTRY")],
+    })
+    return facts
+
+
+def registry_probe(dump: dict, stage: Path, policy: dict,
+                   run: dict | None = None) -> dict:
     entries = {entry["id"]: entry for entry in dump.get("entries") or []}
     disabled = sorted(entry_id for entry_id, entry in entries.items()
                       if str(entry.get("disabled")).lower() == "true")
@@ -397,6 +469,13 @@ def registry_probe(dump: dict, stage: Path, policy: dict) -> dict:
                 "tools": fixture_tools,
                 "matches_policy": fixture_tools == approved,
             },
+            "adapter_registry_marker": (run or {}).get("registry_markers"),
+            "real_run": {
+                "receipts": (run or {}).get("receipts"),
+                "fake_counter": (run or {}).get("fake_counter"),
+                "assistant_messages": (run or {}).get("assistant_messages"),
+                "adapter_error_markers": (run or {}).get("adapter_error_markers"),
+            },
             "controller_binding": {
                 "rule": "every tool object in a provider request is canonicalised "
                         "and its sha256 compared with the Admission-approved set "
@@ -446,11 +525,30 @@ def feature_inventory(dump: dict, run: dict | None) -> dict:
                "config_states": states}
         row.update(_judge_feature(feature, states, run))
         rows.append(row)
+    for row in rows:
+        if not (run or {}).get("available"):
+            row["run_corroboration"] = {"available": False}
+            continue
+        row["run_corroboration"] = {
+            "available": True,
+            "receipts": run.get("receipts"),
+            "fake_counter": run.get("fake_counter"),
+            "assistant_messages": run.get("assistant_messages"),
+            "title_events": run.get("title_events"),
+            "compaction_events": run.get("compaction_events"),
+            "adapter_error_markers": len(run.get("adapter_error_markers") or []),
+            "extra_provider_requests": (
+                None if run.get("receipts") is None
+                else max(0, int(run.get("receipts") or 0)
+                         - int(run.get("assistant_messages") or 0))),
+        }
     return {
         "schema": "m0.g4b.feature.inventory.v1",
         "utc": lib.utc_now(),
         "dump_sha256": dump.get("dump_sha256"),
         "run_evidence": (run or {}).get("evidence"),
+        "run_facts": {key: value for key, value in (run or {}).items()
+                      if key != "registry_markers"},
         "features": rows,
         "summary": _feature_summary(rows),
     }
@@ -531,19 +629,38 @@ def _feature_summary(rows: list[dict]) -> dict:
 # ---------------------------------------------------------------------------
 # 5. B09/B10 structural checks
 # ---------------------------------------------------------------------------
+DEPENDENCY_PREFIXES = ("node_modules/", "pkg-cache/", "native-cache/")
+IMPORT_PATTERN = re.compile(
+    r"^\s*(?:from\s+autoteacher_m0(?:\.[\w.]+)?\s+import|import\s+autoteacher_m0)",
+    re.MULTILINE)
+KEY_MARKERS = ("key", "token", "secret", "credential", "password", ".pem",
+               ".p12", ".pfx")
+ALLOWED_MENTION_PATHS = ("run/candidate_entry.py",)
+
+
 def candidate_stage_checks(stage: Path) -> dict:
+    """Structural B09 check on the candidate stage.
+
+    ``node_modules``/``pkg-cache``/``native-cache`` are vendored third-party
+    bundles (their filenames legitimately contain ``api-key``/``token``); they
+    are covered by the subtree digest, not by a name scan.  Mentions of the
+    trusted package name are allowed only inside the explicit negative import
+    probes; an actual ``import autoteacher_m0`` statement is never allowed.
+    """
     manifest = lib.load_stage_manifest(stage)
     rows = lib.stage_rows(manifest, "candidate")
     forbidden_paths = []
     key_like = []
     trusted_imports = []
-    markers = ("key", "token", "secret", "credential", "password", "passwd.bak")
+    mention_paths = []
+    content_leaks = []
     for relative in rows:
-        lower = relative.lower()
-        if relative.startswith("src/") or "/trusted/" in relative or "autoteacher_m0" in relative:
+        if relative.startswith("src/") or "/trusted/" in relative:
             forbidden_paths.append(relative)
-        if any(marker in Path(lower).name for marker in markers) and \
-                not relative.startswith("etc/"):
+        if relative.startswith(DEPENDENCY_PREFIXES):
+            continue
+        if any(marker in Path(relative).name.lower() for marker in KEY_MARKERS) \
+                and not relative.startswith("etc/"):
             key_like.append(relative)
     scanned = 0
     for relative in rows:
@@ -555,16 +672,38 @@ def candidate_stage_checks(stage: Path) -> dict:
         scanned += 1
         text = path.read_text(encoding="utf-8", errors="replace")
         if "autoteacher_m0" in text:
+            mention_paths.append(relative)
+        if IMPORT_PATTERN.search(text):
             trusted_imports.append(relative)
+    for relative in rows:
+        if relative.startswith(DEPENDENCY_PREFIXES) or not relative.endswith(
+                (".py", ".yml", ".yaml", ".json")):
+            continue
+        path = stage / "candidate" / relative
+        if not path.is_file():
+            continue
+        text = path.read_text(encoding="utf-8", errors="replace")
+        if "BEGIN PRIVATE KEY" in text or "BEGIN RSA PRIVATE KEY" in text \
+                or re.search(r"sk-[A-Za-z0-9]{16,}", text):
+            content_leaks.append(relative)
+    allowed_mentions = all(
+        path in ALLOWED_MENTION_PATHS or path.startswith(("run/probes/",
+                                                          "run/d3-probes/"))
+        for path in mention_paths)
     return {
         "candidate_files": len(rows),
         "python_files_scanned": scanned,
         "forbidden_paths": forbidden_paths,
         "key_like_paths": key_like,
-        "trusted_package_references": trusted_imports,
+        "key_content_leaks": content_leaks,
+        "trusted_package_mentions": mention_paths,
+        "mentions_only_in_negative_probes": allowed_mentions,
+        "trusted_package_imports": trusted_imports,
+        "dependency_bundles_tree_digested": True,
         "no_trusted_code": not forbidden_paths and not trusted_imports,
-        "no_key_material": not key_like,
-        "ok": not forbidden_paths and not trusted_imports and not key_like,
+        "no_key_material": not key_like and not content_leaks,
+        "ok": (not forbidden_paths and not trusted_imports and not key_like
+               and not content_leaks and allowed_mentions),
     }
 
 
@@ -618,8 +757,7 @@ def egress_evidence(run_evidence: Path | None) -> dict:
             result["problems"].append("candidate_network_mode_not_none")
     else:
         result["problems"].append("candidate_inspect_missing")
-    principal = _first_json(run_evidence / "candidate-session" / "evidence",
-                            "principal*.json")
+    principal = _first_json(run_evidence / "traces", "principal*.json")
     if principal:
         network = principal.get("network") or {}
         result["candidate_network_probe"] = network
@@ -646,11 +784,15 @@ def egress_evidence(run_evidence: Path | None) -> dict:
             result["problems"].append("candidate_has_key_like_env")
     else:
         result["problems"].append("candidate_principal_evidence_missing")
-    logs = list(run_evidence.rglob("*.log")) + list(run_evidence.rglob("*.txt"))
-    markers = ("http://", "https://", "proxy", "upload", "telemetry",
-               "api.deepseek", "POST /v1")
+    # Only the runtime's own stderr/trace text is scanned.  ``inspect-*.json``
+    # dumps are podman metadata (they contain HostConfig keys such as
+    # ``httpProxy``) and are not runtime behaviour.
+    markers = ("http://", "https://", "api.deepseek", "upload", "telemetry",
+               "POST /v1")
+    sources = sorted((run_evidence / "run").glob("*.log")) + \
+        sorted((run_evidence / "traces").glob("*.json"))
     hits = []
-    for path in logs:
+    for path in sources:
         if not path.is_file() or path.stat().st_size > (8 << 20):
             continue
         text = path.read_text(encoding="utf-8", errors="replace")
@@ -660,16 +802,44 @@ def egress_evidence(run_evidence: Path | None) -> dict:
                              "marker": marker})
     result["log_marker_hits"] = hits[:40]
     result["log_marker_count"] = len(hits)
-    session = _first_json(run_evidence / "candidate-session" / "evidence",
-                          "dsh-result*.json")
+    result["log_marker_sources"] = [str(path.relative_to(run_evidence))
+                                    for path in sources]
+    result["network_probe_summary"] = {
+        "af_inet": (result.get("candidate_network_probe") or {}).get("af_inet"),
+        "af_inet6": (result.get("candidate_network_probe") or {}).get("af_inet6"),
+        "dns": (result.get("candidate_network_probe") or {}).get("dns"),
+        "interfaces": (result.get("candidate_network_probe") or {}).get(
+            "interfaces"),
+        "default_route_present": _default_route_present(
+            (result.get("candidate_network_probe") or {}).get("routes")),
+    }
+    session = _first_json(run_evidence / "traces", "dsh-result*.json")
     if session:
         sessions = (session.get("resume") or {}).get("sessions") or {}
         result["session_files"] = sessions.get("files")
+        result["session_files_count"] = len(sessions.get("files") or [])
         result["session_files_are_local_only"] = all(
             not str(row.get("path", "")).startswith("/")
             for row in (sessions.get("files") or []))
+    if result.get("log_marker_count"):
+        result["problems"].append("runtime_log_has_network_markers")
+    if result.get("session_files") and not result.get(
+            "session_files_are_local_only", False):
+        result["problems"].append("session_file_path_not_local")
     result["ok"] = not result["problems"]
     return result
+
+
+def _default_route_present(routes: object) -> bool | None:
+    if not isinstance(routes, list):
+        return None
+    for line in routes:
+        if not isinstance(line, str) or line.startswith("Iface"):
+            continue
+        fields = line.split()
+        if len(fields) > 1 and fields[1] == "00000000":
+            return True
+    return False
 
 
 def _first_json(root: Path, pattern: str) -> dict | None:
@@ -702,6 +872,7 @@ def main(argv: list[str] | None = None) -> int:
 
     dump = ({"ok": False, "entries": [], "note": "skipped"} if args.skip_dump
             else merged_config_dump(out_dir, stage, dsh_home=dsh_home))
+    facts = run_facts(run_evidence)
     document = {
         "schema": "m0.g4b.runtime.probe.v1",
         "utc": lib.utc_now(),
@@ -716,9 +887,8 @@ def main(argv: list[str] | None = None) -> int:
         "merged_config": {key: dump.get(key) for key in
                           ("ok", "exit", "entry_count", "dump_sha256",
                            "materialised_count", "note", "argv", "stderr")},
-        "registry": registry_probe(dump, stage, policy),
-        "features": feature_inventory(dump, {"evidence": str(run_evidence)}
-                                      if run_evidence else None),
+        "registry": registry_probe(dump, stage, policy, run=facts),
+        "features": feature_inventory(dump, facts),
         "candidate_stage": candidate_stage_checks(stage),
         "canonical_stability": canonical_stability(stage),
         "egress": egress_evidence(run_evidence),

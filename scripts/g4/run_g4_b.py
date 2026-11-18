@@ -305,7 +305,6 @@ def analyse_tool_evidence(evidence: Path, run_id: str) -> dict:
                                    evidence / "state-snapshot", "final")
     receipts_rows = receipts(receipt_dir)
     module_evidence = evidence / "peercred" / "trusted-modules.json"
-    candidate_log = evidence / "run" / "candidate.log"
     result["ledger"] = {
         "reservations": snapshot.get("reservations"),
         "claims": snapshot.get("claims"),
