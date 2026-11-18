@@ -320,8 +320,9 @@ def analyse_tool_evidence(evidence: Path, run_id: str) -> dict:
     two_cycle = _two_cycle(result["ledger"], receipts_rows)
     result["two_cycle"] = two_cycle
     result["container_modules"] = _module_rows(module_evidence)
-    markers = _candidate_markers(candidate_log)
+    markers, marker_sources = _marker_lines(evidence)
     result["candidate_markers"] = markers
+    result["marker_sources"] = marker_sources
     result["registry_markers"] = markers.get("G3B_BRIDGE_REGISTRY")
     if len(two_cycle["cycles"]) != 2:
         result["problems"].append(f"expected_2_cycles_got_{len(two_cycle['cycles'])}")
@@ -340,7 +341,8 @@ def _two_cycle(ledger: dict, receipts_rows: list[dict]) -> dict:
     attempts = sorted(ledger.get("attempts") or [],
                       key=lambda row: int(row.get("logical_step") or 0))
     claims = {(row.get("call_id")): row for row in ledger.get("claims") or []}
-    received = {row.get("nonce"): row for row in receipts_rows}
+    # join on receipt_id: the Fake receipt's ``nonce`` is the send nonce, not a id
+    received = {row.get("receipt_id"): row for row in receipts_rows}
     cycles = []
     for attempt in attempts:
         claim = claims.get(attempt.get("call_id")) or {}
@@ -407,17 +409,46 @@ def _module_rows(path: Path) -> dict:
             "count": len(rows), "rows": rows}
 
 
-def _candidate_markers(log_path: Path) -> dict:
+MARKER_PREFIXES = ("G3B_", "G3C_", "G3D_", "ADMISSION", "CANDIDATE_")
+
+
+def _marker_lines(evidence: Path) -> tuple[dict, list[str]]:
+    """Collect the adapter/runtime self-report lines from the real run.
+
+    The candidate container's stderr is not always part of ``candidate.log``;
+    the SDK trace (``traces/dsh-result*.json``) stores the filtered
+    ``stderr_markers`` list.  Both sources are read and the source is recorded.
+    """
     markers: dict[str, list[str]] = {}
-    if not log_path.is_file():
-        return markers
-    for line in log_path.read_text(encoding="utf-8", errors="replace").splitlines():
-        for prefix in ("G3B_", "G3C_", "G3D_", "ADMISSION", "CANDIDATE_"):
+    sources: list[str] = []
+
+    def add(line: str) -> None:
+        for prefix in MARKER_PREFIXES:
             if line.startswith(prefix):
-                key = line.split(" ", 1)[0]
-                markers.setdefault(key, []).append(line[:400])
-                break
-    return markers
+                markers.setdefault(line.split(" ", 1)[0], []).append(line[:400])
+                return
+
+    log_path = evidence / "run" / "candidate.log"
+    if log_path.is_file():
+        sources.append("run/candidate.log")
+        for line in log_path.read_text(encoding="utf-8",
+                                       errors="replace").splitlines():
+            add(line)
+    traces = evidence / "traces"
+    if traces.is_dir():
+        for path in sorted(traces.glob("*.json")):
+            try:
+                document = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                continue
+            lines = document.get("stderr_markers") if isinstance(document, dict) else None
+            if not isinstance(lines, list):
+                continue
+            sources.append(f"traces/{path.name}")
+            for line in lines:
+                if isinstance(line, str):
+                    add(line)
+    return markers, sorted(set(sources))
 
 
 # ---------------------------------------------------------------------------
