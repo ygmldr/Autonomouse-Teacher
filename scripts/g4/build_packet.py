@@ -1000,7 +1000,7 @@ builder; copy them to a temporary directory before reading.
     hits = secret_scan([path for path in out.rglob("*") if path.is_file()], out)
     total_bytes = sum(path.stat().st_size for path in out.rglob("*")
                       if path.is_file())
-    packet_file_count = sum(1 for path in out.rglob("*") if path.is_file())
+    packet_file_count = len(rows) + 3  # payload + manifest + hashes + report
     report = f"""G4 review packet integrity report
 packet={out.name}
 created_utc={created}
