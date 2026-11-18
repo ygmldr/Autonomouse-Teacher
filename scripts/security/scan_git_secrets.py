@@ -13,6 +13,7 @@ hosted secret-scanning service.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -28,6 +29,20 @@ PLACEHOLDER_MARKERS = (
     "fake", "invented", "livefake", "example", "placeholder", "dummy",
     "sample", "redacted", "changeme", "your_", "your-", "xxxx", "todo",
     "none", "null", "not-a-real", "notreal",
+)
+
+# Explicit test-only sentinels for env-secret assignments.
+#
+# This exception is intentionally narrow: it applies only to the value side of
+# the env-assignment regexes below, only at the start of the value, and only for
+# obvious synthetic markers. It must not be reused for raw sk-/AWS/GCP/GitHub/
+# PEM/JWT matches. Only obvious test sentinels are allowed here; every other
+# non-empty value -- including random or real-looking 32+ character values --
+# is still reported.
+ENV_SENTINEL_PREFIXES = (
+    "sentinel", "test_only", "test-only", "testonly", "fake", "placeholder",
+    "example", "not_a_real", "not-a-real", "notareal", "invalid", "dummy",
+    "mock", "sample",
 )
 
 OPENAI_RE = re.compile(
@@ -50,8 +65,20 @@ PEM_RE = re.compile(
 BEARER_RE = re.compile(
     r"(?i)\bAuthorization\s*:\s*Bearer\s+([A-Za-z0-9._~+/=-]{20,})"
 )
+# Environment-key assignments for known provider credentials. The explicit
+# synthetic-sentinel exception is applied at the shared env-assignment sites
+# below; raw sk-/AWS/GCP/GitHub/PEM/JWT matches are not affected.
+KNOWN_ENV_NAMES = {"DEEPSEEK_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY"}
 ENV_RE = re.compile(
     r"(?i)\b(DEEPSEEK_API_KEY|OPENAI_API_KEY|ANTHROPIC_API_KEY)\b\s*[:=]\s*[\"']?([^\s\"'#]{6,})"
+)
+# Generic env-secret assignment names. Only 32+ character values are considered
+# here, so a plausible random/real secret is covered while short benign values
+# (for example a type annotation such as ``TOKEN: string``) are not flagged.
+# The same explicit test-sentinel allowlist applies.
+GENERIC_ENV_RE = re.compile(
+    r"\b((?:[A-Z][A-Z0-9_]*_)?(?:API_KEY|ACCESS_KEY|SECRET_KEY|PRIVATE_KEY|TOKEN|"
+    r"SECRET|PASSWORD|PASSWD|CREDENTIALS?))\b\s*[:=]\s*[\"']?([^\s\"'#]{32,})"
 )
 DB_URL_RE = re.compile(
     r"(?i)\b(?:postgres(?:ql)?|mysql|mongodb(?:\+srv)?|redis|amqp)://([^/\s:@]+):([^@\s]{3,})@"
@@ -85,6 +112,12 @@ def _is_placeholder(value: str) -> bool:
     if "..." in low or "***" in low or low.startswith("abc"):
         return True
     return False
+
+
+def _is_env_test_sentinel(value: str) -> bool:
+    """True only for an explicit synthetic sentinel env-assignment value."""
+    candidate = value.strip().strip("\"'`").lower()
+    return candidate.startswith(ENV_SENTINEL_PREFIXES)
 
 
 def _mask(value: str, prefix: int = 6) -> str:
@@ -138,9 +171,17 @@ def _scan_text(text: str, path: str, source: str, commit: str = "") -> list[Find
                 findings.append(Finding("bearer-token", source, path, line_no, _mask(token), commit))
         for match in ENV_RE.finditer(line):
             value = match.group(2).strip().strip("\"'")
-            if not _is_placeholder(value):
+            if not _is_placeholder(value) and not _is_env_test_sentinel(value):
                 findings.append(Finding("env-key-assignment", source, path, line_no,
                                          f"{match.group(1).upper()}={_mask(value)}", commit))
+        for match in GENERIC_ENV_RE.finditer(line):
+            name = match.group(1).upper()
+            if name in KNOWN_ENV_NAMES:
+                continue
+            value = match.group(2).strip().strip("\"'")
+            if not _is_placeholder(value) and not _is_env_test_sentinel(value):
+                findings.append(Finding("env-key-assignment", source, path, line_no,
+                                         f"{name}={_mask(value)}", commit))
         for match in DB_URL_RE.finditer(line):
             password = match.group(2)
             if not _is_placeholder(password):
@@ -280,6 +321,9 @@ def scan(root: Path, *, include_history: bool = True) -> tuple[list[Finding], di
 def self_test() -> int:
     temp = tempfile.mkdtemp(prefix="secret-scan-selftest-")
     failures: list[str] = []
+    # Synthetic high-entropy look-alike: it must still be reported, proving that
+    # the sentinel allowlist does not suppress arbitrary values. Not a credential.
+    high_entropy = hashlib.sha256(b"secret-scanner-selftest-not-a-credential").hexdigest()
     fake_openai = "sk-" + "A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6"
     fake_aws = "AKIA" + "ABCDEFGHIJKLMNOP"
     fake_gcp = "AIza" + "A" * 35
@@ -287,6 +331,7 @@ def self_test() -> int:
     fake_github = "ghp_" + "a" * 36
     fake_pem = "-----BEGIN " + "RSA PRIVATE KEY" + "-----"
     fake_jwt = "eyJ" + "a" * 20 + "." + "b" * 20 + "." + "c" * 20
+    # Real key shapes and synthetic look-alikes must still be detected.
     cases = [
         (fake_openai, "openai-key"),
         (fake_aws, "aws-access-key"),
@@ -297,6 +342,10 @@ def self_test() -> int:
         (fake_jwt, "jwt"),
         ("Authorization: Bearer " + "Z" * 40, "bearer-token"),
         ("OPENAI_API_KEY=" + fake_openai, "env-key-assignment"),
+        ("DEEPSEEK_API_KEY=" + high_entropy, "env-key-assignment"),
+        ("MY_SERVICE_TOKEN=" + high_entropy, "env-key-assignment"),
+        ("TOKEN=" + high_entropy, "env-key-assignment"),
+        ("DEEPSEEK_API_KEY=" + "ZzSENTINEL" + "A" * 24, "env-key-assignment"),
         ("postgresql://user:" + "S3cret" + "Pass@db.example/x", "db-url-password"),
     ]
     for index, (text, expected) in enumerate(cases):
@@ -309,6 +358,24 @@ def self_test() -> int:
     clean = "sk-" + "FAKE-" + "A" * 32
     if _scan_text("key=" + clean + "\n", "clean.txt", "selftest"):
         failures.append("sentinel sk-FAKE was flagged")
+    if _scan_text("OPENAI_API_KEY=" + clean + "\n", "clean.txt", "selftest"):
+        failures.append("sentinel sk-FAKE env assignment was flagged")
+    # Every documented sentinel prefix, plus the literal symbol/value shapes used
+    # by tracked tests/docs (including trailing punctuation), is exempt.
+    for prefix in ENV_SENTINEL_PREFIXES:
+        line = "DEEPSEEK_API_KEY=" + prefix.upper() + "_SELFTEST_VALUE"
+        if _scan_text(line + "\n", "sentinel.txt", "selftest"):
+            failures.append(f"sentinel prefix was flagged: {prefix}")
+    for value in ("SENTINEL", "SENTINEL)", "SENTINEL" + "`",
+                  "TEST_ONLY_NEVER_VALID_SECRET_SENTINEL"):
+        line = f"DEEPSEEK_API_KEY={value}"
+        if _scan_text(line + "\n", "sentinel.txt", "selftest"):
+            failures.append(f"explicit env sentinel was flagged: {value}")
+    if _scan_text("deepseek_api_key=SENTINEL\n", "sentinel.txt", "selftest"):
+        failures.append("case-insensitive env name sentinel was flagged")
+    if _scan_text("MY_SERVICE_TOKEN=TEST_ONLY_NEVER_VALID_SECRET_SENTINEL\n",
+                  "sentinel.txt", "selftest"):
+        failures.append("generic env sentinel was flagged")
     if _scan_text("Authorization: Bearer abc...\n", "clean.txt", "selftest"):
         failures.append("bearer sentinel was flagged")
     if _sensitive_path("docs/readme.md") or not _sensitive_path(".env") or _sensitive_path(".env.example") or not _sensitive_path("keys/id_rsa") or not _sensitive_path("server.pem"):
@@ -317,7 +384,7 @@ def self_test() -> int:
         for failure in failures:
             print(f"SELFTEST FAIL: {failure}")
         return 1
-    print("SELFTEST PASS: detectors, sentinel exclusions, filename classifier")
+    print("SELFTEST PASS: detectors, env-sentinel exclusions, filename classifier")
     return 0
 
 
