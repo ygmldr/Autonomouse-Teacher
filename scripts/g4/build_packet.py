@@ -327,6 +327,7 @@ def build_source(out: Path) -> None:
 
 def build_env(out: Path, docs_sha: str) -> None:
     env = out / "env"
+    build_head = git("rev-parse", "HEAD").strip()
     git_lines = [
         "# Git identity",
         f"HEAD={git('rev-parse', 'HEAD').strip()}",
@@ -335,7 +336,7 @@ def build_env(out: Path, docs_sha: str) -> None:
         f"code_impl_sha={CODE_SHA}",
         f"src_last_commit={SRC_LAST_SHA}",
         f"docs_sha={docs_sha}",
-        f"build_sha={docs_sha}",
+        f"build_sha={build_head}",
         f"impl_parent={git('rev-parse', f'{IMPL_SHA}^').strip()}",
         f"docs_parent={git('rev-parse', f'{docs_sha}^').strip()}",
         f"impl_subject={git('show', '-s', '--format=%s', IMPL_SHA).strip()}",
@@ -768,6 +769,7 @@ def build(args: argparse.Namespace) -> int:
     if git("rev-parse", f"{IMPL_SHA}:src").strip() != \
             git("rev-parse", "HEAD:src").strip():
         raise BuildError("impl src tree differs from HEAD")
+    build_head = git("rev-parse", "HEAD").strip()
 
     out = Path(args.out) if args.out else ARTIFACTS / PACKET_NAME
     if not out.is_absolute():
@@ -807,8 +809,8 @@ def build(args: argparse.Namespace) -> int:
         "code_impl_sha": CODE_SHA,
         "src_last_commit": SRC_LAST_SHA,
         "docs_sha": docs_sha,
-        "build_sha": docs_sha,
-        "build_sha_equals_docs_sha": True,
+        "build_sha": build_head,
+        "build_sha_equals_docs_sha": build_head == docs_sha,
         "impl_subject": git("show", "-s", "--format=%s", impl).strip(),
         "docs_subject": git("show", "-s", "--format=%s", docs_sha).strip(),
         "head_at_packet": git("rev-parse", "HEAD").strip(),
@@ -981,7 +983,7 @@ base_sha={base}
 impl_sha={impl}
 code_impl_sha={CODE_SHA}
 docs_sha={docs_sha}
-build_sha={docs_sha}
+build_sha={build_head}
 head_at_packet={git('rev-parse', 'HEAD').strip()}
 stage_manifest_sha256={STAGE_MANIFEST}
 stage_tree_sha256={STAGE_TREE}
