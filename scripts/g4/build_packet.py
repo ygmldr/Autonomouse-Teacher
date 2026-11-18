@@ -317,6 +317,10 @@ def build_source(out: Path) -> None:
         "run_g4_d.py:195.. D01/D02/D03/D08/D09 orchestration",
         "build_manifest.py:35 manifest builder; verify_manifest.py:41 verifier",
     ]
+    builder = ROOT / "scripts" / "g4" / "build_packet.py"
+    copy_text(builder, out / "source" / "scripts" / "g4" / "build_packet.py")
+    index.append(f"- `scripts/g4/build_packet.py` sha256 "
+                 f"`{sha256_file(builder)}` (packet builder; post-impl evidence tool)")
     write_text(out / "source" / "INDEX.md", "\n".join(index) + "\n")
     write_text(out / "source" / "line-references.txt", "\n".join(refs) + "\n")
 
@@ -787,6 +791,7 @@ def build(args: argparse.Namespace) -> int:
     build_egress(out)
     build_e5(out)
     build_regressions(out)
+    build_review(out, docs_sha, {})
     matrix = build_matrix(out, docs_sha)
 
     summary_path = ARTIFACTS / "g4/e/regression/SUMMARY.json"
@@ -811,7 +816,13 @@ def build(args: argparse.Namespace) -> int:
         "worktree_clean": True,
         "source_blobs": {relative: sha256_file(ROOT / relative)
                          for relative in SOURCE_PATHS},
-        "source_blob_invariant": "every source blob equals git show impl_sha:path",
+        "source_blob_invariant": "every impl source blob equals git show impl_sha:path",
+        "packet_builder": {
+            "path": "scripts/g4/build_packet.py",
+            "sha256": sha256_file(ROOT / "scripts/g4/build_packet.py"),
+            "git_blob_at_head": git("rev-parse", "HEAD:scripts/g4/build_packet.py").strip(),
+            "note": "post-implementation evidence tool; committed separately from impl",
+        },
         "rootfs_sha256": ROOTFS_CANON,
         "deps_sha256": DEPS_CANON,
         "stage_manifest_sha256": STAGE_MANIFEST,
