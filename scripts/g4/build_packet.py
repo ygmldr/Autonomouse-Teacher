@@ -696,6 +696,10 @@ frozen checkout, construct independent auth/OS/ledger probes, and record the
 commands, UTC, exit code and raw bytes. Environment-only failures are
 classified in `regressions/host-failure-classification.json` and
 `regressions/oci-env-deselects.json`; they are not product PASS.
+
+`changes/*.diff` are path-sanitized copies of `git diff --binary` (workspace and
+host paths replaced with `<WORKSPACE>`/`<HOST_*>`); exact bytes are
+reproducible from the frozen commits with `git diff --binary`.
 """)
     write_text(review / "security-nonclaims.md", """# Security non-claims (G4-E)
 
