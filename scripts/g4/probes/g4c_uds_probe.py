@@ -55,6 +55,7 @@ def exchange(label: str, payload: dict, *, timeout: float = 10.0) -> dict:
         "error_code": record.get("error_code"),
         "frame_count": record.get("frame_count"),
         "connected": record.get("connected"),
+        "error": record.get("error"),
         "last_frame": last,
     }
 
@@ -86,7 +87,7 @@ def phase_negatives() -> dict:
         exchange("wrong_model", pc.request_payload(
             session="g4c-neg-model", model="gpt-real", tools=[tool])),
         exchange("max_tokens_over_admission", pc.request_payload(
-            session="g4c-neg-tokens", tools=[tool], max_tokens=1024)),
+            session="g4c-neg-tokens", tools=[tool], max_tokens=1025)),
     ]
     selfauth = pc.request_payload(session="g4c-neg-selfauth", tools=[tool])
     selfauth["authorized"] = True

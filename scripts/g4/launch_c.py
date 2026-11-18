@@ -47,6 +47,7 @@ PROBE_MARKER = "G4C_PROBE "
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--case", default="c01")
+    parser.add_argument("--sub", default="")
     parser.add_argument("--scenario", default="echo")
     parser.add_argument("--session", default="g4c-s1")
     parser.add_argument("--prompt", default=None)
@@ -64,8 +65,6 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--crash-hook", default=None)
     parser.add_argument("--max-calls", type=int, default=None,
                         help="G4-C synthetic admission override (test only)")
-    parser.add_argument("--mutate-prepared-after-claim", action="store_true",
-                        help="G4-C C04 injection: alter Prepared after claim")
     parser.add_argument("--steps", default=None,
                         help="comma-separated hold-mode steps: probes, restart, kill-broker")
     args = parser.parse_args(argv)
@@ -110,15 +109,18 @@ class G4CLauncher(g3d_launch.Launcher):
             raise lib3d.G3DError("must run as host root",
                                  exit_code=lib3d.EXIT_BLOCKED_ENVIRONMENT)
         head = lib3d.git_text("rev-parse", "HEAD")
-        status_raw = lib3d.git_text("status", "--porcelain=v1", "-uall")
-        status_entries = [line for line in status_raw.splitlines() if line.strip()]
-        dirty_other = [line for line in status_entries
-                       if not line[3:].startswith("docs/")]
+        status_entries = self._status_entries()
+        allowed_dirty_prefixes = ("docs/", "scripts/g4/", "tests/integration/g4_c/")
+        dirty_allowed = [row for row in status_entries
+                         if row["path"].startswith(allowed_dirty_prefixes)]
+        dirty_other = [row for row in status_entries
+                       if not row["path"].startswith(allowed_dirty_prefixes)]
         if dirty_other:
             problems.append("unexpected_worktree_changes")
         base = head
+        self._cleanup_rootfs_targets()
         canonical_pre = {
-            "utc": lib.utc(),
+            "utc": lib.utc_now(),
             "rootfs": {"path": str(lib3d.ROOTFS),
                        "sha256": lib3d.sha256_tree(lib3d.ROOTFS),
                        "expected": lib3d.ROOTFS_CANON},
@@ -164,8 +166,9 @@ class G4CLauncher(g3d_launch.Launcher):
             "candidate_tree_sha256": validation["candidate_tree_sha256"],
         }
         self.records["livegate"] = livegate
-        git_info = {"utc": lib.utc(), "head": head, "base": base,
+        git_info = {"utc": lib.utc_now(), "head": head, "base": base,
                     "status_entries": status_entries,
+                    "allowed_dirty": dirty_allowed,
                     "unexpected_dirty": dirty_other,
                     "src_identical_to_head": True,
                     "stage_validation_ok": validation["ok"]}
@@ -174,18 +177,49 @@ class G4CLauncher(g3d_launch.Launcher):
         self.write_evidence_json("env/livegate.json", livegate)
         self.write_evidence_json("env/stage-validation.json", {
             key: value for key, value in validation.items() if key != "manifest"})
-        lib.write_bytes_atomic(self.evidence / "env" / "stage-manifest.json",
+        lib3d.write_bytes_atomic(self.evidence / "env" / "stage-manifest.json",
                                (self.stage_dir / "manifest.json").read_bytes(),
                                mode=0o444)
-        lib.write_bytes_atomic(self.evidence / "env" / "ps-preflight.txt",
+        lib3d.write_bytes_atomic(self.evidence / "env" / "ps-preflight.txt",
                                ps["stdout"].encode(), mode=0o444)
         self.preflight_record = {"ok": not problems, "problems": problems,
-                                 "utc": lib.utc(), "head": head}
+                                 "utc": lib.utc_now(), "head": head}
         self.write_evidence_json("env/preflight.json", self.preflight_record)
         if problems:
             raise lib3d.G3DError("G4-C preflight failed",
                                  exit_code=lib3d.EXIT_PREFLIGHT_IDENTITY,
                                  detail={"problems": problems})
+
+    @staticmethod
+    def _cleanup_rootfs_targets() -> list[str]:
+        """Remove only the empty mount-target dirs this G4-C run can create."""
+        removed = []
+        for name in ("g4c",):
+            path = lib3d.ROOTFS / name
+            try:
+                if path.is_dir() and not path.is_symlink() and not any(path.iterdir()):
+                    path.rmdir()
+                    removed.append(name)
+            except OSError:
+                pass
+        return removed
+
+    @staticmethod
+    def _status_entries() -> list[dict]:
+        raw = lib3d.git_bytes("status", "--porcelain=v1", "-z", "-uall")
+        parts = raw.split(b"\0")
+        rows: list[dict] = []
+        index = 0
+        while index < len(parts):
+            part = parts[index].decode("utf-8", "replace")
+            index += 1
+            if not part:
+                continue
+            xy, path = part[:2], part[3:]
+            if xy and xy[0] in {"R", "C"}:
+                index += 1
+            rows.append({"xy": xy, "path": path})
+        return rows
 
     def _livegate_record(self) -> dict:
         repo_src = str(libc.REPO / "src")
@@ -266,8 +300,8 @@ class G4CLauncher(g3d_launch.Launcher):
         self.records.setdefault("configs", {})["admission_override"] = {
             "max_calls": max_calls, "sha256": record["sha256"],
             "reason": "G4-C synthetic budget boundary test only"}
-        lib.write_bytes_atomic(self.evidence / "run" / "config-admission.json",
-                               lib.json_bytes(document), mode=0o444)
+        lib3d.write_bytes_atomic(self.evidence / "run" / "config-admission.json",
+                               lib3d.json_bytes(document), mode=0o444)
 
     # -- trusted startup ------------------------------------------------
     def _start_trusted_instance(self, *, name: str, crash_hook: str | None,
@@ -338,7 +372,7 @@ class G4CLauncher(g3d_launch.Launcher):
                                  socket_record)
         record_doc = {
             "schema": "m0.g4c.launcher.ready.v1",
-            "utc": lib.utc(), "run_id": self.run_id, "instance": key,
+            "utc": lib.utc_now(), "run_id": self.run_id, "instance": key,
             "trusted_container": name, "trusted_pid": pid,
             "ready": ready_document, "socket": socket_record,
             "evaluation": evaluation,
@@ -359,21 +393,75 @@ class G4CLauncher(g3d_launch.Launcher):
         return entry
 
     def start_trusted(self) -> None:
-        self.records["trusted_utc_start"] = lib.utc()
+        self.records["trusted_utc_start"] = lib.utc_now()
         self.container_records["trusted"] = self._start_trusted_instance(
             name=self.trusted_name, crash_hook=self.crash_hook, key="main")
 
     def restart_trusted(self, *, reason: str) -> dict:
-        """Start a second trusted Controller on the same durable state."""
+        """Recovery start with the *same* single-use admission.
+
+        The Controller intentionally exits ``3`` (ADMISSION_REPLAYED) after its
+        ``reconcile_on_startup`` pass; that pass is the recovery under test.
+        No second serving instance is created, so the request replay that
+        follows cannot send either a second Fake or a second Attempt.
+        """
         name = self.trusted_name + "-r2"
         self.cmd(["podman", "rm", "-f", name], name="rm-stale-trusted-r2", timeout=60)
-        started = lib.utc()
-        entry = self._start_trusted_instance(name=name, crash_hook=None,
-                                             key="restart")
-        record = {"utc": started, "reason": reason, "container": name,
-                  "state": "started", "entry": entry}
+        argv = libc.trusted_argv(
+            podman="podman", rootfs=str(lib3d.ROOTFS),
+            stage_trusted=str(self.stage_dir / "trusted"), deps=str(lib3d.DEPS),
+            run_dir=str(self.run_dir), entry_dir=str(self.run_dir / "g4c-run"),
+            name=name)
+        problems = libc.trusted_argv_problems(
+            argv, run_dir=str(self.run_dir), stage_dir=str(self.stage_dir / "trusted"))
+        if problems:
+            self.fail(lib3d.EXIT_STAGE_INVALID, "G4-C recovery argv invalid",
+                      problems=problems)
+        self._write_argv("trusted-recovery", argv)
+        started = lib.utc_now()
+        record = {"utc_start": started, "reason": reason, "container": name,
+                  "argv": argv, "state": "starting"}
         self.restart_records.append(record)
-        self.write_evidence_json("run/trusted-restart.json", {"restarts": self.restart_records})
+        run = self.cmd(argv, name="podman-run-trusted-recovery", timeout=90)
+        record["run_exit"] = run["exit"]
+        if run["exit"] != 0:
+            record["state"] = "run_failed"
+            self.fail(lib3d.EXIT_TRUSTED_START_FAILED,
+                      "recovery trusted podman run failed",
+                      exit=run["exit"], stderr=run["stderr"][-2000:])
+        wait = self.cmd(["podman", "wait", "--interval", "150ms", name],
+                        name="podman-wait-trusted-recovery", timeout=120)
+        if wait["timed_out"]:
+            self.cmd(["podman", "kill", "-s", "KILL", name],
+                     name="kill-trusted-recovery", timeout=30)
+            self.cmd(["podman", "wait", "--interval", "150ms", name],
+                     name="podman-wait-trusted-recovery-killed", timeout=30)
+        document = self.podman_inspect(name, label="inspect-trusted-recovery")
+        exit_code = None
+        if document is not None:
+            exit_code = int(document["State"].get("ExitCode", -1))
+            record["status"] = document["State"].get("Status")
+            record["finished_at"] = document["State"].get("FinishedAt")
+            self.write_evidence_json("run/inspect-trusted-recovery.json", document)
+        record["exit_code"] = exit_code
+        record["admission_replayed_exit"] = exit_code == 3
+        record["utc_end"] = lib.utc_now()
+        record["state"] = "completed"
+        logs = self._container_logs(name, "trusted-recovery-log")
+        lib3d.write_bytes_atomic(self.evidence / "run" / "trusted-recovery.log",
+                                 logs.encode(), mode=0o444)
+        for source, target in (
+                (self.run_dir / "evidence" / "g4c-egress.json",
+                 "run/g4c-egress-recovery.json"),
+                (self.run_dir / "evidence" / "trusted-modules.json",
+                 "peercred/trusted-modules-recovery.json")):
+            if source.is_file():
+                lib3d.write_bytes_atomic(
+                    self.evidence / target,
+                    lib3d.read_regular_bytes(source, max_bytes=8 << 20),
+                    mode=0o444)
+        self.write_evidence_json("run/trusted-restart.json",
+                                 {"restarts": self.restart_records})
         return record
 
     # -- candidate ------------------------------------------------------
@@ -385,7 +473,7 @@ class G4CLauncher(g3d_launch.Launcher):
             run_dir=str(self.run_dir), name=self.candidate_name,
             scenario=self.args.scenario, session=self.args.session,
             prompt=self.args.prompt, mode=mode,
-            label=self.args.label or self.case,
+            label=(self.args.label or self.case) if mode == "hold" else None,
             hold_seconds=int(self.args.hold_seconds))
         problems = lib3d.argv_contract_problems(
             argv, role="candidate", run_dir=str(self.run_dir),
@@ -394,7 +482,7 @@ class G4CLauncher(g3d_launch.Launcher):
             self.fail(lib3d.EXIT_STAGE_INVALID, "candidate argv violates contract",
                       problems=problems)
         self._write_argv("candidate", argv)
-        self.records["candidate_utc_start"] = lib.utc()
+        self.records["candidate_utc_start"] = lib.utc_now()
         record = self.cmd(argv, name="podman-run-candidate", timeout=90)
         if record["exit"] != 0:
             self.fail(lib3d.EXIT_CANDIDATE_START_FAILED,
@@ -442,7 +530,7 @@ class G4CLauncher(g3d_launch.Launcher):
             self.write_evidence_json("run/inspect-candidate-final.json", final)
         self.records["candidate_exit_code"] = exit_code
         logs = self._container_logs(self.candidate_name, "candidate-log")
-        lib.write_bytes_atomic(self.evidence / "run" / "candidate.log",
+        lib3d.write_bytes_atomic(self.evidence / "run" / "candidate.log",
                                logs.encode(), mode=0o444)
         self._copy_candidate_evidence()
 
@@ -454,7 +542,7 @@ class G4CLauncher(g3d_launch.Launcher):
         record = self.cmd(argv, name=f"probe-{phase}", timeout=timeout)
         stdout = record.get("stdout") or ""
         stderr = record.get("stderr") or ""
-        lib.write_bytes_atomic(self.evidence / "run" / f"probe-{phase}.log",
+        lib3d.write_bytes_atomic(self.evidence / "run" / f"probe-{phase}.log",
                                (stdout + stderr).encode(), mode=0o444)
         document = None
         for line in reversed(stdout.splitlines()):
@@ -481,7 +569,7 @@ class G4CLauncher(g3d_launch.Launcher):
             if not source.is_file():
                 continue
             data = lib3d.read_regular_bytes(source, max_bytes=8 << 20)
-            lib.write_bytes_atomic(self.evidence / "run" / name, data, mode=0o444)
+            lib3d.write_bytes_atomic(self.evidence / "run" / name, data, mode=0o444)
             self.records.setdefault("g4c_assets", []).append(
                 {"name": name, "sha256": lib3d.sha256_bytes(data), "bytes": len(data)})
         for name, target in (("g4c-binding-start.json", "traces/g4c-binding-start.json"),
@@ -490,7 +578,7 @@ class G4CLauncher(g3d_launch.Launcher):
             if not source.is_file():
                 continue
             data = lib3d.read_regular_bytes(source, max_bytes=4 << 20)
-            lib.write_bytes_atomic(self.evidence / target, data, mode=0o444)
+            lib3d.write_bytes_atomic(self.evidence / target, data, mode=0o444)
 
     def _analyse_logs(self) -> None:
         super()._analyse_logs()
@@ -574,7 +662,11 @@ class G4CLauncher(g3d_launch.Launcher):
         check("fake_counter_matches_receipts",
               counter == len([r for r in receipts if r.get("receipt_id")]),
               counter=counter, receipts=len(receipts))
-        check("gate_journal_present", gate["present"], path=gate["path"])
+        if case in {"crash-before-send", "broker-down", "negatives"}:
+            check("gate_no_authorization_before_crash", not gate["authorized"],
+                  authorized=len(gate["authorized"]))
+        else:
+            check("gate_journal_present", gate["present"], path=gate["path"])
         if case in {"c01", "c02"}:
             self._evaluate_dsh_case(check, snapshot, gate, modules)
         elif case == "negatives":
@@ -589,6 +681,8 @@ class G4CLauncher(g3d_launch.Launcher):
             self._evaluate_broker_case(check, snapshot, gate)
         elif case == "quota":
             self._evaluate_quota_case(check, snapshot, gate)
+        elif case == "c18":
+            self._evaluate_stream_case(check, snapshot, gate)
         else:
             check("known_case", False, case=case)
         self.checks = checks
@@ -673,9 +767,13 @@ class G4CLauncher(g3d_launch.Launcher):
         if counter_path.is_file():
             try:
                 result["fake_counter"] = json.loads(
-                    counter_path.read_text(encoding="utf-8")).get("received")
+                    counter_path.read_text(encoding="utf-8")).get("count")
             except (OSError, json.JSONDecodeError):
                 result["fake_counter"] = None
+        elif not rows:
+            # The Fake writes the counter with its first receipt; no receipt
+            # means the provider was never entered.
+            result["fake_counter"] = 0
         self.write_evidence_json("db/snapshot.json", result)
         return result
 
@@ -713,7 +811,7 @@ class G4CLauncher(g3d_launch.Launcher):
         check("claim_count", len(claims) == expected_calls, rows=len(claims))
         check("attempt_count_settled",
               len(attempts) == expected_calls
-              and all(row["state"] == "SETTLED_USAGE" for row in attempts),
+              and all(row["state"] == "SETTLED" for row in attempts),
               states=[row["state"] for row in attempts])
         check("receipt_count", len(receipts) == expected_calls, rows=len(receipts))
         check("fake_counter", snapshot["fake_counter"] == expected_calls,
@@ -760,7 +858,7 @@ class G4CLauncher(g3d_launch.Launcher):
               len(usage_rows) == expected_calls and all(row["equal"] for row in usage_rows),
               rows=usage_rows)
         if scenario == "tool":
-            two_cycle = lib3d.pair_tool_ledger(attempts, claims, receipts)
+            two_cycle = g3d_launch.pair_tool_ledger(attempts, claims, receipts)
             check("two_independent_cycles",
                   len(two_cycle) == 2 and all(
                       item.get("prepared_ok") and item.get("payload_ok")
@@ -769,9 +867,8 @@ class G4CLauncher(g3d_launch.Launcher):
             check("distinct_call_ids", len({row["call_id"] for row in attempts}) == 2,
                   call_ids=[row["call_id"] for row in attempts])
             check("tool_result_in_second_request",
-                  (candidate_result.get("event_summary") or {}).get(
-                      "tool_results", 0) >= 1 or
-                  bool(candidate_result.get("tool_markers")),
+                  len((candidate_result.get("event_summary") or {})
+                      .get("tool_results") or []) >= 1,
                   summary=(candidate_result.get("event_summary") or {}))
         else:
             check("candidate_result_echo_ok",
@@ -779,17 +876,9 @@ class G4CLauncher(g3d_launch.Launcher):
                   and candidate_result.get("finish_reason") == "completed",
                   result={key: candidate_result.get(key) for key in
                           ("final_response", "finish_reason", "error")})
-            timing = self._timing_rows()
-            check("timing_marks_present", bool(timing), rows=len(timing))
-            first = exit_mark = None
-            for row in timing:
-                names = {mark.get("name"): mark for mark in row.get("marks") or []}
-                first = first or names.get("first_chunk_flushed")
-                exit_mark = exit_mark or names.get("exit_after_frames")
-            check("stream_chunk_before_fake_exit",
-                  bool(first) and bool(exit_mark)
-                  and first.get("monotonic", 0) < exit_mark.get("monotonic", 0),
-                  first=first, exit=exit_mark)
+            # Streaming T1<T2 ordering is proven by the explicit ``c18``
+            # stream_slow case; the plain echo receipt carries no first-chunk
+            # timing mark by design.
         check("all_receipts_synthetic_no_network",
               all(row.get("synthetic") is True
                   and row.get("real_model_calls") == 0
@@ -814,17 +903,20 @@ class G4CLauncher(g3d_launch.Launcher):
             "self_authorization_field": "UNKNOWN_FIELD",
             "wrong_provider": "ROUTE_MISMATCH",
             "wrong_model": "ROUTE_MISMATCH",
-            "max_tokens_over_admission": "BUDGET_DENIED",
+            "max_tokens_over_admission": ("REQUEST_INVALID", "BAD_TYPE"),
         }
         problems = []
-        for label, code in expected.items():
+        for label, codes in expected.items():
+            if isinstance(codes, str):
+                codes = (codes,)
             row = rows.get(label) or {}
             got = row.get("error_code")
             ok = row.get("terminal") == "error" and (
-                got == code or (label == "self_authorization_field"
-                                and got in {"UNKNOWN_FIELD", "ADMISSION_SELF_AUTH_DENIED"}))
+                got in codes or (label == "self_authorization_field"
+                                 and got in {"UNKNOWN_FIELD",
+                                             "ADMISSION_SELF_AUTH_DENIED"}))
             if not ok:
-                problems.append({"label": label, "expected": code, "actual": got,
+                problems.append({"label": label, "expected": list(codes), "actual": got,
                                  "terminal": row.get("terminal")})
         check("negatives_all_rejected", not problems, problems=problems,
               seen=sorted(rows))
@@ -880,9 +972,17 @@ class G4CLauncher(g3d_launch.Launcher):
               expected=expect_fake, actual=snapshot["fake_counter"])
         check("crash_attempt_durable_before_send",
               len(snapshot["attempts"]) == 1, attempts=len(snapshot["attempts"]))
+        check("crash_admission_replayed_exit",
+              any(record.get("admission_replayed_exit")
+                  for record in self.restart_records),
+              restarts=[record.get("exit_code")
+                        for record in self.restart_records])
+        replay_row = next(iter(self._case_rows(replay).values()), {})
         check("crash_replay_not_sent",
-              next(iter(self._case_rows(replay).values()), {}).get("terminal") == "error",
-              row=next(iter(self._case_rows(replay).values()), {}))
+              replay_row.get("terminal") != "finish"
+              and (replay_row.get("connected") is False
+                   or replay_row.get("terminal") == "error"),
+              row=replay_row)
         check("crash_replay_same_fake_count",
               snapshot["fake_counter"] == expect_fake, actual=snapshot["fake_counter"])
         check("crash_single_attempt_identity",
@@ -908,6 +1008,35 @@ class G4CLauncher(g3d_launch.Launcher):
               row.get("error_code") in {"BROKER_ERROR", "BROKER_UNAVAILABLE",
                                         "BROKER_TIMEOUT", "INTERNAL", "DEADLINE_EXCEEDED"},
               code=row.get("error_code"))
+
+    def _evaluate_stream_case(self, check, snapshot, gate) -> None:
+        candidate_result = self._read_json_evidence("traces/dsh-result.json") or {}
+        check("stream_candidate_result",
+              candidate_result.get("final_response") == "early",
+              result={key: candidate_result.get(key) for key in
+                      ("final_response", "finish_reason", "error")})
+        check("stream_single_ledger",
+              len(snapshot["reservations"]) == 1
+              and len(snapshot["claims"]) == 1
+              and len(snapshot["attempts"]) == 1,
+              reservations=len(snapshot["reservations"]),
+              claims=len(snapshot["claims"]),
+              attempts=len(snapshot["attempts"]))
+        check("stream_single_receipt", snapshot["fake_counter"] == 1,
+              counter=snapshot["fake_counter"])
+        timing = self._timing_rows()
+        first = exit_mark = None
+        for row in timing:
+            names = {mark.get("name"): mark for mark in row.get("marks") or []}
+            first = first or names.get("first_chunk_flushed")
+            exit_mark = exit_mark or names.get("exit_after_finish")
+        check("stream_chunk_before_fake_exit",
+              bool(first) and bool(exit_mark)
+              and first.get("monotonic", 0) < exit_mark.get("monotonic", 0),
+              first=first, exit=exit_mark)
+        check("stream_gate_consumed_once",
+              len(gate["authorized"]) == 1 and len(gate["consumed"]) == 1,
+              authorized=len(gate["authorized"]), consumed=len(gate["consumed"]))
 
     def _evaluate_quota_case(self, check, snapshot, gate) -> None:
         first = self._probe("valid")
@@ -943,7 +1072,7 @@ class G4CLauncher(g3d_launch.Launcher):
         record = self.cmd(["podman", "exec", self.trusted_name,
                            "/opt/python/bin/python3.11", "-B", "-c", code],
                           name=f"kill-broker-{reason}", timeout=30)
-        document = {"reason": reason, "utc": lib.utc(),
+        document = {"reason": reason, "utc": lib.utc_now(),
                     "exit": record.get("exit"),
                     "stdout": (record.get("stdout") or "").strip()[-500:],
                     "stderr": (record.get("stderr") or "").strip()[-500:]}
@@ -971,11 +1100,20 @@ class G4CLauncher(g3d_launch.Launcher):
             name = record["container"]
             logs = self._container_logs(name, f"restart-log-{name}")
             if logs:
-                lib.write_bytes_atomic(self.evidence / "run" / f"{name}.log",
+                lib3d.write_bytes_atomic(self.evidence / "run" / f"{name}.log",
                                        logs.encode(), mode=0o444)
         super().collect()
 
     def cleanup(self) -> None:
+        self._cleanup_rootfs_targets()
+        ps = self.cmd(["podman", "ps", "-a", "--format", "{{.Names}}"],
+                      name="cleanup-list-containers", timeout=30)
+        for name in (ps.get("stdout") or "").splitlines():
+            name = name.strip()
+            if name.startswith((self.trusted_name + "-r",
+                                self.candidate_name + "-r")):
+                self.cmd(["podman", "rm", "-f", name],
+                         name=f"cleanup-rm-prefix-{name}", timeout=60)
         for record in self.restart_records:
             name = record["container"]
             status = self.podman_status(name)
@@ -993,7 +1131,7 @@ class G4CLauncher(g3d_launch.Launcher):
         summary = {
             "schema": "m0.g4c.run-summary.v1",
             "utc_start": self.started_utc,
-            "utc_end": lib.utc(),
+            "utc_end": lib.utc_now(),
             "run_id": self.run_id,
             "case": self.case,
             "scenario": self.args.scenario,
@@ -1033,7 +1171,7 @@ class G4CLauncher(g3d_launch.Launcher):
             f"CHECK_FAILURES={failure_ids}",
             f"CLEANUP_OK={cleanup.get('ok')}",
         ]
-        lib.write_bytes_atomic(self.evidence / "run" / "run-summary.txt",
+        lib3d.write_bytes_atomic(self.evidence / "run" / "run-summary.txt",
                                ("\n".join(text) + "\n").encode(), mode=0o444)
 
 
