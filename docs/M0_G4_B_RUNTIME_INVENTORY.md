@@ -25,7 +25,7 @@
 | **B10** | Worker 构建 canonical 不漂移 | **PASS（校验既有）**：stage tree/manifest 两次重算一致 = 冻结值；6606 行逐文件复核 | L0 | **未二次 build stage**（`UNVERIFIED` 跨构建可复现性） |
 | **B11** | 代码/registry/deps/profile 变更 → 下一次 dispatch fail-closed | **PASS**（manifest drift 测试 + `require_manifest_match` 逐项理由 + policy 绑定） | L1 | 与 G4-A 的实际接线在 G4-C 集成时验证 |
 
-**关键定量断言**：`real_provider_calls=0`、`real_external_http_calls=0`、`provider_keys_seen=0`、`billable_send_allowed=0`、`LiveGate.status=BLOCKED`、真实容器 2 个 run 全部 `exit 0`、`podman ps -a` 结束为空。
+**关键定量断言**：`real_provider_calls=0`、`real_external_http_calls=0`、`provider_keys_seen=0`、`billable_send_allowed=0`、`LiveGate.status=BLOCKED`、tool run 的 launcher `exit 0` 且 33 项检查 0 失败、raw-UDS 三个阶段探针 payload 全部落盘、`podman ps -a` 结束为空。
 
 ---
 
@@ -230,7 +230,7 @@ DSH `0.2.2-rc.2` 无「merged tool registry / tool JSON Schema」导出 API：`-
 
 ## 6. B05 — 真实 DSH Tool 两轮账本
 
-`run_id=g4b-tool-20261118164749`，冻结 launcher、真实 DSH、真实双 principal、`exit 0`；launcher 自身 12 项检查全 PASS（`run-tool/run/checks.json`）。
+`run_id=g4b-tool-20261118164749`，冻结 launcher、真实 DSH、真实双 principal、`exit 0`；launcher 自身 **33 项检查全部 PASS、0 failures**（`run-tool/run/checks.json`）。
 
 | 项 | 值 |
 |---|---|
@@ -385,6 +385,7 @@ Worker/共享 stage 副作用：`--dump-config` 物化的 `$DSH_HOME/profiles`�
 | R-B-9 | 证据提交与 main 的差异 | 已记录 | 证据在本地 worktree `2f1e41f`（`src=cf40c6b`）产生；main 上对应代码提交为 `c29cabc` |
 | R-B-10 | 宿主 1 项 host-only 测试失败 | 既有 `OPS-P2-b` | 与本包无关，未修改测试 |
 | R-B-11 | P2（disk/userns/run-identity） | 未变 | 本轮不批准、不签收 |
+| R-B-12 | raw-UDS run 的逐阶段 `podman exec` 退出码 | 记录不完整 | `run.json → raw_uds_run.steps` 只保存阶段名；每阶段的真实返回帧/payload 已完整落盘。若需逐阶段 exit code，可在 G4-E 复核时补采 |
 
 ### 12.2 提交与偏差说明
 
