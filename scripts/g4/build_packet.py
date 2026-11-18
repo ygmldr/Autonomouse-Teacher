@@ -150,9 +150,10 @@ def git(*args: str, binary: bool = False):
 
 
 def sanitize_text(text: str) -> str:
+    escaped_root = str(ROOT).replace(" ", "\\040")
     replacements = [
         (str(ROOT), "<WORKSPACE>"),
-        ("/root/Autonomous\\040Teacher", "<WORKSPACE_ESCAPED>"),
+        (escaped_root, "<WORKSPACE_ESCAPED>"),
         ("/root/g4b-baseline", "<G4B_WORKTREE>"),
         ("/root/.local/share/uv/python/cpython-3.11-linux-x86_64-gnu",
          "<UV_PYTHON>"),
