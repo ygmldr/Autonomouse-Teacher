@@ -190,6 +190,7 @@ def case_d01(stage: Path) -> dict:
     launcher = launcher_argv(case="d01", stage=stage, run_id=run_id,
                              evidence=directory / "launcher")
     watchdog_args = ["--run-id", run_id, "--run-dir", str(run_dir_for(run_id)),
+                     "--rootfs-target", str(lib.ROOTFS / "g4c"),
                      "--deadline", "90", "--kill-after-up", "4",
                      "--capture-live", "--expect", "trigger"]
     record = run_watchdog(case="d01", stage=stage, launcher=launcher,
@@ -204,8 +205,9 @@ def case_d02(stage: Path) -> dict:
     launcher = launcher_argv(case="d02", stage=stage, run_id=run_id,
                              evidence=directory / "launcher", steps="valid")
     watchdog_args = ["--run-id", run_id, "--run-dir", str(run_dir_for(run_id)),
+                     "--rootfs-target", str(lib.ROOTFS / "g4c"),
                      "--deadline", "90", "--kill-after-up", "8",
-                     "--require-containers", "1", "--pause", "trusted",
+                     "--require-containers", "1", "--freeze", "trusted",
                      "--capture-live", "--expect", "trigger"]
     record = run_watchdog(case="d02", stage=stage, launcher=launcher,
                           watchdog_args=watchdog_args, expect_exit=0, timeout=240)
@@ -230,6 +232,7 @@ def case_d03(stage: Path) -> dict:
         "socket": "/work/g3b/bridge.sock",
     }
     watchdog_args = ["--run-id", run_id, "--run-dir", str(run_dir_for(run_id)),
+                     "--rootfs-target", str(lib.ROOTFS / "g4c"),
                      "--deadline", "180", "--expect", "exit",
                      "--capture-live", "--exec-probe", str(CANDIDATE_PROBE),
                      "--exec-role", "candidate",
@@ -256,6 +259,7 @@ def case_d08a(stage: Path) -> dict:
     launcher = launcher_argv(case="d08a", stage=stage, run_id=run_id,
                              evidence=directory / "launcher")
     watchdog_args = ["--run-id", run_id, "--run-dir", str(run_dir_for(run_id)),
+                     "--rootfs-target", str(lib.ROOTFS / "g4c"),
                      "--engine", str(wrapper), "--deadline", "90",
                      "--kill-after-up", "3", "--expect", "trigger"]
     record = run_watchdog(case="d08a", stage=stage, launcher=launcher,
@@ -281,6 +285,7 @@ def case_d08b(stage: Path) -> dict:
     launcher = launcher_argv(case="d08b", stage=stage, run_id=run_id,
                              evidence=directory / "launcher")
     watchdog_args = ["--run-id", run_id, "--run-dir", str(run_dir_for(run_id)),
+                     "--rootfs-target", str(lib.ROOTFS / "g4c"),
                      "--engine", str(wrapper), "--deadline", "12",
                      "--expect", "trigger"]
     record = run_watchdog(case="d08b", stage=stage, launcher=launcher,
@@ -400,6 +405,7 @@ def case_d15(stage: Path) -> dict:
         "socket": "/work/g3b/bridge.sock",
     }
     watchdog_args = ["--run-id", run_id, "--run-dir", str(run_dir_for(run_id)),
+                     "--rootfs-target", str(lib.ROOTFS / "g4c"),
                      "--deadline", "90", "--kill-after-up", "5",
                      "--capture-live", "--exec-probe", str(CANDIDATE_PROBE),
                      "--exec-role", "candidate", "--exec-arg", json.dumps(probe_paths),
@@ -477,6 +483,36 @@ def canonical() -> dict:
                                      "ok": rootfs == lib.ROOTFS_CANON},
             "deps": {"sha256": deps, "expected": lib.DEPS_CANON,
                      "ok": deps == lib.DEPS_CANON}}
+
+
+def final_safety_cleanup() -> dict:
+    """Never leave test containers or an empty rootfs mount target behind."""
+    listing = command(["podman", "ps", "-a", "--format", "{{.Names}}"],
+                      name="final-safety-list")
+    names = [line.strip() for line in (listing.get("stdout") or "").splitlines()
+             if line.strip()]
+    removed = []
+    for name in names:
+        record = command(["podman", "rm", "-f", name],
+                         name=f"final-safety-rm-{name}", timeout=60)
+        removed.append({"name": name, "exit": record.get("exit")})
+    target = lib.ROOTFS / "g4c"
+    rootfs_target = {"path": str(target), "removed": False}
+    try:
+        if target.is_dir() and not target.is_symlink() and not any(target.iterdir()):
+            target.rmdir()
+            rootfs_target["removed"] = True
+    except OSError as error:
+        rootfs_target["error"] = type(error).__name__
+    after = command(["podman", "ps", "-a", "--format", "{{.Names}}"],
+                    name="final-safety-verify")
+    remaining = [line for line in (after.get("stdout") or "").splitlines() if line.strip()]
+    document = {"utc": utc(), "discovered": names, "removed": removed,
+                "remaining": remaining, "rootfs_target": rootfs_target,
+                "confirmed_absent": not remaining and after.get("exit") == 0,
+                "operator_action": True}
+    write_json(E5_ROOT / "final-cleanup.json", document)
+    return document
 
 
 def containers_absent() -> dict:
@@ -631,6 +667,7 @@ def main(argv: list[str] | None = None) -> int:
                 "Packet is NOT_BUILT in G4-D (G4-E owns it)",
     })
 
+    safety = final_safety_cleanup()
     post_canonical = canonical()
     post_containers = containers_absent()
     summary = {
@@ -646,6 +683,7 @@ def main(argv: list[str] | None = None) -> int:
         "canonical_post": post_canonical,
         "containers_pre": pre_containers,
         "containers_post": post_containers,
+        "final_cleanup": safety,
         "synthetic": True,
         "provider_route_kind": "synthetic_only",
         "real_model_calls": 0,

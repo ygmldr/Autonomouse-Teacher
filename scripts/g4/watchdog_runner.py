@@ -153,7 +153,8 @@ class ExternalWatchdogRunner:
             self.engine_failures.append(check_id)
 
     def cmd(self, argv: Sequence[str], *, name: str, timeout: float = 30.0,
-            env: Mapping[str, str] | None = None) -> dict:
+            env: Mapping[str, str] | None = None,
+            max_stdout: int = 8000) -> dict:
         started = utc()
         record: dict = {"name": name, "argv": [str(item) for item in argv],
                         "utc_start": started, "utc_end": None, "exit": None}
@@ -162,11 +163,13 @@ class ExternalWatchdogRunner:
                                   env=dict(env or CLEAN_ENV), cwd=str(REPO),
                                   stdin=subprocess.DEVNULL, capture_output=True,
                                   text=True, timeout=timeout)
-            record.update({"exit": proc.returncode, "stdout": proc.stdout[-8000:],
+            record.update({"exit": proc.returncode,
+                           "stdout": proc.stdout[-max_stdout:],
                            "stderr": proc.stderr[-8000:]})
         except subprocess.TimeoutExpired as error:
             record.update({"exit": 124, "timed_out": True,
-                           "stdout": lib3d._decode_timeout_stream(error.stdout)[-8000:],
+                           "stdout": lib3d._decode_timeout_stream(
+                               error.stdout)[-max_stdout:],
                            "stderr": lib3d._decode_timeout_stream(error.stderr)[-8000:]})
         except OSError as error:
             record.update({"exit": 127, "error": type(error).__name__})
@@ -283,7 +286,8 @@ class ExternalWatchdogRunner:
                 self.on_up()
 
     def inspect_container(self, name: str, *, label: str) -> dict | None:
-        record = self.cmd([self.args.engine, "inspect", name], name=label, timeout=30)
+        record = self.cmd([self.args.engine, "inspect", name], name=label,
+                          timeout=30, max_stdout=1 << 20)
         if record.get("exit") != 0:
             return None
         try:
@@ -439,8 +443,8 @@ class ExternalWatchdogRunner:
             self.capture_live_surfaces(live_proc)
         if self.args.exec_probe:
             self.run_exec_probe()
-        if self.args.pause_role and not self.injected:
-            self.inject_pause(self.args.pause_role)
+        if self.args.freeze_role and not self.injected:
+            self.inject_freeze(self.args.freeze_role)
 
     def capture_live_surfaces(self, pids: Mapping[str, int]) -> None:
         """D03/D15: live /proc surfaces of the real Candidate principal."""
@@ -499,19 +503,32 @@ class ExternalWatchdogRunner:
                    and isinstance(document["result"], dict),
                    exit=record.get("exit"), role=role)
 
-    def inject_pause(self, role: str) -> None:
+    def inject_freeze(self, role: str) -> None:
+        """Freeze the in-container Broker/Controller with SIGSTOP (no cgroup pause).
+
+        ``podman pause`` is deliberately not used: a frozen cgroup whose process
+        was already SIGKILLed can become unremovable ("container state improper"),
+        which would make cleanup evidence dishonest. SIGSTOP keeps the container
+        in a normal running state that ``podman rm -f`` can always tear down.
+        """
         name = next((item for item in self.containers if role in item), None)
         if name is None:
             self.check("injection_container_found", False, role=role,
                        known=sorted(self.containers))
             return
-        record = self.cmd([self.args.engine, "pause", name],
-                          name=f"inject-pause-{role}", timeout=30)
+        source = ("import os, signal\n"
+                  "os.kill(1, signal.SIGSTOP)\n"
+                  "print('G4D_FROZEN_PID1')\n")
+        record = self.cmd([self.args.engine, "exec", name,
+                           "/opt/python/bin/python3.11", "-B", "-c", source],
+                          name=f"inject-freeze-{role}", timeout=30)
         self.injected = True
-        self.check("injection_pause_applied", record.get("exit") == 0,
+        self.check("injection_freeze_applied",
+                   record.get("exit") == 0
+                   and "G4D_FROZEN_PID1" in (record.get("stdout") or ""),
                    container=name, exit=record.get("exit"))
         write_json(self.evidence / "cleanup" / "injection.json", {
-            "kind": "podman-pause", "role": role, "container": name,
+            "kind": "in-container-sigstop-pid1", "role": role, "container": name,
             "utc": utc(), "record": record,
         })
 
@@ -664,7 +681,7 @@ class ExternalWatchdogRunner:
         return {"removed": names, "after": after_names, "inspect": inspects}
 
     def cleanup_paths(self) -> dict:
-        result: dict = {"socket": None, "run_dir": None}
+        result: dict = {"socket": None, "run_dir": None, "rootfs_targets": []}
         if self.socket_path is not None:
             record = self.socket_record()
             write_json(self.evidence / "cleanup" / "socket-before-unlink.json", record)
@@ -704,6 +721,35 @@ class ExternalWatchdogRunner:
             result["run_dir_present_after"] = list(run_absence.present)
             self.check("run_dir_absent", run_absence.confirmed,
                        present=list(run_absence.present))
+        for target in self.args.rootfs_target:
+            path = Path(target)
+            record: dict = {"path": str(path)}
+            try:
+                info = os.lstat(path)
+            except FileNotFoundError:
+                record["present"] = False
+            else:
+                record["present"] = True
+                record["mode"] = oct(info.st_mode & 0o7777)
+                record["uid"] = info.st_uid
+                if (stat.S_ISDIR(info.st_mode) and not stat.S_ISLNK(info.st_mode)
+                        and info.st_uid == 0):
+                    try:
+                        if not any(path.iterdir()):
+                            path.rmdir()
+                            record["removed"] = True
+                        else:
+                            record["removed"] = False
+                            record["entries"] = sorted(item.name for item in path.iterdir())
+                    except OSError as error:
+                        record["error"] = type(error).__name__
+                else:
+                    record["refused"] = "not_root_owned_directory"
+            absence = confirm_path_absence([path])
+            record["present_after"] = list(absence.present)
+            result["rootfs_targets"].append(record)
+            self.check("rootfs_target_absent", absence.confirmed,
+                       path=str(path), present=list(absence.present))
         return result
 
     def copy_run_evidence(self) -> None:
@@ -897,8 +943,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--poll-containers", type=float, default=0.25)
     parser.add_argument("--target-exit-ok", default="0")
     parser.add_argument("--require-containers", type=int, default=2)
-    parser.add_argument("--pause", dest="pause_role", default=None,
+    parser.add_argument("--freeze", dest="freeze_role", default=None,
                         choices=(None, "trusted", "candidate"))
+    parser.add_argument("--rootfs-target", action="append", default=[],
+                        help="empty rootfs mount-target dir created by this run")
     parser.add_argument("--self-fail-after", type=float, default=None)
     parser.add_argument("--expect", default="trigger", choices=("trigger", "exit"))
     parser.add_argument("--capture-live", action="store_true")
