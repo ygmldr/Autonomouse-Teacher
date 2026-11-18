@@ -56,7 +56,9 @@ out = {"phase": phase, "uid": __import__("os").getuid(),
 
 
 def send(label, payload):
-    transport = "tr-g4b-" + label.replace("_", "-")[:20]
+    # the protocol requires exactly tr-<32 lowercase hex>
+    import hashlib
+    transport = "tr-" + hashlib.sha256(label.encode("utf-8")).hexdigest()[:32]
     record = pc.exchange(pc.envelope_bytes(payload, transport_id=transport),
                          timeout=8.0)
     out["cases"].append({
@@ -150,17 +152,25 @@ def containers_all() -> list[str]:
 
 
 def snapshot_state(run_dir: Path, dest: Path, tag: str) -> dict:
-    """Copy and read the durable Broker/Attempt ledgers at one instant."""
+    """Copy and read the live Broker/Attempt ledgers at one instant."""
+    return snapshot_from_files(run_dir / "state" / "broker.sqlite3",
+                               run_dir / "state" / "attempts.sqlite3",
+                               run_dir / "state" / "receipts",
+                               dest, tag)
+
+
+def snapshot_from_files(broker_source: Path, attempts_source: Path,
+                        receipt_source: Path, dest: Path, tag: str) -> dict:
     dest.mkdir(parents=True, exist_ok=True)
     copied = []
-    for name in ("broker.sqlite3", "broker.sqlite3-wal", "broker.sqlite3-shm",
-                 "attempts.sqlite3", "attempts.sqlite3-wal",
-                 "attempts.sqlite3-shm"):
-        source = run_dir / "state" / name
+    for source in (broker_source, Path(str(broker_source) + "-wal"),
+                   Path(str(broker_source) + "-shm"), attempts_source,
+                   Path(str(attempts_source) + "-wal"),
+                   Path(str(attempts_source) + "-shm")):
         if source.is_file():
-            target = dest / f"{tag}-{name}"
+            target = dest / f"{tag}-{source.name}"
             shutil.copyfile(source, target)
-            copied.append({"name": name, "bytes": target.stat().st_size,
+            copied.append({"name": source.name, "bytes": target.stat().st_size,
                            "sha256": lib.sha256_file(target)})
     result: dict = {"tag": tag, "utc": lib.utc_now(), "files": copied}
     # The Broker creates ``budget_dispatch_claims`` lazily on the first claim,
@@ -195,7 +205,7 @@ def snapshot_state(run_dir: Path, dest: Path, tag: str) -> dict:
         "attempts": len(result.get("attempts") or []),
         "intents": len(result.get("intents") or []),
     }
-    counter = run_dir / "state" / "receipts" / "received-count.json"
+    counter = receipt_source / "received-count.json"
     if counter.is_file():
         try:
             result["fake_counter"] = int(json.loads(
@@ -224,8 +234,7 @@ def _query(conn: sqlite3.Connection, sql: str) -> list[dict]:
     return [dict(zip(columns, row)) for row in cursor.fetchall()]
 
 
-def receipts(run_dir: Path) -> list[dict]:
-    root = run_dir / "state" / "receipts"
+def receipts(root: Path) -> list[dict]:
     rows = []
     if not root.is_dir():
         return rows
@@ -274,17 +283,27 @@ def tool_run(out_dir: Path, stage: Path, timeout: float) -> dict:
 
 
 def analyse_tool_evidence(evidence: Path, run_id: str) -> dict:
-    run_dir = lib3d.G3D_ROOT / "runs" / run_id
+    """Read the durable copies the launcher wrote before deleting ``$RUN``.
+
+    ``cleanup()`` removes the run directory by design, so the authoritative
+    post-run artifacts are ``<evidence>/db/*.sqlite3``, ``<evidence>/receipt/``
+    and ``<evidence>/peercred/``.
+    """
+    db_dir = evidence / "db"
+    receipt_dir = evidence / "receipt"
     zero = {"reservations": [], "claims": [], "attempts": [], "intents": [],
             "counts": {"reservations": 0, "claims": 0, "attempts": 0, "intents": 0},
             "fake_counter": 0}
-    result: dict = {"run_dir": str(run_dir), "problems": []}
-    if not run_dir.is_dir():
-        result["problems"].append("run_dir_missing")
+    result: dict = {"run_id": run_id, "problems": []}
+    if not (db_dir / "broker.sqlite3").is_file():
+        result["problems"].append("evidence_db_missing")
         result["ledger"] = zero
         return result
-    snapshot = snapshot_state(run_dir, evidence / "state-snapshot", "final")
-    receipts_rows = receipts(run_dir)
+    snapshot = snapshot_from_files(db_dir / "broker.sqlite3",
+                                   db_dir / "attempts.sqlite3",
+                                   receipt_dir,
+                                   evidence / "state-snapshot", "final")
+    receipts_rows = receipts(receipt_dir)
     module_evidence = evidence / "peercred" / "trusted-modules.json"
     candidate_log = evidence / "run" / "candidate.log"
     result["ledger"] = {
