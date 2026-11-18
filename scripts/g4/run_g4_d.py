@@ -558,6 +558,9 @@ def main(argv: list[str] | None = None) -> int:
         return lib3d.EXIT_BLOCKED_ENVIRONMENT
     E5_ROOT.mkdir(parents=True, exist_ok=True)
     (E5_ROOT / "runs").mkdir(exist_ok=True)
+    # One run = one command log. Keeping prior rounds here would make the
+    # sentinel scan of a *current* run inspect stale bytes from older tools.
+    COMMANDS.write_bytes(b"")
     # The sentinel lives only in a repo-external test fixture and is never read
     # from os.environ, a home directory or a key manager.
     sentinel_dir = FIXTURES / "trusted"
