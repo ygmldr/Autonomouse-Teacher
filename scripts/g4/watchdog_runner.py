@@ -467,8 +467,9 @@ class ExternalWatchdogRunner:
                     "present": True, "sha256": stored["sha256"],
                     "bytes": stored["bytes"], "path": stored["path"],
                     "sentinel_count": text.count("TEST_ONLY_NEVER_VALID_SECRET_SENTINEL"),
-                    "env_names": (sorted({line.split("=", 1)[0] for line in text.splitlines()
-                                          if "=" in line})[:200]
+                    "env_names": (sorted({chunk.split("=", 1)[0]
+                                          for chunk in text.split("\0")
+                                          if "=" in chunk})[:200]
                                   if surface == "environ" else None),
                 }
             document[role] = entry
@@ -505,34 +506,62 @@ class ExternalWatchdogRunner:
                    and isinstance(document["result"], dict),
                    exit=record.get("exit"), role=role)
 
-    def inject_freeze(self, role: str) -> None:
-        """Freeze the in-container Broker/Controller with SIGSTOP (no cgroup pause).
+    @staticmethod
+    def _proc_state(pid: int) -> str | None:
+        try:
+            text = Path(f"/proc/{pid}/stat").read_text(encoding="ascii")
+        except (OSError, UnicodeError):
+            return None
+        try:
+            return text[text.rindex(")") + 2:].split()[0]
+        except (ValueError, IndexError):
+            return None
 
-        ``podman pause`` is deliberately not used: a frozen cgroup whose process
-        was already SIGKILLed can become unremovable ("container state improper"),
-        which would make cleanup evidence dishonest. SIGSTOP keeps the container
-        in a normal running state that ``podman rm -f`` can always tear down.
+    def inject_freeze(self, role: str) -> None:
+        """Freeze the trusted Broker/Controller init with a host-side SIGSTOP.
+
+        A signal sent from a ``podman exec`` PID namespace did not actually stop
+        the container init in this environment (observed: init stayed in state
+        ``S``), so the watchdog signals the *host* pid it already inspected and
+        re-reads ``/proc/<pid>/stat`` to prove state ``T``. The cgroup is not
+        paused, therefore ``podman rm -f`` can always tear the container down.
         """
         name = next((item for item in self.containers if role in item), None)
         if name is None:
             self.check("injection_container_found", False, role=role,
                        known=sorted(self.containers))
             return
-        source = ("import os, signal\n"
-                  "os.kill(1, signal.SIGSTOP)\n"
-                  "print('G4D_FROZEN_PID1')\n")
-        record = self.cmd([self.args.engine, "exec", name,
-                           "/opt/python/bin/python3.11", "-B", "-c", source],
-                          name=f"inject-freeze-{role}", timeout=30)
+        document = self.inspect_container(name, label=f"inspect-freeze-{role}")
+        pid = None
+        if document:
+            pid = (document.get("State") or {}).get("Pid")
+        if not isinstance(pid, int) or pid <= 0:
+            self.check("injection_pid_found", False, container=name)
+            return
+        try:
+            os.kill(pid, signal.SIGSTOP)
+        except OSError as error:
+            self.check("injection_freeze_sent", False, pid=pid,
+                       error=type(error).__name__)
+            return
+        deadline = time.monotonic() + self.args.freeze_verify_seconds
+        state = None
+        while time.monotonic() < deadline:
+            state = self._proc_state(pid)
+            if state == "T":
+                break
+            time.sleep(0.02)
         self.injected = True
-        self.check("injection_freeze_applied",
-                   record.get("exit") == 0
-                   and "G4D_FROZEN_PID1" in (record.get("stdout") or ""),
-                   container=name, exit=record.get("exit"))
+        self.check("injection_freeze_sent", state == "T", pid=pid, state=state,
+                   container=name)
         write_json(self.evidence / "cleanup" / "injection.json", {
-            "kind": "in-container-sigstop-pid1", "role": role, "container": name,
-            "utc": utc(), "record": record,
+            "kind": "host-sigstop-container-init", "role": role,
+            "container": name, "pid": pid, "state_after": state,
+            "utc": utc(),
+            "verified": state == "T",
         })
+        write_json(self.evidence / "snapshots" / "frozen.json",
+                   {"container": name, "pid": pid, "state": state})
 
     def wait_for_target(self) -> None:
         assert self.target is not None
@@ -947,6 +976,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--require-containers", type=int, default=2)
     parser.add_argument("--freeze", dest="freeze_role", default=None,
                         choices=(None, "trusted", "candidate"))
+    parser.add_argument("--freeze-verify-seconds", type=float, default=2.0)
     parser.add_argument("--rootfs-target", action="append", default=[],
                         help="empty rootfs mount-target dir created by this run")
     parser.add_argument("--self-fail-after", type=float, default=None)

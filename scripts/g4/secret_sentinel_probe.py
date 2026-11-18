@@ -160,8 +160,8 @@ def scan_proc(pid: int) -> dict:
             "sha256": hashlib.sha256(data).hexdigest(),
             "sentinel_count": text.count(SENTINEL),
             # Show the key names only for environ; values are never emitted.
-            "entries": (sorted({line.split("=", 1)[0] for line in text.splitlines()
-                                if "=" in line})[:200] if name == "environ" else None),
+            "entries": (sorted({chunk.split("=", 1)[0] for chunk in text.split("\0")
+                                if "=" in chunk})[:200] if name == "environ" else None),
         }
     return {"schema": "m0.g4d.sentinel-proc.v1", "utc": utc(), "pid": pid,
             "surfaces": surfaces,
