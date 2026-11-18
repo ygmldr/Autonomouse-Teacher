@@ -47,7 +47,7 @@ from autoteacher_m0.bridge.broker_client import BrokerClient, BrokerClientError
 from autoteacher_m0.bridge.fake_backend import FakeBackend
 from autoteacher_m0.bridge.ipc_server import BridgeServer
 from autoteacher_m0.security.egress import (
-    ClaimResult, EgressBoundary, EgressPolicy, EgressRequest,
+    ClaimResult, EgressBoundary, EgressPolicy, EgressRequest, EgressViolation,
     PreparedProviderRequest, TrustedEgressTransport, canonical_json,
     prepared_call_id, prepared_request_digest, prepared_schema_error,
 )
@@ -219,7 +219,8 @@ class _FakeAnalysis:
 class TrustedController:
     def __init__(self, admission: Admission, *, broker: BrokerClient,
                  fake: FakeBackend, attempts: AttemptJournal,
-                 expected_uid: int = 65534, register_admission: bool = True):
+                 expected_uid: int = 65534, register_admission: bool = True,
+                 dispatch_gate: object | None = None):
         self.admission = admission
         self.broker = broker
         self.fake = fake
@@ -237,6 +238,11 @@ class TrustedController:
         # admission quota is still allocated atomically before this lock.
         self._send_lock = threading.Lock()
         self._cancellations: dict[str, _CancelState] = {}
+        # G4-C: optional trusted send gate. ``None`` keeps the frozen G3-C/G3-D
+        # behaviour byte-for-byte; when set, every provider invocation must
+        # first mint and consume a TrustedSendAuthorization (see egress.py).
+        self.dispatch_gate = dispatch_gate
+        self.send_authorizations: list[dict] = []
         if register_admission:
             self.attempts.register_admission(admission.admission_id, admission.sha256,
                                              admission.run_id, self.instance_id)
@@ -488,6 +494,31 @@ class TrustedController:
             if isinstance(transport_id, str):
                 self._finish_transport(transport_id)
 
+    def _authorize_send(self, *, prepared, request, decision,
+                        payload_bytes: bytes, payload_digest: str,
+                        reservation_id: str, attempt_id: str) -> object:
+        """Mint the G4-C send authorization or fail closed before the Fake."""
+        claim_map = decision.claim.claim if decision.claim is not None else None
+        if not isinstance(claim_map, Mapping):
+            self.attempts.mark_settlement_uncertain(
+                attempt_id, reason="EGRESS_DENIED:BROKER_CLAIM_INVALID")
+            raise BridgeError("EGRESS_DENIED")
+        try:
+            authorization = self.dispatch_gate.authorize(
+                prepared=prepared, request=request, permission=decision.permission,
+                payload_bytes=payload_bytes, payload_digest=payload_digest,
+                payload_length=len(payload_bytes),
+                reservation_id=reservation_id,
+                broker_claim_id=str(claim_map.get("call_id") or ""),
+                broker_claim_digest=_sha256(dict(claim_map)),
+                estimated_cost_usd=request.estimated_cost_usd)
+        except EgressViolation as exc:
+            self.attempts.mark_settlement_uncertain(
+                attempt_id, reason=("EGRESS_DENIED:" + ",".join(exc.reasons))[:200])
+            raise BridgeError("EGRESS_DENIED") from exc
+        self.send_authorizations.append(authorization.to_audit_dict())
+        return authorization
+
     def _handle_payload_stream(self, payload: Mapping[str, object],
                                transport_id: str, deadline: float,
                                state: _CancelState | None,
@@ -700,6 +731,12 @@ class TrustedController:
                 fee_policy_version=FEE_POLICY_VERSION)
             self._crash("after_attempt_start_before_fake_send")
             self._checkpoint(state, deadline, "before_send")
+            send_authorization = None
+            if self.dispatch_gate is not None:
+                send_authorization = self._authorize_send(
+                    prepared=prepared, request=request, decision=decision,
+                    payload_bytes=payload_bytes, payload_digest=payload_digest,
+                    reservation_id=reservation_id, attempt_id=attempt_id)
             holder: dict[str, object] = {}
 
             def on_fake_frame(frame: object) -> None:
@@ -722,6 +759,15 @@ class TrustedController:
                 emit(("chunk", dict(chunk)))
 
             def provider(_req):
+                if send_authorization is not None:
+                    # Re-hash the exact bytes and consume the one-shot
+                    # capability immediately before the Fake is entered.
+                    denial = self.dispatch_gate.consume(
+                        send_authorization, payload_bytes=payload_bytes,
+                        request=request)
+                    if denial is not None:
+                        holder["pre_dispatch_denied"] = denial
+                        raise BridgeError("EGRESS_DENIED")
                 if state is not None and state.event.is_set():
                     holder["cancelled_before_send"] = True
                     raise _Cancelled(state.reason or "aborted")
@@ -765,6 +811,12 @@ class TrustedController:
                 return {"status": 200, "usage": mapped_usage, "error": None}
 
             self.transport.dispatch(request, decision.permission, provider=provider)
+            if holder.get("pre_dispatch_denied"):
+                if attempt_id is not None:
+                    self.attempts.mark_settlement_uncertain(
+                        attempt_id,
+                        reason=f"EGRESS_DENIED:{holder['pre_dispatch_denied']}"[:200])
+                raise BridgeError("EGRESS_DENIED")
             if holder.get("cancelled_before_send"):
                 if attempt_id is not None:
                     self.attempts.mark_settlement_uncertain(
@@ -1568,7 +1620,8 @@ def _bridge_options(config: Mapping) -> dict[str, int | None]:
 
 
 def main(argv: list[str] | None = None, *,
-         on_ready: Callable[[], None] | None = None) -> int:
+         on_ready: Callable[[], None] | None = None,
+         dispatch_gate: object | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", required=True)
     args = parser.parse_args(argv)
@@ -1619,7 +1672,8 @@ def main(argv: list[str] | None = None, *,
         controller = TrustedController(admission, broker=broker, fake=fake,
                                        attempts=attempts,
                                        expected_uid=config.get("expected_uid", 65534),
-                                       register_admission=False)
+                                       register_admission=False,
+                                       dispatch_gate=dispatch_gate)
         # G3-C2-04 frozen order: recover old attempts BEFORE consuming a new
         # admission. An ADMISSION_REPLAYED therefore cannot strand durable state.
         controller.reconcile_on_startup(config.get("receipt_dir"))

@@ -11,9 +11,12 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass, field
-from decimal import Decimal
+from datetime import datetime, timedelta, timezone
+from decimal import Decimal, InvalidOperation
 from enum import StrEnum
 import hashlib
+import json
+import os
 import re
 from typing import Callable, Iterable, Mapping, Protocol, Sequence
 
@@ -21,6 +24,7 @@ from autoteacher_m0.accounting.call_identity import (
     IdentitySchemaError, canonical_json, validate_run_id,
 )
 from autoteacher_m0.contracts import ErrorCode, RuntimeFailure
+from .authorization import ExpectedBindings, binding_drift
 
 OPENCODE_GO_HOST = "opencode.ai"
 OPENCODE_GO_PORT = 443
@@ -35,6 +39,9 @@ BROKER_CLAIMER_BAD_REPLY = "BROKER_CLAIMER_BAD_REPLY"
 BROKER_CLAIMER_BOUND_UNSUPPORTED = "CLAIM_BINDING_UNSUPPORTED"
 PREPARED_REQUEST_INVALID = "PREPARED_REQUEST_INVALID"
 PREPARED_DIGEST_MISMATCH = "PREPARED_DIGEST_MISMATCH"
+REQUEST_DIGEST_MISMATCH = "REQUEST_DIGEST_MISMATCH"
+PREPARED_CALL_ID_MISMATCH = "PREPARED_CALL_ID_MISMATCH"
+REQUEST_CALL_ID_MISMATCH = "REQUEST_CALL_ID_MISMATCH"
 RESERVATION_REQUEST_MISMATCH = "RESERVATION_REQUEST_MISMATCH"
 TOOL_SCHEMA_NOT_APPROVED = "TOOL_SCHEMA_NOT_APPROVED"
 PREPARED_SCHEMA_INVALID = "PREPARED_SCHEMA_INVALID"
@@ -634,6 +641,12 @@ class EgressBoundary:
             stream.worst_case_held_usd += Decimal(worst_case_usd)
         elif http_status is not None and 400 <= http_status < 500:
             state = AttemptState.NOT_BILLABLE_HTTP_ERROR
+        elif error_kind is not None:
+            # Any non-None error marker that is not a recognised non-billable
+            # 4xx is a conservative unknown: never a false successful settlement
+            # (e.g. conflicting/duplicate usage signals).
+            state = AttemptState.BILLABLE_UNKNOWN
+            stream.worst_case_held_usd += Decimal(worst_case_usd)
         elif usage is None or "outputTokens" not in usage or "inputTokens" not in usage:
             state = AttemptState.BILLABLE_UNKNOWN
             stream.worst_case_held_usd += Decimal(worst_case_usd)
@@ -947,3 +960,811 @@ def policy_from_json(raw: Mapping[str, object]) -> EgressPolicy:
     return EgressPolicy(host_ports=host_ports, methods=methods, path_prefix=path_prefix,
                         approved_routes=approved_routes, max_tokens=max_tokens,
                         max_attempts=max_attempts, **flags)
+
+
+# ---------------------------------------------------------------------------
+# G4-C trusted synthetic egress contract
+#
+# The two dataclasses below are the frozen G4-C surface documented in
+# ``docs/M0_G4_C_EGRESS_CONTRACT.md``:
+#
+# * ``ProviderRouteContract`` describes exactly what one provider route may
+#   send (host/port/method/exact path, wire format, streaming, tokenizer/price
+#   source, tool schema digests, retry policy, files/images/store switches).
+#   Synthetic fixtures and future real routes are declared separately; the real
+#   template stays BLOCKED.
+# * ``TrustedSendAuthorization`` is a trusted-domain, in-memory, single-use
+#   capability binding scope/run/call/prepared digest/reservation/claim/payload
+#   digest+length/attempt/route/model/epoch/expiry. It has no JSON parser: a
+#   candidate-supplied mapping can never become an authorization.
+#
+# ``TrustedSendGate`` mints/consumes those capabilities, re-hashes the exact
+# bytes immediately before the Fake Provider is entered, and calls the G4-A
+# ``binding_drift("pre_dispatch", ...)`` checkpoint. The gate is opt-in: with
+# no gate the G3-C/G3-D behaviour is unchanged.
+# ---------------------------------------------------------------------------
+G4C_CONTRACT_SCHEMA = "m0.g4c.egress-contract.v1"
+G4C_SEND_AUTHORIZATION_SCHEMA = "m0.g4c.send-authorization.v1"
+ROUTE_KIND_SYNTHETIC = "synthetic_fixture"
+ROUTE_KIND_REAL = "real_provider"
+ACTIVATION_SYNTHETIC_ONLY = "ACTIVE_SYNTHETIC_ONLY"
+ACTIVATION_BLOCKED = "BLOCKED_REQUIRES_HUMAN_VERIFICATION"
+RETRY_POLICY_NO_RETRY = "no_retry"
+SYNTHETIC_PRICE_SOURCE = "fixture_synthetic_rate:v1"
+REAL_PRICE_SOURCE = "REQUIRES_VERIFICATION"
+SYNTHETIC_ROUTE_ID = "offline-test-only-g3b"
+SYNTHETIC_PROVIDER = "offline-test-only-g3b"
+SYNTHETIC_MODEL_ID = "fixture-bridge-v1"
+SYNTHETIC_HOST = "g3b-fake.local"
+SYNTHETIC_PORT = 9000
+SYNTHETIC_EXACT_PATH = "/v1/g3b/chat"
+SYNTHETIC_FORMAT_VERSION = "m0.g3b.fake.v1"
+SYNTHETIC_STREAMING_CONTRACT = "synthetic_frames_v1"
+# canonical_json(skill_lookup schema) from the frozen G3-C/G3-D capture fixture.
+SKILL_LOOKUP_SCHEMA_DIGEST = (
+    "c984bef0ae31771da16a12ef2e7972b289cde6014b7f8ad12349f16c4f77b704")
+SEND_AUTHORIZATION_TTL_SECONDS = 30
+SEND_AUTHORIZATION_LIMIT = 256
+_SEND_ID_RE = re.compile(r"send-[0-9a-f]{32}\Z", re.ASCII)
+_METHODS = frozenset({"POST"})
+_UTC_TEXT = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z\Z")
+
+
+def _contract_text(value: object, name: str, *, optional: bool = False) -> str | None:
+    if value is None and optional:
+        return None
+    if not isinstance(value, str) or not value or value != value.strip():
+        raise ValueError(f"invalid route contract field {name}")
+    if any(char.isspace() or ord(char) < 32 or ord(char) == 127 for char in value):
+        raise ValueError(f"invalid route contract field {name}")
+    return value
+
+
+def _contract_digest_set(value: object) -> frozenset[str]:
+    if isinstance(value, (str, bytes)) or not isinstance(value, (list, tuple, set,
+                                                               frozenset)):
+        raise ValueError("invalid route contract tool schema digests")
+    digests = set()
+    for item in value:
+        if not isinstance(item, str) or not REQUEST_DIGEST_RE.fullmatch(item):
+            raise ValueError("invalid route contract tool schema digest")
+        digests.add(item)
+    if len(digests) != len(value):
+        raise ValueError("duplicate route contract tool schema digest")
+    return frozenset(digests)
+
+
+@dataclass(frozen=True)
+class ProviderRouteContract:
+    """Frozen description of one provider route; never an endpoint guess."""
+
+    route_id: str
+    provider: str
+    model_id: str
+    endpoint_host: str | None
+    port: int | None
+    method: str | None
+    exact_path: str | None
+    request_format_version: str | None
+    streaming_contract: str | None
+    tokenizer_price_source_version: str | None
+    max_output_tokens: int
+    allowed_tool_schema_digests: frozenset[str]
+    retry_policy: str
+    allow_files: bool
+    allow_images: bool
+    allow_store: bool
+    route_kind: str
+    price_source: str
+    activation: str
+
+    def contract_problems(self) -> tuple[str, ...]:
+        """Stable reasons this declaration is not a valid frozen contract."""
+        problems: list[str] = []
+        for name in ("route_id", "provider", "model_id"):
+            try:
+                _contract_text(getattr(self, name), name)
+            except ValueError:
+                problems.append(f"ROUTE_CONTRACT_FIELD_INVALID:{name}")
+        if self.route_kind not in {ROUTE_KIND_SYNTHETIC, ROUTE_KIND_REAL}:
+            problems.append("ROUTE_CONTRACT_KIND_INVALID")
+        if self.activation not in {ACTIVATION_SYNTHETIC_ONLY, ACTIVATION_BLOCKED}:
+            problems.append("ROUTE_CONTRACT_ACTIVATION_INVALID")
+        if self.retry_policy != RETRY_POLICY_NO_RETRY:
+            problems.append("ROUTE_CONTRACT_RETRY_POLICY_INVALID")
+        if type(self.max_output_tokens) is not int or not 1 <= self.max_output_tokens <= MAX_OUTPUT_TOKENS:
+            problems.append("ROUTE_CONTRACT_MAX_TOKENS_INVALID")
+        for name, value in (("allow_files", self.allow_files),
+                            ("allow_images", self.allow_images),
+                            ("allow_store", self.allow_store)):
+            if type(value) is not bool:
+                problems.append(f"ROUTE_CONTRACT_FLAG_INVALID:{name}")
+        if (not isinstance(self.allowed_tool_schema_digests, frozenset)
+                or any(not isinstance(digest, str)
+                       or not REQUEST_DIGEST_RE.fullmatch(digest)
+                       for digest in self.allowed_tool_schema_digests)):
+            problems.append("ROUTE_CONTRACT_TOOL_DIGESTS_INVALID")
+        active = (self.route_kind == ROUTE_KIND_SYNTHETIC
+                  and self.activation == ACTIVATION_SYNTHETIC_ONLY)
+        if active:
+            for name in ("endpoint_host", "method", "exact_path",
+                         "request_format_version", "streaming_contract",
+                         "tokenizer_price_source_version", "price_source"):
+                value = getattr(self, name)
+                try:
+                    _contract_text(value, name)
+                except ValueError:
+                    problems.append(f"ROUTE_CONTRACT_FIELD_INVALID:{name}")
+            if self.price_source != SYNTHETIC_PRICE_SOURCE:
+                problems.append("ROUTE_CONTRACT_PRICE_SOURCE_INVALID")
+            if self.endpoint_host != SYNTHETIC_HOST:
+                problems.append("ROUTE_CONTRACT_HOST_NOT_FIXTURE")
+            if type(self.port) is not int or not 1 <= self.port <= 65535:
+                problems.append("ROUTE_CONTRACT_PORT_INVALID")
+            if self.method is not None and self.method.upper() not in _METHODS:
+                problems.append("ROUTE_CONTRACT_METHOD_INVALID")
+            if self.exact_path is not None and (
+                    not self.exact_path.startswith("/")
+                    or "\\" in self.exact_path or ".." in self.exact_path
+                    or "%2e" in self.exact_path.casefold()):
+                problems.append("ROUTE_CONTRACT_PATH_INVALID")
+        else:
+            for name in ("endpoint_host", "port", "method", "exact_path",
+                         "request_format_version", "streaming_contract",
+                         "tokenizer_price_source_version"):
+                if getattr(self, name) is not None:
+                    problems.append(f"ROUTE_CONTRACT_BLOCKED_FIELD_SET:{name}")
+            if self.price_source != REAL_PRICE_SOURCE:
+                problems.append("ROUTE_CONTRACT_BLOCKED_PRICE_SOURCE_INVALID")
+        return tuple(problems)
+
+    def send_problems(self) -> tuple[str, ...]:
+        """Reasons this contract may never reach a provider call."""
+        problems = list(self.contract_problems())
+        if self.route_kind != ROUTE_KIND_SYNTHETIC:
+            problems.append("REAL_ROUTE_BLOCKED_REQUIRES_HUMAN_VERIFICATION")
+        if self.activation != ACTIVATION_SYNTHETIC_ONLY:
+            problems.append("ROUTE_ACTIVATION_NOT_SYNTHETIC_ONLY")
+        if self.price_source != SYNTHETIC_PRICE_SOURCE:
+            problems.append("PRICING_SOURCE_UNVERIFIED")
+        return tuple(problems)
+
+    def to_mapping(self) -> dict[str, object]:
+        return {
+            "schema": G4C_CONTRACT_SCHEMA,
+            "route_id": self.route_id, "provider": self.provider,
+            "model_id": self.model_id, "endpoint_host": self.endpoint_host,
+            "port": self.port, "method": self.method, "exact_path": self.exact_path,
+            "request_format_version": self.request_format_version,
+            "streaming_contract": self.streaming_contract,
+            "tokenizer_price_source_version": self.tokenizer_price_source_version,
+            "max_output_tokens": self.max_output_tokens,
+            "allowed_tool_schema_digests": sorted(self.allowed_tool_schema_digests),
+            "retry_policy": self.retry_policy,
+            "allow_files": self.allow_files, "allow_images": self.allow_images,
+            "allow_store": self.allow_store, "route_kind": self.route_kind,
+            "price_source": self.price_source, "activation": self.activation,
+        }
+
+    @classmethod
+    def from_mapping(cls, raw: Mapping[str, object]) -> "ProviderRouteContract":
+        """Strict loader for a trusted launcher-owned declaration."""
+        if not isinstance(raw, Mapping):
+            raise TypeError("route contract must be a mapping")
+        fields = {"schema", "route_id", "provider", "model_id", "endpoint_host",
+                  "port", "method", "exact_path", "request_format_version",
+                  "streaming_contract", "tokenizer_price_source_version",
+                  "max_output_tokens", "allowed_tool_schema_digests",
+                  "retry_policy", "allow_files", "allow_images", "allow_store",
+                  "route_kind", "price_source", "activation"}
+        if set(raw) != fields:
+            raise ValueError("route contract field set is not frozen")
+        if raw["schema"] != G4C_CONTRACT_SCHEMA:
+            raise ValueError("route contract schema mismatch")
+        max_tokens = raw["max_output_tokens"]
+        if type(max_tokens) is not int:
+            raise ValueError("route contract max_output_tokens must be an int")
+        port = raw["port"]
+        if port is not None and type(port) is not int:
+            raise ValueError("route contract port must be an int")
+        flags = {}
+        for name in ("allow_files", "allow_images", "allow_store"):
+            if type(raw[name]) is not bool:
+                raise ValueError(f"route contract {name} must be bool")
+            flags[name] = raw[name]
+        contract = cls(
+            route_id=_contract_text(raw["route_id"], "route_id"),
+            provider=_contract_text(raw["provider"], "provider"),
+            model_id=_contract_text(raw["model_id"], "model_id"),
+            endpoint_host=_contract_text(raw["endpoint_host"], "endpoint_host",
+                                         optional=True),
+            port=port,
+            method=_contract_text(raw["method"], "method", optional=True),
+            exact_path=_contract_text(raw["exact_path"], "exact_path", optional=True),
+            request_format_version=_contract_text(
+                raw["request_format_version"], "request_format_version",
+                optional=True),
+            streaming_contract=_contract_text(
+                raw["streaming_contract"], "streaming_contract", optional=True),
+            tokenizer_price_source_version=_contract_text(
+                raw["tokenizer_price_source_version"],
+                "tokenizer_price_source_version", optional=True),
+            max_output_tokens=max_tokens,
+            allowed_tool_schema_digests=_contract_digest_set(
+                raw["allowed_tool_schema_digests"]),
+            retry_policy=_contract_text(raw["retry_policy"], "retry_policy"),
+            allow_files=flags["allow_files"], allow_images=flags["allow_images"],
+            allow_store=flags["allow_store"],
+            route_kind=_contract_text(raw["route_kind"], "route_kind"),
+            price_source=_contract_text(raw["price_source"], "price_source"),
+            activation=_contract_text(raw["activation"], "activation"),
+        )
+        problems = contract.contract_problems()
+        if problems:
+            raise ValueError("invalid route contract: " + ", ".join(problems))
+        return contract
+
+
+SYNTHETIC_ROUTE_CONTRACT = ProviderRouteContract(
+    route_id=SYNTHETIC_ROUTE_ID,
+    provider=SYNTHETIC_PROVIDER,
+    model_id=SYNTHETIC_MODEL_ID,
+    endpoint_host=SYNTHETIC_HOST,
+    port=SYNTHETIC_PORT,
+    method="POST",
+    exact_path=SYNTHETIC_EXACT_PATH,
+    request_format_version=SYNTHETIC_FORMAT_VERSION,
+    streaming_contract=SYNTHETIC_STREAMING_CONTRACT,
+    tokenizer_price_source_version=SYNTHETIC_PRICE_SOURCE,
+    max_output_tokens=MAX_OUTPUT_TOKENS,
+    allowed_tool_schema_digests=frozenset({SKILL_LOOKUP_SCHEMA_DIGEST}),
+    retry_policy=RETRY_POLICY_NO_RETRY,
+    allow_files=False,
+    allow_images=False,
+    allow_store=False,
+    route_kind=ROUTE_KIND_SYNTHETIC,
+    price_source=SYNTHETIC_PRICE_SOURCE,
+    activation=ACTIVATION_SYNTHETIC_ONLY,
+)
+
+REAL_ROUTE_TEMPLATE = ProviderRouteContract(
+    route_id="deepseek-official",
+    provider="deepseek",
+    model_id="REQUIRES_VERIFICATION",
+    endpoint_host=None,
+    port=None,
+    method=None,
+    exact_path=None,
+    request_format_version=None,
+    streaming_contract=None,
+    tokenizer_price_source_version=None,
+    max_output_tokens=MAX_OUTPUT_TOKENS,
+    allowed_tool_schema_digests=frozenset(),
+    retry_policy=RETRY_POLICY_NO_RETRY,
+    allow_files=False,
+    allow_images=False,
+    allow_store=False,
+    route_kind=ROUTE_KIND_REAL,
+    price_source=REAL_PRICE_SOURCE,
+    activation=ACTIVATION_BLOCKED,
+)
+
+
+@dataclass(frozen=True)
+class SyntheticSendBudget:
+    """Synthetic fixture budget; the $10 hard cap is an engineering bound only."""
+
+    soft_total_usd: Decimal = Decimal("3.00")
+    hard_total_usd: Decimal = Decimal("10.00")
+    soft_call_usd: Decimal = Decimal("0.10")
+    hard_call_usd: Decimal = Decimal("0.20")
+    max_sends: int = 50
+
+    def budget_problems(self) -> tuple[str, ...]:
+        problems: list[str] = []
+        for name in ("soft_total_usd", "hard_total_usd", "soft_call_usd",
+                     "hard_call_usd"):
+            value = getattr(self, name)
+            if not isinstance(value, Decimal) or not value.is_finite() or value <= 0:
+                problems.append(f"BUDGET_VALUE_INVALID:{name}")
+        if problems:
+            return tuple(problems)
+        if self.soft_total_usd > self.hard_total_usd:
+            problems.append("BUDGET_SOFT_TOTAL_EXCEEDS_HARD")
+        if self.soft_call_usd > self.hard_call_usd:
+            problems.append("BUDGET_SOFT_CALL_EXCEEDS_HARD")
+        if self.hard_call_usd > self.hard_total_usd:
+            problems.append("BUDGET_CALL_EXCEEDS_TOTAL")
+        if type(self.max_sends) is not int or not 1 <= self.max_sends <= 50:
+            problems.append("BUDGET_MAX_SENDS_INVALID")
+        return tuple(problems)
+
+
+@dataclass(frozen=True)
+class TrustedSendAuthorization:
+    """Trusted-domain single-use send capability; no JSON constructor exists.
+
+    ``TrustedSendGate.consume`` accepts only the exact object this process
+    minted (identity check), so a candidate-supplied mapping or a copied
+    dataclass is never a credential.
+    """
+
+    authorization_id: str
+    scope_id: str
+    run_id: str
+    call_id: str
+    prepared_digest: str
+    payload_digest: str
+    payload_length: int
+    attempt_ordinal: int
+    reservation_id: str
+    broker_claim_id: str
+    broker_claim_digest: str
+    route_id: str
+    model_id: str
+    auth_epoch: str
+    issued_utc: str
+    expires_utc: str
+    route_kind: str
+    synthetic: bool = True
+    schema_version: str = G4C_SEND_AUTHORIZATION_SCHEMA
+
+    def __post_init__(self) -> None:
+        if self.schema_version != G4C_SEND_AUTHORIZATION_SCHEMA:
+            raise ValueError("send authorization schema mismatch")
+        if not isinstance(self.authorization_id, str) or not _SEND_ID_RE.fullmatch(
+                self.authorization_id):
+            raise ValueError("send authorization id invalid")
+        if not isinstance(self.call_id, str) or not CALL_ID_RE.fullmatch(self.call_id):
+            raise ValueError("send authorization call id invalid")
+        for name in ("prepared_digest", "payload_digest", "broker_claim_digest"):
+            value = getattr(self, name)
+            if not isinstance(value, str) or not REQUEST_DIGEST_RE.fullmatch(value):
+                raise ValueError(f"send authorization {name} invalid")
+        if type(self.payload_length) is not int or self.payload_length < 0:
+            raise ValueError("send authorization payload length invalid")
+        if type(self.attempt_ordinal) is not int or self.attempt_ordinal < 1:
+            raise ValueError("send authorization attempt invalid")
+        for name in ("scope_id", "run_id", "reservation_id", "broker_claim_id",
+                     "route_id", "model_id", "auth_epoch"):
+            value = getattr(self, name)
+            if not isinstance(value, str) or not value or value != value.strip():
+                raise ValueError(f"send authorization {name} invalid")
+        for name in ("issued_utc", "expires_utc"):
+            value = getattr(self, name)
+            if not isinstance(value, str) or not _UTC_TEXT.fullmatch(value):
+                raise ValueError(f"send authorization {name} invalid")
+        if self.expires_utc <= self.issued_utc:
+            raise ValueError("send authorization expiry must follow issue time")
+        if self.route_kind != ROUTE_KIND_SYNTHETIC or self.synthetic is not True:
+            raise ValueError("only synthetic send authorizations exist in G4-C")
+
+    def to_audit_dict(self) -> dict[str, object]:
+        """Full binding record; deliberately no secret material exists here."""
+        return {
+            "schema": self.schema_version,
+            "authorization_id": self.authorization_id,
+            "scope_id": self.scope_id,
+            "run_id": self.run_id,
+            "call_id": self.call_id,
+            "prepared_digest": self.prepared_digest,
+            "payload_digest": self.payload_digest,
+            "payload_length": self.payload_length,
+            "attempt_ordinal": self.attempt_ordinal,
+            "reservation_id": self.reservation_id,
+            "broker_claim_id": self.broker_claim_id,
+            "broker_claim_digest": self.broker_claim_digest,
+            "route_id": self.route_id,
+            "model_id": self.model_id,
+            "auth_epoch": self.auth_epoch,
+            "issued_utc": self.issued_utc,
+            "expires_utc": self.expires_utc,
+            "route_kind": self.route_kind,
+            "synthetic": self.synthetic,
+        }
+
+
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _utc_text(moment: datetime) -> str:
+    return moment.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _payload_digest(payload_bytes: bytes) -> str:
+    return hashlib.sha256(payload_bytes).hexdigest()
+
+
+def tool_schema_digest(tool: Mapping[str, object]) -> str:
+    """Canonical SHA-256 used by the frozen tool-schema allowlist."""
+    return hashlib.sha256(canonical_json(dict(tool)).encode("utf-8")).hexdigest()
+
+
+class TrustedSendGate:
+    """Mint/consume TrustedSendAuthorization and enforce the G4-C pre-dispatch set."""
+
+    def __init__(self, contract: ProviderRouteContract, *,
+                 budget: SyntheticSendBudget | None = None,
+                 auth_epoch: str = "",
+                 journal_path: str | os.PathLike[str] | None = None,
+                 binding_approved: ExpectedBindings | None = None,
+                 binding_observer: Callable[[], ExpectedBindings] | None = None,
+                 binding_checkpoint: str = "pre_dispatch",
+                 ttl_seconds: int = SEND_AUTHORIZATION_TTL_SECONDS,
+                 limit: int = SEND_AUTHORIZATION_LIMIT,
+                 now: Callable[[], datetime] = _utc_now) -> None:
+        if not isinstance(contract, ProviderRouteContract):
+            raise TypeError("contract must be a ProviderRouteContract")
+        if not isinstance(auth_epoch, str) or not auth_epoch or auth_epoch != auth_epoch.strip():
+            raise ValueError("auth_epoch must be a nonempty identifier")
+        if binding_checkpoint not in {"pre_start", "pre_reserve", "pre_dispatch"}:
+            raise ValueError("unknown binding checkpoint")
+        if type(ttl_seconds) is not int or not 1 <= ttl_seconds <= 300:
+            raise ValueError("invalid send authorization ttl")
+        if type(limit) is not int or not 1 <= limit <= SEND_AUTHORIZATION_LIMIT:
+            raise ValueError("invalid send authorization limit")
+        self.contract = contract
+        self.budget = budget or SyntheticSendBudget()
+        budget_problems = self.budget.budget_problems()
+        if budget_problems:
+            raise ValueError("invalid synthetic budget: " + ", ".join(budget_problems))
+        self.auth_epoch = auth_epoch
+        self.journal_path = str(journal_path) if journal_path is not None else None
+        self.binding_approved = binding_approved
+        self.binding_observer = binding_observer
+        self.binding_checkpoint = binding_checkpoint
+        self.ttl_seconds = ttl_seconds
+        self.limit = limit
+        self._now = now
+        self._issued: dict[int, TrustedSendAuthorization] = {}
+        self._consumed: set[str] = set()
+        self._known_usd = Decimal("0")
+        self._held_usd = Decimal("0")
+        self._soft_events: list[dict[str, object]] = []
+        self._denials: list[dict[str, object]] = []
+        self._sends = 0
+        self.send_problems = contract.send_problems()
+
+    # -- audit ---------------------------------------------------------
+    def _journal(self, document: Mapping[str, object]) -> None:
+        if self.journal_path is None:
+            return
+        data = (canonical_json(dict(document)) + "\n").encode("utf-8")
+        flags = os.O_WRONLY | os.O_CREAT | os.O_APPEND | os.O_CLOEXEC
+        if hasattr(os, "O_NOFOLLOW"):
+            flags |= os.O_NOFOLLOW
+        try:
+            descriptor = os.open(self.journal_path, flags, 0o600)
+        except OSError as error:
+            raise EgressViolation(("SEND_JOURNAL_UNAVAILABLE",)) from error
+        try:
+            written = 0
+            while written < len(data):
+                written += os.write(descriptor, data[written:])
+            os.fsync(descriptor)
+        except OSError as error:
+            raise EgressViolation(("SEND_JOURNAL_WRITE_FAILED",)) from error
+        finally:
+            os.close(descriptor)
+
+    def _deny(self, reasons: Iterable[str], **detail: object) -> EgressViolation:
+        codes = tuple(reasons) or ("EGRESS_DENIED",)
+        record = {"decision": "DENIED", "utc": _utc_text(self._now()),
+                  "reasons": list(codes), "detail": detail}
+        self._denials.append(record)
+        try:
+            self._journal(record)
+        except EgressViolation:
+            pass
+        return EgressViolation(codes)
+
+    # -- pre-dispatch binding check (G4-A wiring) ----------------------
+    def pre_dispatch_binding_reasons(self) -> tuple[str, ...]:
+        if self.binding_approved is None or self.binding_observer is None:
+            return ("PRE_DISPATCH_CHECK_INCOMPLETE",)
+        try:
+            observed = self.binding_observer()
+        except BaseException:  # noqa: BLE001 - any observer failure fails closed
+            return ("PRE_DISPATCH_CHECK_ERROR",)
+        if not isinstance(observed, ExpectedBindings):
+            return ("PRE_DISPATCH_CHECK_INVALID",)
+        try:
+            return binding_drift(self.binding_checkpoint,
+                                 approved=self.binding_approved,
+                                 observed=observed)
+        except (TypeError, ValueError):
+            return ("PRE_DISPATCH_CHECK_INVALID",)
+
+    # -- authorization -------------------------------------------------
+    def authorize(self, *, prepared: PreparedProviderRequest,
+                  request: EgressRequest, permission: object,
+                  payload_bytes: bytes, payload_digest: str,
+                  reservation_id: str, broker_claim_id: str,
+                  broker_claim_digest: str, payload_length: int,
+                  estimated_cost_usd: str | None = None) -> TrustedSendAuthorization:
+        """Mint one capability or raise EgressViolation with stable reasons."""
+        reasons: list[str] = []
+        if self.send_problems:
+            raise self._deny(self.send_problems)
+        if not isinstance(prepared, PreparedProviderRequest):
+            raise self._deny((PREPARED_REQUEST_INVALID,))
+        schema_error = prepared_schema_error(prepared)
+        if schema_error is not None:
+            raise self._deny((schema_error,))
+        computed_prepared = prepared_request_digest(prepared)
+        computed_call_id = prepared_call_id(prepared)
+        if prepared.request_digest != computed_prepared:
+            reasons.append(PREPARED_DIGEST_MISMATCH)
+        if request.request_digest != computed_prepared:
+            reasons.append(REQUEST_DIGEST_MISMATCH)
+        if prepared.call_id != computed_call_id:
+            reasons.append(PREPARED_CALL_ID_MISMATCH)
+        if request.call_id != computed_call_id:
+            reasons.append(REQUEST_CALL_ID_MISMATCH)
+        # Exact route contract binding (no prefix/wildcard comparisons).
+        if prepared.route_id != self.contract.route_id:
+            reasons.append("ROUTE_CONTRACT_MISMATCH:route_id")
+        if prepared.provider != self.contract.provider:
+            reasons.append("ROUTE_CONTRACT_MISMATCH:provider")
+        if prepared.model != self.contract.model_id:
+            reasons.append("ROUTE_CONTRACT_MISMATCH:model_id")
+        if prepared.host != self.contract.endpoint_host:
+            reasons.append("ROUTE_CONTRACT_MISMATCH:host")
+        if prepared.port != self.contract.port:
+            reasons.append("ROUTE_CONTRACT_MISMATCH:port")
+        if (not isinstance(prepared.method, str)
+                or prepared.method.upper() != str(self.contract.method).upper()):
+            reasons.append("ROUTE_CONTRACT_MISMATCH:method")
+        if prepared.path != self.contract.exact_path:
+            reasons.append("ROUTE_CONTRACT_MISMATCH:path")
+        if prepared.stream != (self.contract.streaming_contract != "none"):
+            reasons.append("ROUTE_CONTRACT_MISMATCH:stream")
+        if prepared.max_output_tokens > self.contract.max_output_tokens:
+            reasons.append("MAX_TOKENS_EXCEEDED")
+        if prepared.retry_policy is not None:
+            reasons.append("RETRY_POLICY_NOT_APPROVED")
+        flag_map = (("has_files", "allow_files"), ("has_images", "allow_images"),
+                    ("store", "allow_store"))
+        for name, policy_name in flag_map:
+            if getattr(prepared, name) is True and not getattr(self.contract, policy_name):
+                reasons.append(f"{name.upper()}_NOT_PERMITTED")
+        # The transport request is what the provider closure receives.
+        if request.max_tokens > self.contract.max_output_tokens:
+            reasons.append("MAX_TOKENS_EXCEEDED")
+        if request.host != self.contract.endpoint_host or request.port != self.contract.port:
+            reasons.append("ROUTE_CONTRACT_MISMATCH:request_host")
+        if (not isinstance(request.method, str)
+                or request.method.upper() != str(self.contract.method).upper()):
+            reasons.append("ROUTE_CONTRACT_MISMATCH:request_method")
+        if request.path != self.contract.exact_path:
+            reasons.append("ROUTE_CONTRACT_MISMATCH:request_path")
+        for name, policy_name in flag_map:
+            if getattr(request, name) is True and not getattr(self.contract, policy_name):
+                reasons.append(f"{name.upper()}_NOT_PERMITTED")
+        try:
+            tool_digests = {tool_schema_digest(tool) for tool in prepared.tools}
+        except (TypeError, ValueError):
+            tool_digests = set()
+            reasons.append("TOOL_SCHEMA_INVALID")
+        if not tool_digests.issubset(set(self.contract.allowed_tool_schema_digests)):
+            reasons.append(TOOL_SCHEMA_NOT_APPROVED)
+        # Claim/permission binding.
+        if not isinstance(permission, DispatchPermission):
+            reasons.append("DISPATCH_PERMISSION_REQUIRED")
+        else:
+            claim = permission.claim
+            claim_map = getattr(claim, "claim", None)
+            if not isinstance(claim, ClaimResult) or claim.claimed is not True:
+                reasons.append("DISPATCH_PERMISSION_REQUIRED")
+            elif not isinstance(claim_map, Mapping):
+                reasons.append("BROKER_CLAIM_INVALID")
+            else:
+                if claim_map.get("call_id") != computed_call_id:
+                    reasons.append("BROKER_CLAIM_CALL_MISMATCH")
+                if claim_map.get("reservation_id") != reservation_id:
+                    reasons.append("BROKER_CLAIM_RESERVATION_MISMATCH")
+                if claim_map.get("request_digest") != computed_prepared:
+                    reasons.append("BROKER_CLAIM_DIGEST_MISMATCH")
+                if hashlib.sha256(canonical_json(dict(claim_map)).encode()).hexdigest() \
+                        != broker_claim_digest:
+                    reasons.append("BROKER_CLAIM_DIGEST_INVALID")
+                if str(broker_claim_id) != str(claim_map.get("call_id")):
+                    reasons.append("BROKER_CLAIM_ID_MISMATCH")
+            if permission.call_id != computed_call_id:
+                reasons.append("PERMISSION_CALL_MISMATCH")
+            if permission.request_digest != computed_prepared:
+                reasons.append("PERMISSION_DIGEST_MISMATCH")
+            if permission.logical_stream_id != request.logical_stream_id:
+                reasons.append("PERMISSION_STREAM_MISMATCH")
+            if permission.reservation_id != reservation_id:
+                reasons.append("PERMISSION_RESERVATION_MISMATCH")
+            if permission.attempt_ordinal != request.attempt_ordinal:
+                reasons.append("PERMISSION_ATTEMPT_MISMATCH")
+            if permission.route_model != (self.contract.route_id,
+                                          self.contract.model_id):
+                reasons.append("PERMISSION_ROUTE_MISMATCH")
+        # Actual bytes: length + digest + minimal wire binding re-checked here.
+        if not isinstance(payload_bytes, bytes) or type(payload_length) is not int:
+            reasons.append("PAYLOAD_BYTES_INVALID")
+        else:
+            if len(payload_bytes) != payload_length:
+                reasons.append("PAYLOAD_LENGTH_MISMATCH")
+            if _payload_digest(payload_bytes) != payload_digest:
+                reasons.append("PAYLOAD_DIGEST_MISMATCH")
+            document = _strict_payload_document(payload_bytes)
+            if document is None:
+                reasons.append("PAYLOAD_SCHEMA_INVALID")
+            else:
+                if document.get("schema") != self.contract.request_format_version:
+                    reasons.append("PAYLOAD_FORMAT_MISMATCH")
+                if document.get("call_id") != computed_call_id:
+                    reasons.append("PAYLOAD_CALL_MISMATCH")
+                if document.get("prepared_digest") != computed_prepared:
+                    reasons.append("PAYLOAD_PREPARED_DIGEST_MISMATCH")
+                if document.get("route_id") != self.contract.route_id:
+                    reasons.append("PAYLOAD_ROUTE_MISMATCH")
+                if document.get("model") != self.contract.model_id:
+                    reasons.append("PAYLOAD_MODEL_MISMATCH")
+        # Budget: unknown/absent cost is never zero.
+        try:
+            cost = Decimal(str(estimated_cost_usd if estimated_cost_usd is not None
+                               else request.estimated_cost_usd))
+        except (InvalidOperation, ValueError):
+            cost = None
+            reasons.append("COST_UNKNOWN")
+        if cost is not None:
+            if not cost.is_finite() or cost <= 0:
+                reasons.append("COST_UNKNOWN")
+            else:
+                if cost > self.budget.hard_call_usd:
+                    reasons.append("PER_CALL_BUDGET_EXCEEDED")
+                if self._known_usd + self._held_usd + cost > self.budget.hard_total_usd:
+                    reasons.append("HARD_BUDGET_CEILING_EXCEEDED")
+        if len(self._issued) >= self.limit:
+            reasons.append("SEND_AUTHORIZATION_LIMIT_REACHED")
+        reasons.extend(self.pre_dispatch_binding_reasons())
+        if reasons:
+            raise self._deny(reasons, call_id=computed_call_id,
+                             reservation_id=reservation_id)
+        moment = self._now()
+        issued = _utc_text(moment)
+        expires = _utc_text(moment + timedelta(seconds=self.ttl_seconds))
+        material = {
+            "nonce": os.urandom(8).hex(),
+            "schema": G4C_SEND_AUTHORIZATION_SCHEMA,
+            "scope_id": prepared.scope_id, "run_id": prepared.run_id,
+            "call_id": computed_call_id, "prepared_digest": computed_prepared,
+            "payload_digest": payload_digest, "payload_length": len(payload_bytes),
+            "attempt_ordinal": request.attempt_ordinal,
+            "reservation_id": reservation_id,
+            "broker_claim_id": broker_claim_id,
+            "broker_claim_digest": broker_claim_digest,
+            "auth_epoch": self.auth_epoch, "issued_utc": issued,
+        }
+        authorization = TrustedSendAuthorization(
+            authorization_id="send-" + hashlib.sha256(
+                canonical_json(material).encode("utf-8")).hexdigest()[:32],
+            scope_id=prepared.scope_id, run_id=prepared.run_id,
+            call_id=computed_call_id, prepared_digest=computed_prepared,
+            payload_digest=payload_digest, payload_length=len(payload_bytes),
+            attempt_ordinal=request.attempt_ordinal,
+            reservation_id=reservation_id, broker_claim_id=broker_claim_id,
+            broker_claim_digest=broker_claim_digest,
+            route_id=self.contract.route_id, model_id=self.contract.model_id,
+            auth_epoch=self.auth_epoch, issued_utc=issued, expires_utc=expires,
+            route_kind=self.contract.route_kind, synthetic=True)
+        # Journal first: a configured audit journal that cannot be written is a
+        # hard failure, never a silent unlogged send authorization.
+        self._journal({"decision": "AUTHORIZED",
+                       "utc": issued,
+                       **authorization.to_audit_dict()})
+        self._issued[id(authorization)] = authorization
+        self._sends += 1
+        if cost is not None:
+            if cost > self.budget.soft_call_usd:
+                self._soft_events.append({"kind": "soft_call", "cost_usd": str(cost),
+                                          "call_id": computed_call_id})
+            if self._known_usd + self._held_usd + cost > self.budget.soft_total_usd:
+                self._soft_events.append({"kind": "soft_total",
+                                          "cost_usd": str(cost),
+                                          "call_id": computed_call_id})
+            self._known_usd += cost
+        return authorization
+
+    def consume(self, authorization: object, *,
+                payload_bytes: object = None,
+                request: EgressRequest | None = None) -> str | None:
+        """Consume exactly one process-minted capability; None means accepted."""
+        if not isinstance(authorization, TrustedSendAuthorization):
+            self._record_consume(None, "AUTHORIZATION_UNKNOWN")
+            return "AUTHORIZATION_UNKNOWN"
+        registered = self._issued.get(id(authorization))
+        if registered is not authorization:
+            if authorization.authorization_id in self._consumed:
+                self._record_consume(authorization, "AUTHORIZATION_REPLAYED")
+                return "AUTHORIZATION_REPLAYED"
+            self._record_consume(authorization, "AUTHORIZATION_UNKNOWN")
+            return "AUTHORIZATION_UNKNOWN"
+        if self._now() >= datetime.strptime(
+                authorization.expires_utc, "%Y-%m-%dT%H:%M:%SZ").replace(
+                    tzinfo=timezone.utc):
+            del self._issued[id(authorization)]
+            self._consumed.add(authorization.authorization_id)
+            self._record_consume(authorization, "AUTHORIZATION_EXPIRED")
+            return "AUTHORIZATION_EXPIRED"
+        if authorization.auth_epoch != self.auth_epoch:
+            self._record_consume(authorization, "AUTH_EPOCH_MISMATCH")
+            return "AUTH_EPOCH_MISMATCH"
+        if not isinstance(payload_bytes, bytes):
+            self._record_consume(authorization, "PAYLOAD_BYTES_INVALID")
+            return "PAYLOAD_BYTES_INVALID"
+        if len(payload_bytes) != authorization.payload_length:
+            self._record_consume(authorization, "PAYLOAD_LENGTH_MISMATCH")
+            return "PAYLOAD_LENGTH_MISMATCH"
+        if _payload_digest(payload_bytes) != authorization.payload_digest:
+            self._record_consume(authorization, "PAYLOAD_DIGEST_MISMATCH")
+            return "PAYLOAD_DIGEST_MISMATCH"
+        if request is not None:
+            if (request.call_id != authorization.call_id
+                    or request.reservation_id != authorization.reservation_id
+                    or request.attempt_ordinal != authorization.attempt_ordinal):
+                self._record_consume(authorization, "REQUEST_BINDING_MISMATCH")
+                return "REQUEST_BINDING_MISMATCH"
+        del self._issued[id(authorization)]
+        self._consumed.add(authorization.authorization_id)
+        self._record_consume(authorization, "CONSUMED")
+        return None
+
+    def _record_consume(self, authorization: TrustedSendAuthorization | None,
+                        decision: str) -> None:
+        record: dict[str, object] = {
+            "decision": decision, "utc": _utc_text(self._now()),
+            "authorization_id": (authorization.authorization_id
+                                 if authorization is not None else None),
+        }
+        if decision != "CONSUMED":
+            self._denials.append(record)
+        try:
+            self._journal(record)
+        except EgressViolation:
+            pass
+
+    def snapshot(self) -> dict[str, object]:
+        return {
+            "schema": "m0.g4c.send-gate.v1",
+            "route_contract": self.contract.to_mapping(),
+            "contract_problems": list(self.send_problems),
+            "auth_epoch": self.auth_epoch,
+            "binding_checkpoint": self.binding_checkpoint,
+            "binding_check_configured": (self.binding_approved is not None
+                                         and self.binding_observer is not None),
+            "issued": len(self._issued),
+            "consumed": len(self._consumed),
+            "sends_authorized": self._sends,
+            "known_cost_usd": format(self._known_usd, "f"),
+            "worst_case_held_usd": format(self._held_usd, "f"),
+            "soft_events": list(self._soft_events),
+            "denials": list(self._denials),
+        }
+
+
+def _strict_payload_document(payload_bytes: bytes) -> dict[str, object] | None:
+    """Parse the trusted wire payload; duplicate keys/NaN are invalid."""
+    def reject_duplicates(pairs: list[tuple[str, object]]) -> dict[str, object]:
+        seen: dict[str, object] = {}
+        for key, value in pairs:
+            if key in seen:
+                raise ValueError(f"duplicate key: {key}")
+            seen[key] = value
+        return seen
+
+    try:
+        document = json.loads(
+            payload_bytes.decode("utf-8"),
+            object_pairs_hook=reject_duplicates,
+            parse_constant=lambda token: (_ for _ in ()).throw(
+                ValueError(f"invalid {token}")))
+    except (UnicodeDecodeError, json.JSONDecodeError, ValueError):
+        return None
+    return document if isinstance(document, dict) else None

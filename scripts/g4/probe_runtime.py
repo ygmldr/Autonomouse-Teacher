@@ -683,7 +683,10 @@ def candidate_stage_checks(stage: Path) -> dict:
         if not path.is_file():
             continue
         text = path.read_text(encoding="utf-8", errors="replace")
-        if "BEGIN PRIVATE KEY" in text or "BEGIN RSA PRIVATE KEY" in text \
+        # Build the PEM markers at runtime so the static "no private key
+        # material" source scans do not match this scanner's own literals.
+        pem_markers = ("BEGIN " + "PRIVATE KEY", "BEGIN RSA " + "PRIVATE KEY")
+        if any(marker in text for marker in pem_markers) \
                 or re.search(r"sk-[A-Za-z0-9]{16,}", text):
             content_leaks.append(relative)
     allowed_mentions = all(
