@@ -32,6 +32,10 @@ import tempfile
 
 SENTINEL = "TEST_ONLY_NEVER_VALID_SECRET_SENTINEL"
 SENTINEL_BYTES = SENTINEL.encode("ascii")
+# Evidence records the marker fingerprint, never the marker bytes: a scan log
+# must not itself become a hit when it is inside a scanned root.
+SENTINEL_SHA256 = hashlib.sha256(SENTINEL_BYTES).hexdigest()
+SENTINEL_LENGTH = len(SENTINEL_BYTES)
 SCHEMA = "m0.g4d.sentinel-scan.v1"
 SKIP_SUFFIXES = {".sock", ".socket", ".fifo", ".lock"}
 MAX_FILE_BYTES = 64 << 20
@@ -49,10 +53,11 @@ def iter_regular_files(root: Path, *, exclude: tuple[str, ...]) -> tuple[list[Pa
         return [root], skipped
     if not root.is_dir():
         return [], [str(root)]
+    absolute_exclude = tuple(str(Path(item).resolve()) for item in exclude)
     for entry in sorted(root.rglob("*")):
         text = str(entry)
         if any(text == item or text.startswith(item.rstrip("/") + os.sep)
-               for item in exclude):
+               for item in absolute_exclude):
             continue
         try:
             info = entry.lstat()
@@ -64,6 +69,9 @@ def iter_regular_files(root: Path, *, exclude: tuple[str, ...]) -> tuple[list[Pa
             continue
         if entry.suffix in SKIP_SUFFIXES:
             skipped.append(f"{text}:special")
+            continue
+        if entry.name.endswith("sentinel-scan.json"):
+            skipped.append(f"{text}:scanner-output")
             continue
         if info.st_size > MAX_FILE_BYTES:
             skipped.append(f"{text}:too_large:{info.st_size}")
@@ -126,7 +134,8 @@ def scan_roots(roots: list[str], *, exclude: tuple[str, ...] = ()) -> dict:
     return {
         "schema": SCHEMA,
         "utc": utc(),
-        "sentinel_name": SENTINEL,
+        "sentinel_sha256": SENTINEL_SHA256,
+        "sentinel_length": SENTINEL_LENGTH,
         "roots": [str(Path(item).resolve()) for item in roots],
         "excluded": list(exclude),
         "files_scanned": scanned,
@@ -199,7 +208,8 @@ def main(argv: list[str] | None = None) -> int:
     document: dict = {
         "schema": SCHEMA,
         "utc": utc(),
-        "sentinel_name": SENTINEL,
+        "sentinel_sha256": SENTINEL_SHA256,
+        "sentinel_length": SENTINEL_LENGTH,
         "proc": [scan_proc(pid) for pid in args.pid],
     }
     scan = scan_roots(args.root, exclude=tuple(args.exclude)) if args.root else None
