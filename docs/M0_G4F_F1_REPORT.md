@@ -137,7 +137,7 @@ PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -B tests/security/test_scan_git_secre
 | `CREDENTIAL={probe…` | `tests/integration/g4_d/test_d03_d04_sentinel.py` | placeholder | 符号引用 |
 | `TOKEN=...`/`SECRET=...` | 若干 tests/scripts | not secret shaped | 代码表达式/类名，非密钥值 |
 
-**全历史复核**：150 commits、689 blobs、441 files、commit messages 全扫，**0 findings**；21 条被排除记录全部为哨兵/占位符，`risk_count=0`。未发现非测试哨兵的真实泄露，因此未触发 STOP。
+**全历史复核（F1 提交前基线）**：150 commits、689 blobs、441 files、commit messages 全扫，**0 findings**；21 条被排除记录全部为哨兵/占位符，`risk_count=0`。F1 提交后 `history-audit.json` 还会统计本报告与测试文件自身的哨兵示例，数量会相应增加（以 JSON 为准，risk 仍为 0）。未发现非测试哨兵的真实泄露，因此未触发 STOP。
 
 ## 5. 误报/漏报修复摘要
 
@@ -169,6 +169,7 @@ PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -B tests/security/test_scan_git_secre
 | `history-audit.json` | 全历史 findings、150 commits、被排除值分类（commit/path/pattern/masked） |
 | `latest-commits-audit.json` | `a2c8424..bb2e914` 两端点全 blob 复核、哨兵分类、0 findings |
 | `git-range.txt` | 最新区间 commit/diff stat |
+| `audit-summary.json` | 审计生成汇总（head/findings/risk 计数） |
 
 所有证据只含掩码值（前 6 字符 + 长度），不含完整 Secret。
 
