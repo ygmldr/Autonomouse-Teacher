@@ -49,6 +49,7 @@ OUT = REPO / "artifacts" / "g4f" / "f2"
 PYTHON = sys.executable
 LAUNCH = G4_SCRIPTS / "launch_c.py"
 ADAPTER_PROBE = REPO / "tests/integration/g4_f2/adapter_purpose_probe.mjs"
+CASE_KEYS = {"echo": "c01", "tool": "c02"}
 EXPECTED_CASES = {
     "unapproved_tool_name": "ADMISSION_TOOL_SCHEMA_MISMATCH",
     "modified_approved_schema": "ADMISSION_TOOL_SCHEMA_MISMATCH",
@@ -212,7 +213,7 @@ def run_dsh_case(*, case: str, scenario: str, stage: Path, stamp: str) -> dict:
     if evidence.exists() and any(evidence.iterdir()):
         raise SystemExit(f"evidence directory is not empty: {evidence}")
     run_id = f"g4f2-{case}-{stamp}"
-    argv = [PYTHON, "-B", str(LAUNCH), "--case", f"f2-{case}",
+    argv = [PYTHON, "-B", str(LAUNCH), "--case", CASE_KEYS[case],
             "--scenario", scenario, "--session", f"g4f2-{case}",
             "--stage", str(stage), "--run-id", run_id,
             "--evidence-dir", str(evidence), "--timeout", "180"]
@@ -395,7 +396,12 @@ def _counts(dest: Path) -> dict:
             return -1
         try:
             return int(conn.execute(sql).fetchone()[0])
-        except sqlite3.Error:
+        except sqlite3.Error as exc:
+            # G3-C creates ``budget_dispatch_claims`` lazily on the first
+            # claim. A fresh Broker DB therefore has no such table; that is
+            # zero claims, not an unreadable ledger.
+            if "no such table" in str(exc):
+                return 0
             return -1
         finally:
             conn.close()
@@ -664,11 +670,6 @@ def main(argv: list[str] | None = None) -> int:
             "controller.per-dispatch dispatch-window journal + Admission approved "
             "schema SHA-256 + DSH session trace request/header")
         write_json(OUT / f"summary-{stamp}.json", summary)
-        link = OUT / "summary.json"
-        if not link.is_file():
-            write_json(link, summary)
-        else:
-            write_json(link, summary)
     problems = []
     for run in summary["runs"]:
         if run["launcher_exit"] != 0:
