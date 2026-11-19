@@ -1,0 +1,15 @@
+[v1] root=/root/Autonomous Teacher/artifacts/review-packet-g4f-e7d92967ec0ece80de4a1a3705f637e8eb9bde99
+  exists=True files=177 symlinks=0 sidecars=['f4/sqlite-readonly/resume-attempts.sqlite3-shm', 'f4/sqlite-readonly/resume-attempts.sqlite3-wal'] unhashed_beyond_hashes_report=['f4/sqlite-readonly/resume-attempts.sqlite3-shm', 'f4/sqlite-readonly/resume-attempts.sqlite3-wal']
+  hashes_entries=173 payload_hashed=172 manifest_files_count=172
+  recomputed_payload_tree=e464b9b1d6ab0bf4406ccc7868863d207f594fa898ee4affaa3e901d9f1caaa0
+  manifest_payload_tree  =e464b9b1d6ab0bf4406ccc7868863d207f594fa898ee4affaa3e901d9f1caaa0 match=True
+  per-file hash mismatches=[]
+  v1_tree_excluding_2_sidecars=e464b9b1d6ab0bf4406ccc7868863d207f594fa898ee4affaa3e901d9f1caaa0 match=True
+[v2] root=/root/Autonomous Teacher/worktrees/m0-g4h0/artifacts/g4h0/packet-v2
+  exists=True files=175 symlinks=0 sidecars=[] unhashed_beyond_hashes_report=[]
+  hashes_entries=173 payload_hashed=172 manifest_files_count=172
+  recomputed_payload_tree=ffae8b3bb48cd3c1f78fa2aa49dd8a616ec8a3b76cbb5aed782b1f4d572bac8c
+  manifest_payload_tree  =ffae8b3bb48cd3c1f78fa2aa49dd8a616ec8a3b76cbb5aed782b1f4d572bac8c match=True
+  per-file hash mismatches=[]
+
+PACKET INTEGRITY OK: v1 immutable+sidecar drift documented, v2 manifest tree agrees and has 0 sidecars

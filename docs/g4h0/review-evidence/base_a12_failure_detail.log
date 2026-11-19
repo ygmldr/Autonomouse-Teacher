@@ -1,0 +1,35 @@
+ITER 1 PASS
+ITER 2 PASS
+=== FAILURE at iteration 3 ===
+F                                                                        [100%]
+=================================== FAILURES ===================================
+______________ test_a12_concurrent_consumption_admits_exactly_one ______________
+
+trusted = <g4a_support.TrustedFixture object at 0x7d4acc043c50>
+
+    def test_a12_concurrent_consumption_admits_exactly_one(trusted) -> None:
+        barrier = threading.Barrier(2)
+        results: list[object] = []
+        errors: list[AuthorizationRejected] = []
+    
+        def worker() -> None:
+            barrier.wait(timeout=30)
+            try:
+                results.append(trusted.consume())
+            except AuthorizationRejected as error:
+                errors.append(error)
+    
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            futures = [pool.submit(worker) for _ in range(2)]
+            for future in futures:
+                future.result(timeout=60)
+        assert len(results) == 1
+        assert len(errors) == 1
+>       assert "AUTHORIZATION_REPLAYED" in errors[0].reasons
+E       AssertionError: assert 'AUTHORIZATION_REPLAYED' in ('AUTHORIZATION_USE_RECORD_INVALID',)
+E        +  where ('AUTHORIZATION_USE_RECORD_INVALID',) = AuthorizationRejected('AUTHORIZATION_USE_RECORD_INVALID').reasons
+
+tests/integration/g4_a/test_a12_replay_epoch.py:83: AssertionError
+=========================== short test summary info ============================
+FAILED tests/integration/g4_a/test_a12_replay_epoch.py::test_a12_concurrent_consumption_admits_exactly_one
+1 failed in 0.95s

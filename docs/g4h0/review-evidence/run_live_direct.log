@@ -1,0 +1,2 @@
+BLOCKED SECURITY_BLOCKED: no independent authorization/controller boundary.
+Review docs/M0_RUNBOOK.md; a Markdown approval is not an execution capability.

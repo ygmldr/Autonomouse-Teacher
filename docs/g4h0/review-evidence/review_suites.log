@@ -1,0 +1,51 @@
+........F............................................................... [ 10%]
+........................................................................ [ 21%]
+........................................................................ [ 32%]
+........................................................................ [ 43%]
+........................................................................ [ 54%]
+........................................................................ [ 65%]
+........................................................................ [ 76%]
+........................................................................ [ 87%]
+........................................................................ [ 98%]
+.........                                                                [100%]
+=================================== FAILURES ===================================
+___________ test_retry_bound_stays_fail_closed_for_a_late_publisher ____________
+
+trusted = <g4a_support.TrustedFixture object at 0x7a42f60c9510>
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7a42f5660150>
+
+    def test_retry_bound_stays_fail_closed_for_a_late_publisher(
+            trusted, monkeypatch: pytest.MonkeyPatch) -> None:
+        auth_id = _set_authorization(trusted, _new_authorization_id("late-publisher"))
+        record = trusted.record_path(auth_id)
+        _write_record(record, b"")
+        monkeypatch.setattr(authorization_module, "_USE_RECORD_READ_ATTEMPTS", 3)
+        monkeypatch.setattr(authorization_module, "_USE_RECORD_READ_DELAY_SECONDS", 0.005)
+        body = _use_record_body(auth_id)
+        finished = threading.Event()
+    
+        def late_writer() -> None:
+            time.sleep(0.3)
+            record.write_bytes(body)
+            finished.set()
+    
+        writer = threading.Thread(target=late_writer, daemon=True)
+        writer.start()
+        try:
+            started = time.monotonic()
+            with pytest.raises(AuthorizationRejected) as error:
+                trusted.consume()
+            elapsed = time.monotonic() - started
+        finally:
+            writer.join(timeout=5)
+>       assert error.value.reasons == ("AUTHORIZATION_USE_RECORD_INVALID",)
+E       AssertionError: assert ('AUTHORIZATION_REPLAYED',) == ('AUTHORIZATI...ORD_INVALID',)
+E         
+E         At index 0 diff: 'AUTHORIZATION_REPLAYED' != 'AUTHORIZATION_USE_RECORD_INVALID'
+E         Use -v to get more diff
+
+tests/integration/g4_h0/test_p2_03_concurrent_consume.py:384: AssertionError
+=========================== short test summary info ============================
+FAILED tests/integration/g4_h0/test_p2_03_concurrent_consume.py::test_retry_bound_stays_fail_closed_for_a_late_publisher
+1 failed, 656 passed in 218.50s (0:03:38)
+EXIT=1

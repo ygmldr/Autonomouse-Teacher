@@ -1,0 +1,15 @@
+baseline consume_execution_authorization latency (no collision):
+  baseline 0: 336.9 ms
+  baseline 1: 332.2 ms
+  baseline 2: 335.4 ms
+late-publisher scenario (test uses a fixed 300 ms writer delay):
+  trial 0: elapsed=331.4 ms reasons=('AUTHORIZATION_REPLAYED',)
+  trial 1: elapsed=333.3 ms reasons=('AUTHORIZATION_REPLAYED',)
+  trial 2: elapsed=334.8 ms reasons=('AUTHORIZATION_REPLAYED',)
+  trial 3: elapsed=340.9 ms reasons=('AUTHORIZATION_REPLAYED',)
+  trial 4: elapsed=333.1 ms reasons=('AUTHORIZATION_REPLAYED',)
+  trial 5: elapsed=336.2 ms reasons=('AUTHORIZATION_REPLAYED',)
+  trial 6: elapsed=330.9 ms reasons=('AUTHORIZATION_REPLAYED',)
+  trial 7: elapsed=333.2 ms reasons=('AUTHORIZATION_REPLAYED',)
+  trial 8: elapsed=325.3 ms reasons=('AUTHORIZATION_REPLAYED',)
+  trial 9: elapsed=360.1 ms reasons=('AUTHORIZATION_REPLAYED',)

@@ -1,0 +1,474 @@
+{
+  "double_consume": 0,
+  "elapsed_seconds": 27.95,
+  "failure_count": 25,
+  "failures": [
+    "round 0: loser_codes=['AUTHORIZATION_USE_RECORD_INVALID']",
+    "round 1: loser_codes=['AUTHORIZATION_USE_RECORD_INVALID']",
+    "round 2: loser_codes=['AUTHORIZATION_USE_RECORD_INVALID']",
+    "round 3: loser_codes=['AUTHORIZATION_USE_RECORD_INVALID']",
+    "round 4: loser_codes=['AUTHORIZATION_USE_RECORD_INVALID']",
+    "round 5: loser_codes=['AUTHORIZATION_USE_RECORD_INVALID']",
+    "round 6: loser_codes=['AUTHORIZATION_USE_RECORD_INVALID']",
+    "round 7: loser_codes=['AUTHORIZATION_USE_RECORD_INVALID']",
+    "round 8: loser_codes=['AUTHORIZATION_USE_RECORD_INVALID']",
+    "round 9: loser_codes=['AUTHORIZATION_USE_RECORD_INVALID']",
+    "round 10: loser_codes=['AUTHORIZATION_USE_RECORD_INVALID']",
+    "round 12: loser_codes=['AUTHORIZATION_USE_RECORD_INVALID']",
+    "round 13: loser_codes=['AUTHORIZATION_USE_RECORD_INVALID']",
+    "round 14: loser_codes=['AUTHORIZATION_USE_RECORD_INVALID']",
+    "round 15: loser_codes=['AUTHORIZATION_USE_RECORD_INVALID']",
+    "round 17: loser_codes=['AUTHORIZATION_USE_RECORD_INVALID']",
+    "round 19: loser_codes=['AUTHORIZATION_USE_RECORD_INVALID']",
+    "round 20: loser_codes=['AUTHORIZATION_USE_RECORD_INVALID']",
+    "round 21: loser_codes=['AUTHORIZATION_USE_RECORD_INVALID']",
+    "round 23: loser_codes=['AUTHORIZATION_USE_RECORD_INVALID']",
+    "round 25: loser_codes=['AUTHORIZATION_USE_RECORD_INVALID']",
+    "round 26: loser_codes=['AUTHORIZATION_USE_RECORD_INVALID']",
+    "round 27: loser_codes=['AUTHORIZATION_USE_RECORD_INVALID']",
+    "round 28: loser_codes=['AUTHORIZATION_USE_RECORD_INVALID']",
+    "round 29: loser_codes=['AUTHORIZATION_USE_RECORD_INVALID']"
+  ],
+  "label": "review-before-widened",
+  "loser_code_histogram": {
+    "AUTHORIZATION_REPLAYED": 5,
+    "AUTHORIZATION_USE_RECORD_INVALID": 25
+  },
+  "loser_invalid_count": 25,
+  "module_path": "/tmp/at-p203-before/src/autoteacher_m0/security/authorization.py",
+  "network_calls": 0,
+  "python": "3.11.15",
+  "real_key": false,
+  "record_count": 30,
+  "record_modes": [
+    "0o600"
+  ],
+  "residual_non_record_files": [],
+  "rounds": 30,
+  "rounds_detail": [
+    {
+      "authorization_id": "auth-review-before-widened-000-1c04f93e8eac",
+      "elapsed_ms": 650.8,
+      "json_record_count": 1,
+      "loser_codes": [
+        "AUTHORIZATION_USE_RECORD_INVALID"
+      ],
+      "ok": false,
+      "record_mode": "0o600",
+      "record_valid": true,
+      "round": 0,
+      "temporary_files": [],
+      "winner_count": 1
+    },
+    {
+      "authorization_id": "auth-review-before-widened-001-be4cd169b133",
+      "elapsed_ms": 667.9,
+      "json_record_count": 2,
+      "loser_codes": [
+        "AUTHORIZATION_USE_RECORD_INVALID"
+      ],
+      "ok": false,
+      "record_mode": "0o600",
+      "record_valid": true,
+      "round": 1,
+      "temporary_files": [],
+      "winner_count": 1
+    },
+    {
+      "authorization_id": "auth-review-before-widened-002-e81f83c3a546",
+      "elapsed_ms": 639.0,
+      "json_record_count": 3,
+      "loser_codes": [
+        "AUTHORIZATION_USE_RECORD_INVALID"
+      ],
+      "ok": false,
+      "record_mode": "0o600",
+      "record_valid": true,
+      "round": 2,
+      "temporary_files": [],
+      "winner_count": 1
+    },
+    {
+      "authorization_id": "auth-review-before-widened-003-4945c14ee0c0",
+      "elapsed_ms": 655.4,
+      "json_record_count": 4,
+      "loser_codes": [
+        "AUTHORIZATION_USE_RECORD_INVALID"
+      ],
+      "ok": false,
+      "record_mode": "0o600",
+      "record_valid": true,
+      "round": 3,
+      "temporary_files": [],
+      "winner_count": 1
+    },
+    {
+      "authorization_id": "auth-review-before-widened-004-5a1403ece83d",
+      "elapsed_ms": 650.1,
+      "json_record_count": 5,
+      "loser_codes": [
+        "AUTHORIZATION_USE_RECORD_INVALID"
+      ],
+      "ok": false,
+      "record_mode": "0o600",
+      "record_valid": true,
+      "round": 4,
+      "temporary_files": [],
+      "winner_count": 1
+    },
+    {
+      "authorization_id": "auth-review-before-widened-005-09a8f71ecc01",
+      "elapsed_ms": 663.1,
+      "json_record_count": 6,
+      "loser_codes": [
+        "AUTHORIZATION_USE_RECORD_INVALID"
+      ],
+      "ok": false,
+      "record_mode": "0o600",
+      "record_valid": true,
+      "round": 5,
+      "temporary_files": [],
+      "winner_count": 1
+    },
+    {
+      "authorization_id": "auth-review-before-widened-006-43c72c4d8f6d",
+      "elapsed_ms": 652.0,
+      "json_record_count": 7,
+      "loser_codes": [
+        "AUTHORIZATION_USE_RECORD_INVALID"
+      ],
+      "ok": false,
+      "record_mode": "0o600",
+      "record_valid": true,
+      "round": 6,
+      "temporary_files": [],
+      "winner_count": 1
+    },
+    {
+      "authorization_id": "auth-review-before-widened-007-eacdb9029a96",
+      "elapsed_ms": 671.7,
+      "json_record_count": 8,
+      "loser_codes": [
+        "AUTHORIZATION_USE_RECORD_INVALID"
+      ],
+      "ok": false,
+      "record_mode": "0o600",
+      "record_valid": true,
+      "round": 7,
+      "temporary_files": [],
+      "winner_count": 1
+    },
+    {
+      "authorization_id": "auth-review-before-widened-008-a11ecf6a7d2c",
+      "elapsed_ms": 683.5,
+      "json_record_count": 9,
+      "loser_codes": [
+        "AUTHORIZATION_USE_RECORD_INVALID"
+      ],
+      "ok": false,
+      "record_mode": "0o600",
+      "record_valid": true,
+      "round": 8,
+      "temporary_files": [],
+      "winner_count": 1
+    },
+    {
+      "authorization_id": "auth-review-before-widened-009-871a30169cd5",
+      "elapsed_ms": 747.4,
+      "json_record_count": 10,
+      "loser_codes": [
+        "AUTHORIZATION_USE_RECORD_INVALID"
+      ],
+      "ok": false,
+      "record_mode": "0o600",
+      "record_valid": true,
+      "round": 9,
+      "temporary_files": [],
+      "winner_count": 1
+    },
+    {
+      "authorization_id": "auth-review-before-widened-010-6ac5be05a282",
+      "elapsed_ms": 696.1,
+      "json_record_count": 11,
+      "loser_codes": [
+        "AUTHORIZATION_USE_RECORD_INVALID"
+      ],
+      "ok": false,
+      "record_mode": "0o600",
+      "record_valid": true,
+      "round": 10,
+      "temporary_files": [],
+      "winner_count": 1
+    },
+    {
+      "authorization_id": "auth-review-before-widened-011-294ec7a41365",
+      "elapsed_ms": 663.2,
+      "json_record_count": 12,
+      "loser_codes": [
+        "AUTHORIZATION_REPLAYED"
+      ],
+      "ok": true,
+      "record_mode": "0o600",
+      "record_valid": true,
+      "round": 11,
+      "temporary_files": [],
+      "winner_count": 1
+    },
+    {
+      "authorization_id": "auth-review-before-widened-012-11149ace9cab",
+      "elapsed_ms": 655.9,
+      "json_record_count": 13,
+      "loser_codes": [
+        "AUTHORIZATION_USE_RECORD_INVALID"
+      ],
+      "ok": false,
+      "record_mode": "0o600",
+      "record_valid": true,
+      "round": 12,
+      "temporary_files": [],
+      "winner_count": 1
+    },
+    {
+      "authorization_id": "auth-review-before-widened-013-3567438a0404",
+      "elapsed_ms": 682.4,
+      "json_record_count": 14,
+      "loser_codes": [
+        "AUTHORIZATION_USE_RECORD_INVALID"
+      ],
+      "ok": false,
+      "record_mode": "0o600",
+      "record_valid": true,
+      "round": 13,
+      "temporary_files": [],
+      "winner_count": 1
+    },
+    {
+      "authorization_id": "auth-review-before-widened-014-d6d549df51a3",
+      "elapsed_ms": 695.3,
+      "json_record_count": 15,
+      "loser_codes": [
+        "AUTHORIZATION_USE_RECORD_INVALID"
+      ],
+      "ok": false,
+      "record_mode": "0o600",
+      "record_valid": true,
+      "round": 14,
+      "temporary_files": [],
+      "winner_count": 1
+    },
+    {
+      "authorization_id": "auth-review-before-widened-015-44909b34b1de",
+      "elapsed_ms": 658.3,
+      "json_record_count": 16,
+      "loser_codes": [
+        "AUTHORIZATION_USE_RECORD_INVALID"
+      ],
+      "ok": false,
+      "record_mode": "0o600",
+      "record_valid": true,
+      "round": 15,
+      "temporary_files": [],
+      "winner_count": 1
+    },
+    {
+      "authorization_id": "auth-review-before-widened-016-b758eeef5347",
+      "elapsed_ms": 763.3,
+      "json_record_count": 17,
+      "loser_codes": [
+        "AUTHORIZATION_REPLAYED"
+      ],
+      "ok": true,
+      "record_mode": "0o600",
+      "record_valid": true,
+      "round": 16,
+      "temporary_files": [],
+      "winner_count": 1
+    },
+    {
+      "authorization_id": "auth-review-before-widened-017-fdae06319ea8",
+      "elapsed_ms": 679.4,
+      "json_record_count": 18,
+      "loser_codes": [
+        "AUTHORIZATION_USE_RECORD_INVALID"
+      ],
+      "ok": false,
+      "record_mode": "0o600",
+      "record_valid": true,
+      "round": 17,
+      "temporary_files": [],
+      "winner_count": 1
+    },
+    {
+      "authorization_id": "auth-review-before-widened-018-8ff03692c121",
+      "elapsed_ms": 746.8,
+      "json_record_count": 19,
+      "loser_codes": [
+        "AUTHORIZATION_REPLAYED"
+      ],
+      "ok": true,
+      "record_mode": "0o600",
+      "record_valid": true,
+      "round": 18,
+      "temporary_files": [],
+      "winner_count": 1
+    },
+    {
+      "authorization_id": "auth-review-before-widened-019-50673b74a6e9",
+      "elapsed_ms": 705.5,
+      "json_record_count": 20,
+      "loser_codes": [
+        "AUTHORIZATION_USE_RECORD_INVALID"
+      ],
+      "ok": false,
+      "record_mode": "0o600",
+      "record_valid": true,
+      "round": 19,
+      "temporary_files": [],
+      "winner_count": 1
+    },
+    {
+      "authorization_id": "auth-review-before-widened-020-203ee9973a2c",
+      "elapsed_ms": 759.3,
+      "json_record_count": 21,
+      "loser_codes": [
+        "AUTHORIZATION_USE_RECORD_INVALID"
+      ],
+      "ok": false,
+      "record_mode": "0o600",
+      "record_valid": true,
+      "round": 20,
+      "temporary_files": [],
+      "winner_count": 1
+    },
+    {
+      "authorization_id": "auth-review-before-widened-021-a2eaa047dae3",
+      "elapsed_ms": 662.6,
+      "json_record_count": 22,
+      "loser_codes": [
+        "AUTHORIZATION_USE_RECORD_INVALID"
+      ],
+      "ok": false,
+      "record_mode": "0o600",
+      "record_valid": true,
+      "round": 21,
+      "temporary_files": [],
+      "winner_count": 1
+    },
+    {
+      "authorization_id": "auth-review-before-widened-022-98e062bf89f2",
+      "elapsed_ms": 729.0,
+      "json_record_count": 23,
+      "loser_codes": [
+        "AUTHORIZATION_REPLAYED"
+      ],
+      "ok": true,
+      "record_mode": "0o600",
+      "record_valid": true,
+      "round": 22,
+      "temporary_files": [],
+      "winner_count": 1
+    },
+    {
+      "authorization_id": "auth-review-before-widened-023-043987d86d82",
+      "elapsed_ms": 670.2,
+      "json_record_count": 24,
+      "loser_codes": [
+        "AUTHORIZATION_USE_RECORD_INVALID"
+      ],
+      "ok": false,
+      "record_mode": "0o600",
+      "record_valid": true,
+      "round": 23,
+      "temporary_files": [],
+      "winner_count": 1
+    },
+    {
+      "authorization_id": "auth-review-before-widened-024-f04c0185e544",
+      "elapsed_ms": 742.4,
+      "json_record_count": 25,
+      "loser_codes": [
+        "AUTHORIZATION_REPLAYED"
+      ],
+      "ok": true,
+      "record_mode": "0o600",
+      "record_valid": true,
+      "round": 24,
+      "temporary_files": [],
+      "winner_count": 1
+    },
+    {
+      "authorization_id": "auth-review-before-widened-025-7ee888920e1e",
+      "elapsed_ms": 669.7,
+      "json_record_count": 26,
+      "loser_codes": [
+        "AUTHORIZATION_USE_RECORD_INVALID"
+      ],
+      "ok": false,
+      "record_mode": "0o600",
+      "record_valid": true,
+      "round": 25,
+      "temporary_files": [],
+      "winner_count": 1
+    },
+    {
+      "authorization_id": "auth-review-before-widened-026-49d5dece0e9c",
+      "elapsed_ms": 701.7,
+      "json_record_count": 27,
+      "loser_codes": [
+        "AUTHORIZATION_USE_RECORD_INVALID"
+      ],
+      "ok": false,
+      "record_mode": "0o600",
+      "record_valid": true,
+      "round": 26,
+      "temporary_files": [],
+      "winner_count": 1
+    },
+    {
+      "authorization_id": "auth-review-before-widened-027-3bfaec2278f4",
+      "elapsed_ms": 747.8,
+      "json_record_count": 28,
+      "loser_codes": [
+        "AUTHORIZATION_USE_RECORD_INVALID"
+      ],
+      "ok": false,
+      "record_mode": "0o600",
+      "record_valid": true,
+      "round": 27,
+      "temporary_files": [],
+      "winner_count": 1
+    },
+    {
+      "authorization_id": "auth-review-before-widened-028-f06873738d36",
+      "elapsed_ms": 619.5,
+      "json_record_count": 29,
+      "loser_codes": [
+        "AUTHORIZATION_USE_RECORD_INVALID"
+      ],
+      "ok": false,
+      "record_mode": "0o600",
+      "record_valid": true,
+      "round": 28,
+      "temporary_files": [],
+      "winner_count": 1
+    },
+    {
+      "authorization_id": "auth-review-before-widened-029-f5aeacd5309b",
+      "elapsed_ms": 586.2,
+      "json_record_count": 30,
+      "loser_codes": [
+        "AUTHORIZATION_USE_RECORD_INVALID"
+      ],
+      "ok": false,
+      "record_mode": "0o600",
+      "record_valid": true,
+      "round": 29,
+      "temporary_files": [],
+      "winner_count": 1
+    }
+  ],
+  "schema": "at-m0/g4h0-p2-03-stress/v1",
+  "test_only_synthetic": true,
+  "utc_started": "2026-11-18T12:00:00Z",
+  "widen_write_ms": 100.0
+}

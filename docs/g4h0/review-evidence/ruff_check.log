@@ -1,0 +1,84 @@
+F401 [*] `os` imported but unused
+  --> scripts/g3b/build_packet.py:26:8
+   |
+24 | import hashlib
+25 | import json
+26 | import os
+   |        ^^
+27 | from pathlib import Path
+28 | import re
+   |
+help: Remove unused import: `os`
+   |
+25 | import json
+   - import os
+26 | from pathlib import Path
+   |
+
+F541 [*] f-string without any placeholders
+   --> scripts/g3b/build_packet.py:586:9
+    |
+584 |         f"evidence_matrix_rows={matrix_rows}",
+585 |         f"implementation_sha={impl} (source/tests blobs verified against Git)",
+586 |         f"tar_generated=false",
+    |         ^^^^^^^^^^^^^^^^^^^^^^
+587 |         f"excluded_self_reference=hashes.sha256,packet-integrity-report.txt",
+588 |         f"overall={'SELF_CHECK_PASS' if not failures else 'SELF_CHECK_FAIL_WITH_PENDING' if warnings else 'SELF_CHECK_FAIL'}",
+    |
+help: Remove extraneous `f` prefix
+    |
+585 |         f"implementation_sha={impl} (source/tests blobs verified against Git)",
+    -         f"tar_generated=false",
+586 +         "tar_generated=false",
+587 |         f"excluded_self_reference=hashes.sha256,packet-integrity-report.txt",
+    |
+
+F541 [*] f-string without any placeholders
+   --> scripts/g3b/build_packet.py:587:9
+    |
+585 |         f"implementation_sha={impl} (source/tests blobs verified against Git)",
+586 |         f"tar_generated=false",
+587 |         f"excluded_self_reference=hashes.sha256,packet-integrity-report.txt",
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+588 |         f"overall={'SELF_CHECK_PASS' if not failures else 'SELF_CHECK_FAIL_WITH_PENDING' if warnings else 'SELF_CHECK_FAIL'}",
+589 |         "",
+    |
+help: Remove extraneous `f` prefix
+    |
+586 |         f"tar_generated=false",
+    -         f"excluded_self_reference=hashes.sha256,packet-integrity-report.txt",
+587 +         "excluded_self_reference=hashes.sha256,packet-integrity-report.txt",
+588 |         f"overall={'SELF_CHECK_PASS' if not failures else 'SELF_CHECK_FAIL_WITH_PENDING' if warnings else 'SELF_CHECK_FAIL'}",
+    |
+
+F401 [*] `os` imported but unused
+  --> scripts/g3c/build_packet.py:27:8
+   |
+25 | import hashlib
+26 | import json
+27 | import os
+   |        ^^
+28 | import re
+29 | import shutil
+   |
+help: Remove unused import: `os`
+   |
+26 | import json
+   - import os
+27 | import re
+   |
+
+E741 Ambiguous variable name: `I`
+  --> scripts/g4/build_packet_g4f.py:44:1
+   |
+42 | DOCS = ROOT / "docs"
+43 | F6 = ARTIFACTS / "g4f" / "f6"
+44 | I = F6 / "integration"
+   | ^
+45 |
+46 | BASE_SHA = "bb2e9142a4e96e2b8fbe65bb99f1b4c045260251"
+   |
+
+Found 5 errors.
+[*] 4 fixable with `--fix`.
+RUFF_EXIT=1

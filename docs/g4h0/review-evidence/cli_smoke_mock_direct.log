@@ -1,0 +1,24 @@
+{
+  "mode": "mock",
+  "mock_smoke": "PASS",
+  "count": 3,
+  "real_sdk_smoke": "NOT_EXECUTED",
+  "E1": "BLOCKED",
+  "billable_cost_usd": "0",
+  "synthetic_accounting": {
+    "spent_usd": "0.000015",
+    "requests": 3,
+    "input_tokens": 9,
+    "output_tokens": 3,
+    "pending": 0,
+    "reserved_usd": "0",
+    "soft_exceeded": false,
+    "blocked": false,
+    "price_version": "mock-price-v1"
+  },
+  "run_ids": [
+    "66e2d69f2b9e4cce8e7cd7010e12c261",
+    "e0112e5123f74f3585698b956df6f90b",
+    "22978f6244324cb28bf52416267f578d"
+  ]
+}
