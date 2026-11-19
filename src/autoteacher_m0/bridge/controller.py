@@ -38,6 +38,9 @@ from autoteacher_m0.bridge.admission import Admission, AdmissionError, load_admi
 from autoteacher_m0.accounting.observation import (
     ProviderObservation, observation_digest,
 )
+from autoteacher_m0.bridge.dispatch_audit import (
+    DispatchAudit, default_journal_path, describe_request,
+)
 from autoteacher_m0.bridge.protocol import (
     ERROR_CODES, Envelope, validate_chunk_payload, validate_error_payload,
     validate_request_payload,
@@ -54,12 +57,18 @@ from autoteacher_m0.security.egress import (
 
 ROUTE = "offline-test-only-g3b"
 MODEL = "fixture-bridge-v1"
+# G4-F2: conversation is the only purpose this synthetic provider route serves.
+# ``None`` is the shape the real DSH agent loop sends for a conversation request
+# (see the frozen capture fixture); auxiliary purposes are rejected before any
+# Reserve/Claim so a title/compaction/judge call can never bypass accounting.
+ALLOWED_PURPOSES = frozenset({None, "conversation"})
 OBSERVATION_SCHEMA = "m0.g3c.observation.v1"
 FEE_POLICY_VERSION = "fixture-synthetic-v1"
 INPUT_BOUND_KIND = "utf8_bytes_upper_bound"
 SYNTHETIC_FIXTURE_ONLY = True
 ABSOLUTE_DEADLINE_SECONDS = 30.0
 MAX_CANCEL_STATES = 256
+MAX_PEER_ORIGINS = 256
 _CANCEL_PRUNE_TARGET = 128
 _USAGE_FIELDS = frozenset({"inputTokens", "cacheReadTokens", "cacheWriteTokens",
                            "outputTokens", "reasoningTokens", "totalTokens"})
@@ -220,7 +229,9 @@ class TrustedController:
     def __init__(self, admission: Admission, *, broker: BrokerClient,
                  fake: FakeBackend, attempts: AttemptJournal,
                  expected_uid: int = 65534, register_admission: bool = True,
-                 dispatch_gate: object | None = None):
+                 dispatch_gate: object | None = None,
+                 dispatch_journal: str | os.PathLike[str] | None = None,
+                 require_origin: bool = False):
         self.admission = admission
         self.broker = broker
         self.fake = fake
@@ -233,6 +244,17 @@ class TrustedController:
                                     ABSOLUTE_DEADLINE_SECONDS)
         self._quota_lock = threading.RLock()
         self._cancel_lock = threading.Lock()
+        # G4-F2: bounded per-dispatch evidence journal and the kernel-reported
+        # peer for each transport. A journal write never decides a dispatch.
+        self.dispatch_audit = DispatchAudit(dispatch_journal)
+        self._peer_lock = threading.Lock()
+        self._peer_origins: dict[str, dict] = {}
+        # Only an Admission/socket deployment that declares an expected peer UID
+        # can turn the kernel-reported origin into a fail-closed condition.
+        # Legacy 0600/root deployments keep the historical behaviour; their
+        # origin is still journaled as evidence.
+        self.require_origin = bool(require_origin)
+        self._dispatch_seq = 0
         # One trusted Fake child at a time: the Fake backend is single-flight and
         # this lock also keeps Broker claim/settle ordering deterministic. The
         # admission quota is still allocated atomically before this lock.
@@ -281,6 +303,83 @@ class TrustedController:
                 state.terminal = True
                 state.touched = time.monotonic()
 
+    # -- G4-F2 per-dispatch origin / evidence --------------------------
+    def observe_peer(self, transport_id: str, uid: int, gid: int,
+                     pid: int) -> None:
+        """Record the kernel-reported UDS peer for one transport (evidence).
+
+        The IPC server calls this immediately after parsing a request and
+        before the Controller generator runs. Only integer ids are accepted;
+        anything else is ignored (the server's own peer check still applies).
+        The value is always journaled as evidence. It becomes a fail-closed
+        condition only when the deployment declared an expected peer UID
+        (``require_origin``); the registry is bounded, and an evicted transport
+        can then only be rejected, never silently allowed.
+        """
+        if not isinstance(transport_id, str) or not 1 <= len(transport_id) <= 128:
+            return
+        if any(type(value) is not int or not 0 <= value <= 0xFFFFFFFE
+               for value in (uid, gid, pid)):
+            return
+        with self._peer_lock:
+            self._peer_origins.pop(transport_id, None)
+            self._peer_origins[transport_id] = {
+                "kind": "unix_peer", "uid": uid, "gid": gid, "pid": pid}
+            while len(self._peer_origins) > MAX_PEER_ORIGINS:
+                self._peer_origins.pop(next(iter(self._peer_origins)))
+
+    def _origin_for(self, transport_id: object) -> dict | None:
+        if not isinstance(transport_id, str):
+            return None
+        with self._peer_lock:
+            origin = self._peer_origins.get(transport_id)
+            return dict(origin) if origin is not None else None
+
+    def _check_origin(self, transport_id: object) -> None:
+        """Fail closed when a declared peer boundary sees no/foreign origin."""
+        if not self.require_origin:
+            return
+        origin = self._origin_for(transport_id)
+        if origin is None or origin.get("uid") != self.admission.launcher_uid:
+            raise BridgeError("ADMISSION_LAUNCHER_MISMATCH")
+
+    def _new_dispatch_record(self, payload: object, transport_id: object) -> dict:
+        record = describe_request(
+            payload, approved=dict(self.admission.tool_schemas),
+            origin=self._origin_for(transport_id), transport_id=transport_id)
+        record["instance_id"] = self.instance_id
+        with self._peer_lock:
+            self._dispatch_seq += 1
+            record["dispatch_seq"] = self._dispatch_seq
+        return record
+
+    def _emit_dispatch_record(self, record: dict, *, error_code: str | None = None,
+                              reserved: bool | None = None,
+                              dispatched: bool | None = None,
+                              settled: bool | None = None) -> None:
+        if error_code is not None:
+            record["error_code"] = error_code
+        if reserved is not None:
+            record["reserved"] = bool(reserved)
+        if dispatched is not None:
+            record["dispatched"] = bool(dispatched)
+        if settled is not None:
+            record["settled"] = bool(settled)
+        if record.get("settled"):
+            record["outcome"] = "completed"
+        elif record.get("error_code") is not None:
+            record["outcome"] = ("failed_after_reserve" if record.get("reserved")
+                                 else "rejected")
+        elif record.get("dispatched"):
+            record["outcome"] = "dispatched"
+        elif record.get("reserved"):
+            record["outcome"] = "reserved"
+        self.dispatch_audit.append(record)
+
+    def _audit_protocol_rejection(self, env: Envelope, code: str) -> None:
+        record = self._new_dispatch_record(env.payload, env.transport_id)
+        self._emit_dispatch_record(record, error_code=code)
+
     def cancel(self, *, transport_id: str, reason: str) -> None:
         """Cancel exactly one transport's stream; repeated/unknown ids are safe.
 
@@ -321,6 +420,12 @@ class TrustedController:
 
     def _prepare_checked(self, payload: Mapping[str, object], step: int):
         validate_request_payload(payload)
+        # Defense in depth: the protocol validator already rejects an auxiliary
+        # purpose, but the Controller states the conversation-only rule itself so
+        # no future/first-frame path can hand a title/compaction/judge request to
+        # Reserve/Claim.
+        if payload.get("purpose") not in ALLOWED_PURPOSES:
+            raise BridgeError("BAD_TYPE")
         if payload.get("provider") != ROUTE or payload.get("model") != MODEL:
             raise BridgeError("ROUTE_MISMATCH")
         max_tokens = payload.get("maxTokens")
@@ -330,29 +435,53 @@ class TrustedController:
             # Admission output bound is enforced before Reserve/Claim/Fake.
             raise BridgeError("BUDGET_DENIED")
         messages = payload.get("messages", [])
+        admission_tools = dict(self.admission.tool_schemas)
         if isinstance(messages, list):
             for message in messages:
                 content = message.get("content") if isinstance(message, Mapping) else None
                 if not isinstance(content, list):
                     continue
                 for block in content:
-                    if isinstance(block, Mapping) and block.get("type") in {
-                            "image", "file", "attachment", "store"}:
+                    if not isinstance(block, Mapping):
+                        continue
+                    block_type = block.get("type")
+                    if block_type in {"image", "file", "attachment", "store"}:
                         raise BridgeError("REQUEST_INVALID")
+                    # G4-F2: an embedded tool reference is part of the actual
+                    # tool surface the model sees. Its origin is the conversation
+                    # history, not the request's approved ``tools`` array, so it
+                    # must name an approved tool or the dispatch is refused
+                    # before Reserve/Claim.
+                    if block_type == "tool-call":
+                        name = block.get("name")
+                    elif block_type in {"tool-addition", "tool-removal"}:
+                        name = block.get("toolName")
+                    else:
+                        continue
+                    if not isinstance(name, str) or not name:
+                        raise BridgeError("REQUEST_INVALID")
+                    if name not in admission_tools:
+                        raise BridgeError("ADMISSION_TOOL_SCHEMA_MISMATCH")
         tool_hashes = []
-        admission_tools = dict(self.admission.tool_schemas)
         tools = payload.get("tools", [])
         if not isinstance(tools, list):
             raise BridgeError("REQUEST_INVALID")
+        seen_tools: set[str] = set()
         for tool in tools:
             if not isinstance(tool, Mapping) or not isinstance(tool.get("name"), str):
                 raise BridgeError("REQUEST_INVALID")
+            name = tool["name"]
+            if name in seen_tools:
+                # A duplicate name makes the "actual tool surface" ambiguous;
+                # never let two definitions share one approved identity.
+                raise BridgeError("ADMISSION_TOOL_SCHEMA_MISMATCH")
+            seen_tools.add(name)
             try:
                 raw = canonical_json(tool).encode("utf-8")
             except (TypeError, ValueError):
                 raise BridgeError("REQUEST_INVALID") from None
             digest = hashlib.sha256(raw).hexdigest()
-            if admission_tools.get(tool["name"]) != digest:
+            if admission_tools.get(name) != digest:
                 raise BridgeError("ADMISSION_TOOL_SCHEMA_MISMATCH")
             tool_hashes.append(tool)
         # Conservative input bound. We cannot prove a model/tokenizer token count,
@@ -426,6 +555,18 @@ class TrustedController:
                 if isinstance(env.payload, Mapping) and set(env.payload) & {
                         "call_id", "reservation_id", "request_digest", "authorized", "admission"}:
                     code = "ADMISSION_SELF_AUTH_DENIED"
+                if isinstance(code, str):
+                    code = self._normalize_code(code)
+                    if code not in ERROR_CODES:
+                        code = "INTERNAL"
+                else:
+                    code = "INTERNAL"
+                try:
+                    # G4-F2: a request rejected before any Reserve/Claim is still
+                    # part of the observed tool surface (and its purpose/origin).
+                    self._audit_protocol_rejection(env, code)
+                except Exception:  # noqa: BLE001 - observation must not mask the rejection
+                    pass
                 yield self._error_envelope(env, code, seq=seq)
                 return
             events: queue.Queue = queue.Queue(maxsize=_STREAM_QUEUE_FRAMES)
@@ -694,9 +835,14 @@ class TrustedController:
         attempt_id: str | None = None
         intent_id: str | None = None
         call_id: str | None = None
+        audit = self._new_dispatch_record(payload, transport_id)
         try:
             with self._quota_lock:
                 self._checkpoint(state, deadline, "admission")
+                # G4-F2: a request from an unknown/foreign UDS peer is refused
+                # before quota, Reserve and Claim. In-process callers that never
+                # register a peer keep the legacy path (no server involved).
+                self._check_origin(transport_id)
                 if self.calls >= self.admission.max_calls:
                     raise BridgeError("BUDGET_DENIED")
                 step = self.calls
@@ -705,6 +851,9 @@ class TrustedController:
                 except BaseException:
                     self.rejected_calls += 1
                     raise
+                audit["outcome"] = "prepared"
+                audit["step"] = step
+                audit["call_id"] = prepared.call_id
                 if (self.attempts.attempt_for_call(prepared.call_id) is not None
                         or self.attempts.intent_for_call(prepared.call_id) is not None):
                     raise BridgeError("ATTEMPT_ALREADY_STARTED")
@@ -736,6 +885,8 @@ class TrustedController:
                                             output_tokens=prepared.max_output_tokens,
                                             call_id=prepared.call_id, deadline=deadline)
             reservation_id = reserved["reservation_id"]
+            audit["reserved"] = True
+            audit["reservation_id"] = reservation_id
             # Read-only copy of the Broker's authoritative upper bound; the gate
             # uses it only to size its conservative held view.
             reservation_doc = reserved.get("reservation")
@@ -825,6 +976,9 @@ class TrustedController:
                 if state is not None and state.event.is_set():
                     holder["cancelled_before_send"] = True
                     raise _Cancelled(state.reason or "aborted")
+                # G4-F2: the Fake send boundary is exactly here; record it for
+                # the dispatch journal before any bytes can reach the child.
+                audit["dispatched"] = True
                 try:
                     receipt, frames = self._invoke_fake(payload_bytes, nonce,
                                                         deadline, state,
@@ -921,6 +1075,9 @@ class TrustedController:
             self._apply_completion_reply(
                 reply, attempt_id=attempt_id, reservation_id=reservation_id,
                 authoritative=analysis.authoritative, deadline=deadline)
+            audit["settled"] = True
+            audit["receipt_id"] = receipt.receipt_id
+            audit["usage_present"] = bool(analysis.usage)
             self._crash("after_journal_mark_before_sdk_finish")
             self._crash("after_settlement_before_sdk_finish")
             if state is not None and state.event.is_set():
@@ -930,6 +1087,10 @@ class TrustedController:
             self._emit_terminal(emit, analysis)
         except (AdmissionError, BridgeError, BrokerClientError, ValueError,
                 _Cancelled, _DeadlineExceeded) as exc:
+            try:
+                audit["error_code"] = self._exception_code(exc)
+            except Exception:  # noqa: BLE001 - evidence must not mask the abort
+                audit["error_code"] = "INTERNAL"
             if intent_id is not None:
                 try:
                     self.attempts.mark_intent_held(
@@ -950,6 +1111,14 @@ class TrustedController:
                     except Exception:
                         pass
             raise
+        finally:
+            # G4-F2: one bounded record per dispatch (accepted or rejected).
+            # Missing/failed evidence writes are counted by DispatchAudit and
+            # never change the allow/deny decision above.
+            try:
+                self._emit_dispatch_record(audit)
+            except Exception:  # noqa: BLE001 - observation must not mask the outcome
+                pass
 
     @staticmethod
     def _is_timeout_exception(exc: BaseException) -> bool:
@@ -1752,7 +1921,11 @@ def main(argv: list[str] | None = None, *,
                                        attempts=attempts,
                                        expected_uid=config.get("expected_uid", 65534),
                                        register_admission=False,
-                                       dispatch_gate=dispatch_gate)
+                                       dispatch_gate=dispatch_gate,
+                                       dispatch_journal=default_journal_path(
+                                           config["attempt_db"]),
+                                       require_origin=config.get(
+                                           "expected_peer_uid") is not None)
         # G3-C2-04 frozen order: recover old attempts BEFORE consuming a new
         # admission. An ADMISSION_REPLAYED therefore cannot strand durable state.
         controller.reconcile_on_startup(config.get("receipt_dir"))

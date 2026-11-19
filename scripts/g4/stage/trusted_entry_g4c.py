@@ -47,6 +47,7 @@ SOCKET_GID = 2000
 POLICY_SCHEMA = "m0.g4c.dispatch-policy.v1"
 MODULES = (
     "autoteacher_m0.bridge.controller",
+    "autoteacher_m0.bridge.dispatch_audit",
     "autoteacher_m0.bridge.ipc_server",
     "autoteacher_m0.bridge.attempts",
     "autoteacher_m0.bridge.admission",

@@ -139,7 +139,7 @@ class _ConnectionContext:
     """Per-connection mutable state (never shared across connections)."""
 
     __slots__ = ("sock", "lock", "done", "expired", "transport_id", "seq",
-                 "total_bytes", "chunk_count")
+                 "total_bytes", "chunk_count", "peer")
 
     def __init__(self, sock: socket.socket) -> None:
         self.sock = sock
@@ -150,6 +150,10 @@ class _ConnectionContext:
         self.seq = 1
         self.total_bytes = 0
         self.chunk_count = 0
+        # G4-F2: kernel-reported (uid, gid, pid) for this connection; evidence
+        # only (identity stays the peer UID). Passed to the Controller once the
+        # request transport id is known, never derived from the payload.
+        self.peer: tuple[int, int, int] | None = None
 
 
 class BridgeServer:
@@ -247,13 +251,15 @@ class BridgeServer:
                     raise
                 # D1-A: authorize the kernel-reported peer before any frame is
                 # read, before the connection cap decision and before any ack.
-                if not self._authorize_peer(conn):
+                peer = self._authorize_peer(conn)
+                if peer is None:
                     self._close_socket(conn)
                     continue
                 accepted_at = time.monotonic()
                 first_deadline = accepted_at + self.first_frame_deadline_s
                 request_deadline = accepted_at + self.request_deadline_s
                 context = _ConnectionContext(conn)
+                context.peer = peer
                 thread = threading.Thread(
                     target=self._connection_thread,
                     args=(context, first_deadline, request_deadline),
@@ -416,29 +422,30 @@ class BridgeServer:
         except OSError:
             _LOGGER.warning("bridge socket cleanup failed")
 
-    def _authorize_peer(self, conn: socket.socket) -> bool:
+    def _authorize_peer(self, conn: socket.socket) -> tuple[int, int, int] | None:
         """Verify the accepted peer via SO_PEERCRED before any read/ack.
 
-        PID is recorded as evidence only: across PID namespaces the kernel may
-        report ``pid=0``, so identity is decided solely by the peer UID. Any
-        missing option, short read or exception fails closed; there is no
-        path-only trust fallback.
+        Returns the kernel-reported ``(uid, gid, pid)`` on success and ``None``
+        on any failure. PID is recorded as evidence only: across PID namespaces
+        the kernel may report ``pid=0``, so identity is decided solely by the
+        peer UID. Any missing option, short read or exception fails closed; there
+        is no path-only trust fallback.
         """
         option = getattr(socket, "SO_PEERCRED", None)
         if option is None:
             self._record_peer_rejection(PEERCRED_UNAVAILABLE)
             _LOGGER.warning("bridge peercred unavailable: SO_PEERCRED missing")
-            return False
+            return None
         try:
             raw = conn.getsockopt(socket.SOL_SOCKET, option, _PEERCRED_SIZE)
         except Exception as exc:  # noqa: BLE001 - any credential error fails closed
             self._record_peer_rejection(PEERCRED_UNAVAILABLE)
             _LOGGER.warning("bridge peercred unavailable type=%s", type(exc).__name__)
-            return False
+            return None
         if not isinstance(raw, (bytes, bytearray)) or len(raw) != _PEERCRED_SIZE:
             self._record_peer_rejection(PEERCRED_UNAVAILABLE)
             _LOGGER.warning("bridge peercred invalid length")
-            return False
+            return None
         pid, uid, gid = struct.unpack(_PEERCRED_FORMAT, raw)
         uid &= 0xFFFFFFFF
         gid &= 0xFFFFFFFF
@@ -450,9 +457,9 @@ class BridgeServer:
             _LOGGER.warning(
                 "bridge peer rejected code=%s uid=%d gid=%d expected_uid=%d",
                 PEER_UID_DENIED, uid, gid, self.expected_peer_uid)
-            return False
+            return None
         _LOGGER.debug("bridge peer accepted uid=%d gid=%d pid=%d", uid, gid, pid)
-        return True
+        return (uid, gid, pid)
 
     def _record_peer_rejection(self, code: str) -> None:
         with self._lock:
@@ -512,6 +519,16 @@ class BridgeServer:
             return
         context.transport_id = request.transport_id
         context.seq = 1
+        # G4-F2: hand the kernel-reported origin to the Controller before its
+        # generator runs; the Controller journals it for every dispatch and,
+        # when the deployment declares an expected peer UID, rejects a
+        # missing/foreign origin fail-closed before Reserve/Claim.
+        observe_peer = getattr(self.controller, "observe_peer", None)
+        if callable(observe_peer) and context.peer is not None:
+            try:
+                observe_peer(request.transport_id, *context.peer)
+            except (TypeError, ValueError):
+                pass
         if request.kind != "request":
             self._send_error_ctx(context, "UNKNOWN_KIND")
             return

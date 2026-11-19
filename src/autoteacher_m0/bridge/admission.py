@@ -86,15 +86,24 @@ def load_admission(path: str | Path = ADMISSION_PATH, *, now_utc: datetime | Non
     limits = _no_extra(doc["limits"], {"max_calls", "max_attempts", "max_input_tokens",
                                        "max_output_tokens", "deadline_ms"})
     tool_schemas = []
+    seen_tools: set[str] = set()
     if not isinstance(doc["tool_schemas"], list):
         raise AdmissionError("ADMISSION_INVALID")
     for item in doc["tool_schemas"]:
         entry = _no_extra(item, {"name", "sha256"})
         if not isinstance(entry["name"], str) or not entry["name"]:
             raise AdmissionError("ADMISSION_INVALID")
-        if not isinstance(entry["sha256"], str) or len(entry["sha256"]) != 64:
+        # G4-F2: the approved set is keyed by name; two entries sharing a name
+        # would make the per-dispatch allowlist lookup ambiguous. Reject the
+        # whole Admission document instead of silently using the last digest.
+        if entry["name"] in seen_tools:
             raise AdmissionError("ADMISSION_INVALID")
-        tool_schemas.append((entry["name"], entry["sha256"]))
+        seen_tools.add(entry["name"])
+        digest = entry["sha256"]
+        if (not isinstance(digest, str) or len(digest) != 64
+                or any(char not in "0123456789abcdef" for char in digest)):
+            raise AdmissionError("ADMISSION_INVALID")
+        tool_schemas.append((entry["name"], digest))
     launcher = _no_extra(doc["launcher"], {"uid", "container", "admission_nonce"})
     if launcher["uid"] != expected_uid or launcher["container"] is not True:
         raise AdmissionError("ADMISSION_LAUNCHER_MISMATCH")

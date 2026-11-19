@@ -32,6 +32,7 @@ import lib_g4 as lib  # noqa: E402
 
 MODULES = (
     "autoteacher_m0.bridge.controller",
+    "autoteacher_m0.bridge.dispatch_audit",
     "autoteacher_m0.bridge.ipc_server",
     "autoteacher_m0.bridge.attempts",
     "autoteacher_m0.bridge.admission",

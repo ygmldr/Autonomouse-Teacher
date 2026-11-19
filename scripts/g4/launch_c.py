@@ -564,7 +564,8 @@ class G4CLauncher(g3d_launch.Launcher):
     # -- evidence collection -------------------------------------------
     def _copy_state_assets(self) -> None:
         super()._copy_state_assets()
-        for name in ("g4c-policy.json", "g4c-send-journal.jsonl"):
+        for name in ("g4c-policy.json", "g4c-send-journal.jsonl",
+                     "dispatch-window.jsonl"):
             source = self.run_dir / "state" / name
             if not source.is_file():
                 continue
