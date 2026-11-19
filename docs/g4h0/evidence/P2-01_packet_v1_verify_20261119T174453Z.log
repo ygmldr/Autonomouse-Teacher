@@ -1,0 +1,27 @@
+### P2-01 V1 PACKET READ-ONLY VERIFICATION (collected 2026-11-19T17:42:44Z)
+packet=/root/Autonomous Teacher/artifacts/review-packet-g4f-e7d92967ec0ece80de4a1a3705f637e8eb9bde99
+main_head=3e7afee077845a071cd364e93ab209cac20b2d5f
+main_status_lines=0
+files=177 symlinks=0
+--- sha256sum -c hashes.sha256 ---
+exit=0
+OK_lines=173
+--- payload tree (recomputed from actual bytes) ---
+payload_full_incl_sidecars: (174, '111c1361417ea6ee6958ecffebdb78164f655b082ae8cf911dca221f57794b5a')
+payload_excl_2_sidecars    : (172, 'e464b9b1d6ab0bf4406ccc7868863d207f594fa898ee4affaa3e901d9f1caaa0')
+manifest_files_count: 172
+manifest_payload_tree_sha256: e464b9b1d6ab0bf4406ccc7868863d207f594fa898ee4affaa3e901d9f1caaa0
+docs_sha: d12df4165108d59a2a4f08ba3ba93a35935df846 impl_sha: e7d92967ec0ece80de4a1a3705f637e8eb9bde99 build_sha: 0d5e5e09cd607aef6ba39608b8a3b33a0d2c7705
+state_constants: {"E5_PRELIVE_FULL": "BLOCKED_PENDING_HUMAN_DEPLOYMENT", "G4-H": "NOT_AUTHORIZED", "G5": "BLOCKED", "G6": "NOT_RUN", "LiveGate": "BLOCKED", "M0": "DECISION_PENDING"}
+live_gate: BLOCKED real_model_calls: 0 real_external_http_calls: 0 key_present: False
+--- sidecar metadata ---
+2026-11-19 15:09:08.401906609 +0000 57344 f4/sqlite-readonly/crash-resume-attempts.sqlite3
+2026-11-19 15:09:08.401782838 +0000 65536 f4/sqlite-readonly/crash-resume-broker.sqlite3
+2026-11-19 15:09:08.401117752 +0000 65536 f4/sqlite-readonly/resume-attempts.sqlite3
+2026-11-19 15:11:07.722755144 +0000 32768 f4/sqlite-readonly/resume-attempts.sqlite3-shm
+2026-11-19 15:11:07.721763357 +0000 0 f4/sqlite-readonly/resume-attempts.sqlite3-wal
+2026-11-19 15:09:08.400983511 +0000 65536 f4/sqlite-readonly/resume-broker.sqlite3
+--- hashed-file count / unhashed files ---
+hashes.sha256_lines=173
+unhashed_payload_files_beyond_design:
+  packet-integrity-report.txt (design exclusion)
