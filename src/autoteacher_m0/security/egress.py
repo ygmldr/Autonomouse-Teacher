@@ -18,6 +18,7 @@ import hashlib
 import json
 import os
 import re
+import stat
 import threading
 from typing import Callable, Iterable, Mapping, Protocol, Sequence
 
@@ -1311,6 +1312,33 @@ class SyntheticSendBudget:
 # writes back to the Broker and never substitutes for ``reserved_cost`` or the
 # settlement ``cost_usd``.
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# G4-F5 revocation semantics (synthetic authorization lifetime).
+#
+# The trusted launcher owns one synthetic run authorization (``auth_epoch`` /
+# ``authorization_id``). A root-owned revocation document can revoke it while a
+# dispatch is in flight. The gate re-reads that document at two checkpoints:
+#
+#   pre_dispatch : immediately before a send capability is minted;
+#   pre_send     : immediately before that capability is consumed (the last
+#                  point at which a send can still be refused).
+#
+# The file is an *input*, never an authority: it cannot mint, settle or price a
+# send. Absence of a configured revocation source keeps the F3/F4 behaviour
+# byte-for-byte. Once configured, an unreadable/invalid document fails closed
+# (``REVOCATION_STATE_INVALID``) because ignoring a revocation is worse than
+# refusing to send. A revocation observed after the wire boundary cannot
+# retract the send; the Broker settlement stays authoritative and the caller
+# must not resend.
+# ---------------------------------------------------------------------------
+REVOCATION_SCHEMA = "m0.g4c.revocation.v1"
+REVOCATION_CHECK_SCHEMA = "m0.g4c.revocation-check.v1"
+RUN_AUTHORIZATION_REVOKED = "RUN_AUTHORIZATION_REVOKED"
+REVOCATION_STATE_INVALID = "REVOCATION_STATE_INVALID"
+MAX_REVOCATION_BYTES = 64 * 1024
+REVOCATION_CHECK_LIMIT = 64
+_REVOCATION_KEYS = frozenset({"schema", "authorization_id", "auth_epoch",
+                              "revoked", "revoked_utc", "reason"})
 COST_VIEW_SCHEMA = "m0.g4c.cost-view.v1"
 COST_AUTHORITY_BROKER = "broker_reservation_settlement"
 COST_VIEW_ROLE = "conservative_read_only_view"
@@ -1485,6 +1513,8 @@ class TrustedSendGate:
                  binding_approved: ExpectedBindings | None = None,
                  binding_observer: Callable[[], ExpectedBindings] | None = None,
                  binding_checkpoint: str = "pre_dispatch",
+                 authorization_id: str | None = None,
+                 revocation_path: str | os.PathLike[str] | None = None,
                  ttl_seconds: int = SEND_AUTHORIZATION_TTL_SECONDS,
                  limit: int = SEND_AUTHORIZATION_LIMIT,
                  now: Callable[[], datetime] = _utc_now) -> None:
@@ -1498,12 +1528,26 @@ class TrustedSendGate:
             raise ValueError("invalid send authorization ttl")
         if type(limit) is not int or not 1 <= limit <= SEND_AUTHORIZATION_LIMIT:
             raise ValueError("invalid send authorization limit")
+        resolved_authorization = auth_epoch if authorization_id is None else authorization_id
+        if (not isinstance(resolved_authorization, str)
+                or not resolved_authorization
+                or resolved_authorization != resolved_authorization.strip()):
+            raise ValueError("authorization_id must be a nonempty identifier")
+        if revocation_path is not None and not isinstance(
+                revocation_path, (str, os.PathLike)):
+            raise ValueError("revocation_path must be a path or None")
         self.contract = contract
         self.budget = budget or SyntheticSendBudget()
         budget_problems = self.budget.budget_problems()
         if budget_problems:
             raise ValueError("invalid synthetic budget: " + ", ".join(budget_problems))
         self.auth_epoch = auth_epoch
+        self.authorization_id = resolved_authorization
+        self.revocation_path = (os.fspath(revocation_path)
+                                if revocation_path is not None else None)
+        self._revocation_lock = threading.RLock()
+        self._revocation_checks: list[dict[str, object]] = []
+        self._revocation_last: dict[str, object] | None = None
         self.journal_path = str(journal_path) if journal_path is not None else None
         self.binding_approved = binding_approved
         self.binding_observer = binding_observer
@@ -1560,6 +1604,114 @@ class TrustedSendGate:
         except EgressViolation:
             pass
         return EgressViolation(codes)
+
+    # -- G4-F5 revocation input (read-only; never an authority) ---------
+    def read_revocation_state(self) -> dict[str, object]:
+        """Read the synthetic run-authorization revocation document.
+
+        The document is a trusted *input* (root-owned state dir). It never
+        carries a cost, a capability or a settlement. When no path is
+        configured the gate behaves exactly as in G4-F3/F4.
+        """
+        base: dict[str, object] = {
+            "configured": self.revocation_path is not None,
+            "path": self.revocation_path,
+            "valid": False, "revoked": False, "targets_run": False,
+            "reason": None, "sha256": None, "bytes": None,
+            "utc": _utc_text(self._now()),
+        }
+        if self.revocation_path is None:
+            return base
+        flags = os.O_RDONLY | os.O_CLOEXEC
+        if hasattr(os, "O_NOFOLLOW"):
+            flags |= os.O_NOFOLLOW
+        try:
+            descriptor = os.open(self.revocation_path, flags)
+        except OSError as error:
+            return {**base, "reason": REVOCATION_STATE_INVALID,
+                    "error": f"OPEN_FAILED:{type(error).__name__}"}
+        try:
+            info = os.fstat(descriptor)
+            if not stat.S_ISREG(info.st_mode):
+                return {**base, "reason": REVOCATION_STATE_INVALID,
+                        "error": "NOT_A_REGULAR_FILE"}
+            if info.st_size <= 0 or info.st_size > MAX_REVOCATION_BYTES:
+                return {**base, "reason": REVOCATION_STATE_INVALID,
+                        "error": "SIZE_INVALID", "bytes": info.st_size}
+            raw = os.read(descriptor, MAX_REVOCATION_BYTES + 1)
+        except OSError as error:
+            return {**base, "reason": REVOCATION_STATE_INVALID,
+                    "error": f"READ_FAILED:{type(error).__name__}"}
+        finally:
+            os.close(descriptor)
+        base["bytes"] = len(raw)
+        base["sha256"] = hashlib.sha256(raw).hexdigest()
+        try:
+            document = json.loads(raw.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            return {**base, "reason": REVOCATION_STATE_INVALID,
+                    "error": "JSON_INVALID"}
+        if not isinstance(document, dict) or set(document) != _REVOCATION_KEYS:
+            return {**base, "reason": REVOCATION_STATE_INVALID,
+                    "error": "FIELDS_INVALID"}
+        if document.get("schema") != REVOCATION_SCHEMA:
+            return {**base, "reason": REVOCATION_STATE_INVALID,
+                    "error": "SCHEMA_INVALID"}
+        for name in ("authorization_id", "auth_epoch", "revoked_utc", "reason"):
+            value = document.get(name)
+            if not isinstance(value, str) or not value or value != value.strip():
+                return {**base, "reason": REVOCATION_STATE_INVALID,
+                        "error": f"{name.upper()}_INVALID"}
+        if type(document.get("revoked")) is not bool:
+            return {**base, "reason": REVOCATION_STATE_INVALID,
+                    "error": "REVOKED_NOT_BOOL"}
+        target_ids = {self.authorization_id, "*"}
+        targets_run = (document["authorization_id"] in target_ids
+                       and document["auth_epoch"] == self.auth_epoch)
+        return {
+            **base, "valid": True, "targets_run": targets_run,
+            "revoked": bool(document["revoked"] and targets_run),
+            "state_authorization_id": document["authorization_id"],
+            "state_auth_epoch": document["auth_epoch"],
+            "revoked_utc": document["revoked_utc"],
+            "state_reason": document["reason"],
+        }
+
+    def revocation_check(self, checkpoint: str) -> dict[str, object]:
+        """One bounded, recorded observation of the revocation input.
+
+        Returns the observation; ``reason`` is non-empty when the current send
+        must be refused. An unreadable/invalid configured document fails closed.
+        """
+        state = self.read_revocation_state()
+        reason = state.get("reason")
+        if not reason and state.get("revoked"):
+            reason = RUN_AUTHORIZATION_REVOKED
+        entry: dict[str, object] = {
+            "schema": REVOCATION_CHECK_SCHEMA,
+            "checkpoint": checkpoint,
+            "utc": _utc_text(self._now()),
+            "configured": state.get("configured"),
+            "valid": state.get("valid"),
+            "targets_run": state.get("targets_run"),
+            "revoked": bool(reason),
+            "reason": reason,
+            "state_sha256": state.get("sha256"),
+            "authorization_id": self.authorization_id,
+            "auth_epoch": self.auth_epoch,
+        }
+        with self._revocation_lock:
+            self._revocation_last = dict(entry)
+            if len(self._revocation_checks) >= REVOCATION_CHECK_LIMIT:
+                del self._revocation_checks[
+                    : len(self._revocation_checks) - REVOCATION_CHECK_LIMIT + 1]
+            self._revocation_checks.append(dict(entry))
+        if reason:
+            try:
+                self._journal({"decision": "REVOCATION_CHECK", **entry})
+            except EgressViolation:
+                pass
+        return entry
 
     # -- G4-F3 conservative cost view (Broker is the only authority) ----
     def _cost_event(self, kind: str, *, reservation_id: str = "",
@@ -1845,6 +1997,11 @@ class TrustedSendGate:
         reasons: list[str] = []
         if self.send_problems:
             raise self._deny(self.send_problems)
+        # G4-F5: revocation is checked before any other capability work, and a
+        # revoked/unreadable state denies the mint (no hold, no journal grant).
+        revocation = self.revocation_check("pre_dispatch")
+        if revocation.get("reason"):
+            reasons.append(str(revocation["reason"]))
         if not isinstance(prepared, PreparedProviderRequest):
             raise self._deny((PREPARED_REQUEST_INVALID,))
         schema_error = prepared_schema_error(prepared)
@@ -2074,6 +2231,15 @@ class TrustedSendGate:
         if authorization.auth_epoch != self.auth_epoch:
             self._record_consume(authorization, "AUTH_EPOCH_MISMATCH")
             return "AUTH_EPOCH_MISMATCH"
+        # G4-F5: the last point at which a send can still be refused. A
+        # revocation observed here burns the capability so a later un-revoke
+        # can never resurrect it.
+        revocation = self.revocation_check("pre_send")
+        if revocation.get("reason"):
+            del self._issued[id(authorization)]
+            self._consumed.add(authorization.authorization_id)
+            self._record_consume(authorization, str(revocation["reason"]))
+            return str(revocation["reason"])
         if not isinstance(payload_bytes, bytes):
             self._record_consume(authorization, "PAYLOAD_BYTES_INVALID")
             return "PAYLOAD_BYTES_INVALID"
@@ -2127,6 +2293,15 @@ class TrustedSendGate:
             cost_view = self._cost_mapping_locked()
             known = format(self._known_usd, "f")
             held = format(self._held_usd, "f")
+        with self._revocation_lock:
+            revocation = {
+                "configured": self.revocation_path is not None,
+                "authorization_id": self.authorization_id,
+                "path": self.revocation_path,
+                "last": dict(self._revocation_last)
+                        if self._revocation_last is not None else None,
+                "checks": [dict(entry) for entry in self._revocation_checks],
+            }
         return {
             "schema": "m0.g4c.send-gate.v1",
             "route_contract": self.contract.to_mapping(),
@@ -2145,6 +2320,7 @@ class TrustedSendGate:
             "worst_case_held_usd": held,
             "cost_authority": COST_AUTHORITY_BROKER,
             "cost_view": cost_view,
+            "revocation": revocation,
             "soft_events": list(self._soft_events),
             "denials": list(self._denials),
         }

@@ -26,9 +26,11 @@ from __future__ import annotations
 import argparse
 import json
 import os
+from decimal import Decimal
 from pathlib import Path
 import sqlite3
 import sys
+import threading
 import time
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "g3d"))
@@ -63,6 +65,21 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--hold-seconds", type=int, default=600)
     parser.add_argument("--label", default=None)
     parser.add_argument("--crash-hook", default=None)
+    parser.add_argument("--test-delay-hook", default=None,
+                        help="G4-F5 test-only delay window (before_reserve / "
+                             "after_reserve_before_send)")
+    parser.add_argument("--test-delay-ms", type=int, default=None,
+                        help="G4-F5 test-only delay in milliseconds")
+    parser.add_argument("--revocation", action="store_true",
+                        help="G4-F5: wire the synthetic run-authorization "
+                             "revocation input")
+    parser.add_argument("--pre-revoke", action="store_true",
+                        help="G4-F5: write the revocation document before the "
+                             "candidate starts")
+    parser.add_argument("--watch-revocation", default=None,
+                        choices=(None, "after_reserve", "in_flight"),
+                        help="G4-F5: revoke during a real DSH request at the "
+                             "named window")
     parser.add_argument("--max-calls", type=int, default=None,
                         help="G4-C synthetic admission override (test only)")
     parser.add_argument("--steps", default=None,
@@ -73,10 +90,25 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return args
 
 
+F5_DSH_CASES = frozenset({
+    "revocation-pre-reserve", "revocation-post-reserve",
+    "revocation-in-flight", "timeout-pre-send", "timeout-post-send",
+    "crash-after-authorize", "crash-after-consume",
+})
+
+
 class G4CLauncher(g3d_launch.Launcher):
     def __init__(self, args: argparse.Namespace) -> None:
         super().__init__(args)
         self.crash_hook = args.crash_hook
+        self.test_delay_hook = args.test_delay_hook
+        self.test_delay_ms = args.test_delay_ms
+        self.revocation_enabled = bool(args.revocation)
+        self.pre_revoke = bool(args.pre_revoke)
+        self.watch_revocation = args.watch_revocation
+        self.dsh_revocation: dict | None = None
+        self.revocations: list[dict] = []
+        self.revocation_epoch: str | None = None
         self.restart_records: list[dict] = []
         self.g4c_policy: dict | None = None
         self.g4c_policy_sha256: str | None = None
@@ -251,9 +283,25 @@ class G4CLauncher(g3d_launch.Launcher):
         epoch = f"g4c-{self.run_id}"
         if len(epoch) > 128:
             epoch = epoch[:120]
+        revocation_policy = None
+        if self.revocation_enabled:
+            self.revocation_epoch = epoch
+            revocation_policy = {
+                "schema": "m0.g4c.revocation-policy.v1",
+                "path": "/work/state/g4c-revocation.json",
+                "authorization_id": epoch,
+            }
         policy = libc.build_policy(contract=contract, closure=closure,
                                    approved=approved, auth_epoch=epoch,
-                                   run_id=self.run_id)
+                                   run_id=self.run_id,
+                                   revocation=revocation_policy)
+        if self.revocation_enabled:
+            # Initial state: the synthetic run authorization is valid. The gate
+            # re-reads this root-owned document at pre_reserve, pre_dispatch and
+            # pre_send; every rewrite is recorded in the evidence index.
+            self.write_revocation(revoked=self.pre_revoke,
+                                  reason=("initial-pre-revoked" if self.pre_revoke
+                                          else "initial"))
         policy_path = self.run_dir / "state" / "g4c-policy.json"
         record = libc.write_policy(policy_path, policy)
         self.g4c_policy = policy
@@ -292,6 +340,93 @@ class G4CLauncher(g3d_launch.Launcher):
                       "stage egress.py differs from the running repository source")
         return mapping
 
+    def write_revocation(self, *, revoked: bool, reason: str) -> dict:
+        """Rewrite the synthetic run-authorization revocation document.
+
+        This is a real root-owned state input read by the trusted gate; the
+        document itself is not a fee/ledger authority and never mints a send.
+        """
+        if self.revocation_epoch is None:
+            raise lib3d.G3DError("revocation is not enabled for this run")
+        document = {
+            "schema": "m0.g4c.revocation.v1",
+            "authorization_id": self.revocation_epoch,
+            "auth_epoch": self.revocation_epoch,
+            "revoked": bool(revoked),
+            "revoked_utc": lib.utc_now(),
+            "reason": reason,
+        }
+        path = self.run_dir / "state" / "g4c-revocation.json"
+        record = lib3d.write_json_atomic(path, document, mode=0o600, uid=0, gid=0)
+        entry = {
+            "utc": lib.utc_now(), "revoked": bool(revoked), "reason": reason,
+            "sha256": record["sha256"], "bytes": record["bytes"],
+            "path": str(path), "document": document,
+        }
+        self.revocations.append(entry)
+        self.write_evidence_json(
+            f"run/revocation-{len(self.revocations):02d}.json", entry)
+        return entry
+
+    def _revocation_path(self) -> Path:
+        return self.run_dir / "state" / "g4c-revocation.json"
+
+    def _revocation_is_revoked(self) -> bool:
+        try:
+            document = json.loads(self._revocation_path().read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return False
+        return document.get("revoked") is True
+
+    def _start_dsh_revocation_watcher(self):
+        """Revoke the synthetic authorization during a *real DSH* request.
+
+        The watcher waits for the controller's post-Reserve marker (pre-send) or
+        for the Fake receipt (post-wire), then writes the real revocation
+        document from the host. No request bytes, no model and no network are
+        involved; the DSH request is the ordinary synthetic-fixture turn.
+        """
+        if not self.watch_revocation:
+            return None
+        if not self.revocation_enabled:
+            raise lib3d.G3DError("--watch-revocation requires --revocation")
+        window = self.watch_revocation
+        marker = self.run_dir / "state" / "g4f5-delay-marker.json"
+        receipts = self.run_dir / "state" / "receipts"
+        before = len(list(receipts.glob("rcpt-*.json"))) if receipts.is_dir() else 0
+
+        def worker() -> None:
+            try:
+                def new_receipt():
+                    if not receipts.is_dir():
+                        return None
+                    rows = sorted(receipts.glob("rcpt-*.json"))
+                    return len(rows) if len(rows) > before else None
+                if window == "after_reserve":
+                    observed = self._wait_for(
+                        lambda: marker.is_file() or None, timeout=90.0)
+                else:
+                    observed = self._wait_for(new_receipt, timeout=90.0)
+                if not observed:
+                    raise lib3d.G3DError(
+                        f"DSH {window} window was not observed")
+                record = self.write_revocation(
+                    revoked=True, reason=f"dsh:{window}")
+                self.dsh_revocation = {
+                    "window": window, "observed": True,
+                    "utc": lib.utc_now(), "revocation": record,
+                    "container": self.candidate_name,
+                }
+                self.write_evidence_json("run/dsh-revocation.json",
+                                         self.dsh_revocation)
+            except BaseException as exc:  # noqa: BLE001 - evidence keeps failure
+                self.record_error("DSH_REVOCATION_FAILED",
+                                  f"{type(exc).__name__}: {exc}")
+
+        thread = threading.Thread(target=worker, daemon=True)
+        thread.start()
+        return thread
+
     def _override_admission_max_calls(self, max_calls: int) -> None:
         path = self.run_dir / "state" / "admission.json"
         document = json.loads(path.read_text(encoding="utf-8"))
@@ -313,7 +448,9 @@ class G4CLauncher(g3d_launch.Launcher):
             podman="podman", rootfs=str(lib3d.ROOTFS),
             stage_trusted=str(self.stage_dir / "trusted"), deps=str(lib3d.DEPS),
             run_dir=str(self.run_dir), entry_dir=str(self.run_dir / "g4c-run"),
-            name=name, crash_hook=crash_hook)
+            name=name, crash_hook=crash_hook,
+            test_delay_hook=self.test_delay_hook if key == "main" else None,
+            test_delay_ms=self.test_delay_ms if key == "main" else None)
         problems = libc.trusted_argv_problems(
             argv, run_dir=str(self.run_dir), stage_dir=str(self.stage_dir / "trusted"))
         if problems:
@@ -407,6 +544,16 @@ class G4CLauncher(g3d_launch.Launcher):
         """
         name = self.trusted_name + "-r2"
         self.cmd(["podman", "rm", "-f", name], name="rm-stale-trusted-r2", timeout=60)
+        # G4-F5: keep the *crashed/pre-restart* process's gate snapshot before
+        # the recovery process overwrites /output/g4c-egress.json.
+        pre_restart = self.run_dir / "evidence" / "g4c-egress.json"
+        if pre_restart.is_file():
+            lib3d.write_bytes_atomic(
+                self.evidence / "run" / "g4c-egress-before-restart.json",
+                lib3d.read_regular_bytes(pre_restart, max_bytes=8 << 20), mode=0o444)
+        if self.revocation_enabled:
+            self.write_revocation(revoked=self._revocation_is_revoked(),
+                                  reason="before-restart")
         argv = libc.trusted_argv(
             podman="podman", rootfs=str(lib3d.ROOTFS),
             stage_trusted=str(self.stage_dir / "trusted"), deps=str(lib3d.DEPS),
@@ -507,6 +654,7 @@ class G4CLauncher(g3d_launch.Launcher):
             self.records["candidate_hold"] = True
             self.records["candidate_exit_code"] = None
             return
+        watcher = self._start_dsh_revocation_watcher()
         if document["State"]["Status"] == "running":
             wait_record = self.cmd(
                 ["podman", "wait", "--interval", "200ms", self.candidate_name],
@@ -520,6 +668,8 @@ class G4CLauncher(g3d_launch.Launcher):
                 self.cmd(["podman", "wait", "--interval", "200ms",
                           self.candidate_name],
                          name="podman-wait-candidate-killed", timeout=30)
+        if watcher is not None:
+            watcher.join(timeout=60.0)
         final = self.podman_inspect(self.candidate_name, label="inspect-candidate-final")
         exit_code = None
         if final is not None:
@@ -668,7 +818,9 @@ class G4CLauncher(g3d_launch.Launcher):
                   authorized=len(gate["authorized"]))
         else:
             check("gate_journal_present", gate["present"], path=gate["path"])
-        if case in {"c01", "c02"}:
+        if (self.args.candidate_mode == "dsh" and case in F5_DSH_CASES):
+            self._evaluate_dsh_f5_case(check, snapshot, gate)
+        elif case in {"c01", "c02"}:
             self._evaluate_dsh_case(check, snapshot, gate, modules)
         elif case == "negatives":
             self._evaluate_negative_case(check, snapshot, gate)
@@ -684,6 +836,15 @@ class G4CLauncher(g3d_launch.Launcher):
             self._evaluate_quota_case(check, snapshot, gate)
         elif case == "c18":
             self._evaluate_stream_case(check, snapshot, gate)
+        elif case in {"revocation-pre-reserve", "revocation-post-reserve",
+                      "revocation-in-flight"}:
+            self._evaluate_revocation_case(check, snapshot, gate)
+        elif case == "timeout-pre-send":
+            self._evaluate_timeout_pre_send(check, snapshot, gate)
+        elif case == "timeout-post-send":
+            self._evaluate_timeout_post_send(check, snapshot, gate)
+        elif case in {"crash-after-authorize", "crash-after-consume"}:
+            self._evaluate_ingress_crash_case(check, snapshot, gate)
         else:
             check("known_case", False, case=case)
         self.checks = checks
@@ -781,7 +942,8 @@ class G4CLauncher(g3d_launch.Launcher):
     def _gate_evidence(self) -> dict:
         path = self.evidence / "run" / "g4c-send-journal.jsonl"
         result = {"present": path.is_file(), "path": str(path),
-                  "authorized": [], "consumed": [], "denied": []}
+                  "authorized": [], "consumed": [], "denied": [],
+                  "revocation": []}
         if path.is_file():
             for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
                 try:
@@ -791,10 +953,147 @@ class G4CLauncher(g3d_launch.Launcher):
                 decision = document.get("decision")
                 if decision in {"AUTHORIZED", "CONSUMED"}:
                     result[decision.lower()].append(document)
+                elif decision == "REVOCATION_CHECK":
+                    result["revocation"].append(document)
                 else:
                     result["denied"].append(document)
         self.write_evidence_json("checks/gate-journal.json", result)
         return result
+
+    def _evaluate_dsh_f5_case(self, check, snapshot, gate) -> None:
+        """Real-DSH G4-F5 evidence: ledger + gate + recovery, no probes."""
+        case = self.case
+        result = self._read_json_evidence("traces/dsh-result.json") or {}
+        reservations = snapshot["reservations"]
+        claims = snapshot["claims"]
+        attempts = snapshot["attempts"]
+        receipts = snapshot["receipts"]
+        dsh_failed = (result.get("error") is not None
+                      or result.get("finish_reason") not in {None, "completed"})
+        check("dsh_result_present", bool(result), keys=sorted(result)[:8])
+        if case == "revocation-in-flight":
+            check("dsh_request_completed", not dsh_failed,
+                  error=result.get("error"),
+                  finish_reason=result.get("finish_reason"),
+                  response=result.get("final_response"))
+        else:
+            check("dsh_request_failed", dsh_failed,
+                  error=result.get("error"),
+                  finish_reason=result.get("finish_reason"),
+                  response=result.get("final_response"))
+        check("f5_dsh_revocation_enabled", self.revocation_enabled,
+              enabled=self.revocation_enabled)
+        if case == "revocation-pre-reserve":
+            check("dsh_revocation_pre_reserve_no_ledger",
+                  not reservations and not claims and not attempts
+                  and not snapshot["intents"] and not receipts
+                  and snapshot["fake_counter"] == 0,
+                  reservations=len(reservations), claims=len(claims),
+                  attempts=len(attempts), receipts=len(receipts),
+                  fake=snapshot["fake_counter"])
+            check("dsh_revocation_pre_reserve_no_authorization",
+                  not gate["authorized"] and self._revocation_pre_reserve_check(gate),
+                  authorized=len(gate["authorized"]),
+                  checks=len(gate["revocation"]))
+            return
+        if case in {"revocation-post-reserve", "crash-after-authorize",
+                    "crash-after-consume"}:
+            recovery = self._gate_snapshot("run/g4c-egress-recovery.json")
+            check("dsh_post_reserve_pending_reservation",
+                  len(reservations) == 1
+                  and reservations[0].get("status") == "PENDING"
+                  and self._money(reservations[0].get("cost")) > 0,
+                  rows=[{key: row.get(key) for key in ("status", "cost")}
+                        for row in reservations])
+            check("dsh_post_reserve_durable_attempt",
+                  len(attempts) == 1
+                  and attempts[0].get("state") in {"SETTLEMENT_UNCERTAIN",
+                                                   "ATTEMPT_STARTED"},
+                  states=[row.get("state") for row in attempts])
+            check("dsh_post_reserve_no_fake",
+                  not receipts and snapshot["fake_counter"] == 0,
+                  receipts=len(receipts), fake=snapshot["fake_counter"])
+            check("dsh_post_reserve_recovery_held",
+                  self._money(recovery.get("worst_case_held_usd")) > 0,
+                  held=recovery.get("worst_case_held_usd"),
+                  known=recovery.get("known_cost_usd"))
+            check("dsh_post_reserve_single_claim", len(claims) == 1,
+                  rows=len(claims))
+            if case == "revocation-post-reserve":
+                window = self._read_json_evidence("run/dsh-revocation.json") or {}
+                check("dsh_revocation_mid_request",
+                      window.get("window") == "after_reserve"
+                      and bool((window.get("revocation") or {}).get("revoked")),
+                      window=window.get("window"))
+                check("dsh_revocation_gate_denial",
+                      bool(self._revocation_denials(gate)))
+            return
+        if case == "revocation-in-flight":
+            window = self._read_json_evidence("run/dsh-revocation.json") or {}
+            check("dsh_in_flight_completed",
+                  not dsh_failed and result.get("final_response") is not None,
+                  response=result.get("final_response"))
+            check("dsh_in_flight_single_settled",
+                  len(reservations) == 1 and len(claims) == 1
+                  and len(attempts) == 1
+                  and attempts[0].get("state") == "SETTLED"
+                  and snapshot["fake_counter"] == 1 and len(receipts) == 1,
+                  reservations=len(reservations), claims=len(claims),
+                  attempts=len(attempts), fake=snapshot["fake_counter"])
+            check("dsh_in_flight_cost_not_free",
+                  bool(reservations)
+                  and self._money(reservations[0].get("cost")) > 0,
+                  cost=reservations[0].get("cost") if reservations else None)
+            check("dsh_in_flight_revocation_after_wire",
+                  window.get("window") == "in_flight"
+                  and bool((window.get("revocation") or {}).get("revoked")),
+                  window=window.get("window"))
+            return
+        if case == "timeout-pre-send":
+            marker = self.run_dir / "state" / "g4f5-delay-marker.json"
+            check("dsh_timeout_pre_send_no_ledger",
+                  not reservations and not claims and not attempts
+                  and not receipts and snapshot["fake_counter"] == 0,
+                  reservations=len(reservations), attempts=len(attempts),
+                  receipts=len(receipts), fake=snapshot["fake_counter"])
+            check("dsh_timeout_pre_send_no_authorization", not gate["authorized"],
+                  authorized=len(gate["authorized"]))
+            check("dsh_timeout_pre_send_real_delay", marker.is_file(),
+                  marker=str(marker))
+            return
+        if case == "timeout-post-send":
+            before = self._gate_snapshot("run/g4c-egress-before-restart.json")
+            recovery = self._gate_snapshot("run/g4c-egress-recovery.json")
+            check("dsh_timeout_post_send_fake_once",
+                  snapshot["fake_counter"] == 1 and len(receipts) == 1,
+                  fake=snapshot["fake_counter"], receipts=len(receipts))
+            check("dsh_timeout_post_send_single_ledger",
+                  len(reservations) == 1 and len(claims) == 1
+                  and len(attempts) == 1,
+                  reservations=len(reservations), claims=len(claims),
+                  attempts=len(attempts))
+            final = reservations[0] if reservations else {}
+            check("dsh_timeout_post_send_not_free",
+                  final.get("status") in {"PENDING", "OK", "FAILED"}
+                  and (final.get("status") == "PENDING"
+                       or self._money(final.get("cost")) > 0),
+                  status=final.get("status"), cost=final.get("cost"))
+            check("dsh_timeout_post_send_before_recovery_held",
+                  self._money(before.get("worst_case_held_usd")) > 0,
+                  held=before.get("worst_case_held_usd"),
+                  known=before.get("known_cost_usd"))
+            if recovery:
+                check("dsh_timeout_post_send_recovery_not_free",
+                      self._money(recovery.get("worst_case_held_usd")) > 0
+                      or self._money(recovery.get("known_cost_usd")) > 0,
+                      held=recovery.get("worst_case_held_usd"),
+                      known=recovery.get("known_cost_usd"))
+            else:
+                check("dsh_timeout_post_send_gate_held",
+                      self._money(gate.get("worst_case_held_usd")) > 0,
+                      held=gate.get("worst_case_held_usd"))
+            return
+        check("known_f5_dsh_case", False, case=case)
 
     def _evaluate_dsh_case(self, check, snapshot, gate, modules) -> None:
         scenario = "tool" if self.case == "c02" else "echo"
@@ -1056,6 +1355,262 @@ class G4CLauncher(g3d_launch.Launcher):
               reservations=len(snapshot["reservations"]),
               attempts=len(snapshot["attempts"]))
 
+    # -- G4-F5 revocation / timeout / in-flight crash -------------------
+    @staticmethod
+    def _money(value: object) -> Decimal:
+        try:
+            return Decimal(str(value))
+        except Exception:  # noqa: BLE001 - evidence-only conversion
+            return Decimal("0")
+
+    def _step_record(self, name: str) -> dict:
+        document = self._read_json_evidence("run/steps.json") or {}
+        for item in document.get("steps") or []:
+            if item.get("step") == name:
+                return item.get("record") or {}
+        return {}
+
+    def _gate_snapshot(self, relative: str) -> dict:
+        return self._read_json_evidence(relative) or {}
+
+    def _revocation_denials(self, gate: dict) -> list[dict]:
+        return [row for row in gate.get("revocation") or []
+                if row.get("revoked") is True]
+
+    def _revocation_pre_reserve_check(self, gate: dict) -> bool:
+        return any(row.get("checkpoint") == "pre_reserve"
+                   and row.get("reason") == "RUN_AUTHORIZATION_REVOKED"
+                   for row in self._revocation_denials(gate))
+
+    def _evaluate_revocation_case(self, check, snapshot, gate) -> None:
+        case = self.case
+        reservations = snapshot["reservations"]
+        claims = snapshot["claims"]
+        attempts = snapshot["attempts"]
+        receipts = snapshot["receipts"]
+        check("revocation_document_written", bool(self.revocations),
+              rows=len(self.revocations))
+        check("revocation_enabled_in_policy",
+              bool((self.g4c_policy or {}).get("revocation")),
+              policy=(self.g4c_policy or {}).get("revocation"))
+        check("revocation_gate_observed_denial",
+              bool(self._revocation_denials(gate)),
+              rows=[{key: row.get(key) for key in
+                     ("checkpoint", "reason", "state_sha256")}
+                    for row in self._revocation_denials(gate)][:4])
+        if case == "revocation-pre-reserve":
+            row = next(iter(self._case_rows(self._probe("valid")).values()), {})
+            check("revocation_pre_reserve_denied",
+                  row.get("terminal") == "error"
+                  and row.get("error_code") == "ADMISSION_SELF_AUTH_DENIED",
+                  row=row)
+            check("revocation_pre_reserve_no_reservation", not reservations,
+                  rows=len(reservations))
+            check("revocation_pre_reserve_no_claim_attempt_intent",
+                  not claims and not attempts and not snapshot["intents"],
+                  claims=len(claims), attempts=len(attempts),
+                  intents=len(snapshot["intents"]))
+            check("revocation_pre_reserve_no_receipt_or_fake",
+                  not receipts and snapshot["fake_counter"] == 0,
+                  receipts=len(receipts), fake=snapshot["fake_counter"])
+            check("revocation_pre_reserve_no_send_authorization",
+                  not gate["authorized"], authorized=len(gate["authorized"]))
+            check("revocation_pre_reserve_checkpoint",
+                  self._revocation_pre_reserve_check(gate),
+                  rows=self._revocation_denials(gate)[:3])
+            return
+        if case == "revocation-post-reserve":
+            first = next(iter(self._case_rows(self._probe("valid")).values()), {})
+            second = next(iter(self._case_rows(self._probe("valid2")).values()), {})
+            recovery = self._gate_snapshot("run/g4c-egress-recovery.json")
+            check("revocation_post_reserve_denied",
+                  first.get("terminal") == "error"
+                  and first.get("error_code") == "ADMISSION_SELF_AUTH_DENIED",
+                  row=first)
+            check("revocation_post_reserve_single_pending_reservation",
+                  len(reservations) == 1
+                  and reservations[0].get("status") == "PENDING"
+                  and self._money(reservations[0].get("cost")) > 0,
+                  rows=[{key: row.get(key) for key in ("status", "cost", "estimated")}
+                        for row in reservations])
+            check("revocation_post_reserve_single_claim", len(claims) == 1,
+                  rows=len(claims))
+            check("revocation_post_reserve_attempt_uncertain",
+                  len(attempts) == 1
+                  and attempts[0].get("state") in {"SETTLEMENT_UNCERTAIN",
+                                                   "ATTEMPT_STARTED"},
+                  states=[row.get("state") for row in attempts])
+            check("revocation_post_reserve_no_fake",
+                  not receipts and snapshot["fake_counter"] == 0,
+                  receipts=len(receipts), fake=snapshot["fake_counter"])
+            check("revocation_post_reserve_no_authorized_send",
+                  not gate["authorized"], authorized=len(gate["authorized"]))
+            check("revocation_post_reserve_recovery_held",
+                  self._money(recovery.get("worst_case_held_usd")) > 0
+                  and self._money(recovery.get("known_cost_usd")) == 0,
+                  held=recovery.get("worst_case_held_usd"),
+                  known=recovery.get("known_cost_usd"))
+            recovery_views = (recovery.get("cost_view") or {}).get("reservations") or []
+            check("revocation_post_reserve_recovery_broker_pending",
+                  len(recovery_views) == 1
+                  and recovery_views[0].get("broker_status") == "PENDING",
+                  views=recovery_views[:1])
+            check("revocation_after_request_rejected",
+                  second.get("terminal") == "error"
+                  and second.get("error_code") == "ADMISSION_SELF_AUTH_DENIED",
+                  row=second)
+            check("revocation_after_request_no_new_ledger",
+                  len(reservations) == 1 and len(claims) == 1
+                  and len(attempts) == 1 and not receipts,
+                  reservations=len(reservations), claims=len(claims),
+                  attempts=len(attempts), receipts=len(receipts))
+            check("revocation_post_reserve_no_double_settlement",
+                  len(gate["authorized"]) == 0 and not gate["consumed"],
+                  authorized=len(gate["authorized"]),
+                  consumed=len(gate["consumed"]))
+            return
+        # revocation-in-flight
+        first = next(iter(self._case_rows(self._probe("valid")).values()), {})
+        second = next(iter(self._case_rows(self._probe("valid2")).values()), {})
+        step = self._step_record("valid-revoke-in-flight")
+        check("revocation_in_flight_request_completed",
+              first.get("terminal") == "finish", row=first)
+        check("revocation_in_flight_single_settled_ledger",
+              len(reservations) == 1
+              and reservations[0].get("status") in {"OK", "FAILED"}
+              and len(claims) == 1 and len(attempts) == 1
+              and attempts[0].get("state") == "SETTLED",
+              reservations=[row.get("status") for row in reservations],
+              attempts=[row.get("state") for row in attempts])
+        check("revocation_in_flight_fake_once",
+              snapshot["fake_counter"] == 1 and len(receipts) == 1,
+              fake=snapshot["fake_counter"], receipts=len(receipts))
+        check("revocation_in_flight_not_free",
+              self._money(reservations[0].get("cost")) > 0
+              and self._money(reservations[0].get("estimated")) > 0,
+              row={key: reservations[0].get(key)
+                   for key in ("cost", "estimated")} if reservations else None)
+        check("revocation_in_flight_observed_after_receipt",
+              (step.get("window") == "in_flight")
+              and isinstance(step.get("observed"), int)
+              and step["observed"] >= 1
+              and bool(step.get("revocation", {}).get("revoked")),
+              step={key: step.get(key) for key in ("window", "observed")})
+        check("revocation_in_flight_second_request_rejected",
+              second.get("terminal") == "error"
+              and second.get("error_code") == "ADMISSION_SELF_AUTH_DENIED",
+              row=second)
+        check("revocation_in_flight_no_second_ledger",
+              len(reservations) == 1 and len(claims) == 1
+              and len(attempts) == 1 and snapshot["fake_counter"] == 1,
+              reservations=len(reservations), claims=len(claims),
+              attempts=len(attempts), fake=snapshot["fake_counter"])
+        check("revocation_in_flight_no_double_send",
+              len(gate["authorized"]) == 1 and len(gate["consumed"]) == 1,
+              authorized=len(gate["authorized"]),
+              consumed=len(gate["consumed"]))
+
+    def _evaluate_timeout_pre_send(self, check, snapshot, gate) -> None:
+        row = next(iter(self._case_rows(self._probe("valid")).values()), {})
+        check("timeout_pre_send_deadline_code",
+              row.get("terminal") == "error"
+              and row.get("error_code") == "DEADLINE_EXCEEDED", row=row)
+        check("timeout_pre_send_no_reservation", not snapshot["reservations"],
+              rows=len(snapshot["reservations"]))
+        check("timeout_pre_send_no_attempt", not snapshot["attempts"],
+              rows=len(snapshot["attempts"]))
+        check("timeout_pre_send_no_receipt_or_fake",
+              not snapshot["receipts"] and snapshot["fake_counter"] == 0,
+              receipts=len(snapshot["receipts"]), fake=snapshot["fake_counter"])
+        check("timeout_pre_send_no_authorization", not gate["authorized"],
+              authorized=len(gate["authorized"]))
+        marker = self.run_dir / "state" / "g4f5-delay-marker.json"
+        check("timeout_pre_send_real_delay_observed", marker.is_file(),
+              marker=str(marker))
+
+    def _evaluate_timeout_post_send(self, check, snapshot, gate) -> None:
+        first = next(iter(self._case_rows(self._probe("valid")).values()), {})
+        replay = next(iter(self._case_rows(self._probe("replay")).values()), {})
+        before = self._gate_snapshot("run/g4c-egress-before-restart.json")
+        recovery = self._gate_snapshot("run/g4c-egress-recovery.json")
+        reservations = snapshot["reservations"]
+        attempts = snapshot["attempts"]
+        check("timeout_post_send_deadline_code",
+              first.get("terminal") == "error"
+              and first.get("error_code") == "DEADLINE_EXCEEDED", row=first)
+        check("timeout_post_send_fake_once",
+              snapshot["fake_counter"] == 1 and len(snapshot["receipts"]) == 1,
+              fake=snapshot["fake_counter"], receipts=len(snapshot["receipts"]))
+        check("timeout_post_send_single_reservation",
+              len(reservations) == 1, rows=len(reservations))
+        check("timeout_post_send_attempt_uncertain",
+              len(attempts) == 1
+              and attempts[0].get("state") in {"SETTLEMENT_UNCERTAIN", "SETTLED"},
+              states=[row.get("state") for row in attempts])
+        check("timeout_post_send_held_before_recovery",
+              self._money(before.get("worst_case_held_usd")) > 0
+              and self._money(before.get("known_cost_usd")) == 0,
+              held=before.get("worst_case_held_usd"),
+              known=before.get("known_cost_usd"))
+        check("timeout_post_send_replay_not_sent",
+              replay.get("terminal") == "error"
+              and snapshot["fake_counter"] == 1, row=replay)
+        final_status = reservations[0].get("status") if reservations else None
+        final_cost = self._money(reservations[0].get("cost")) if reservations else Decimal("0")
+        check("timeout_post_send_broker_conservative",
+              final_status in {"PENDING", "OK", "FAILED"}
+              and (final_status == "PENDING" or final_cost > 0),
+              status=final_status, cost=str(final_cost))
+        check("timeout_post_send_recovery_not_free",
+              (self._money(recovery.get("worst_case_held_usd")) > 0
+               or self._money(recovery.get("known_cost_usd")) > 0),
+              held=recovery.get("worst_case_held_usd"),
+              known=recovery.get("known_cost_usd"))
+        check("timeout_post_send_no_double_send",
+              len(gate["authorized"]) == 1 and len(gate["consumed"]) == 1,
+              authorized=len(gate["authorized"]),
+              consumed=len(gate["consumed"]))
+
+    def _evaluate_ingress_crash_case(self, check, snapshot, gate) -> None:
+        row = next(iter(self._case_rows(self._probe("valid")).values()), {})
+        replay = next(iter(self._case_rows(self._probe("replay")).values()), {})
+        recovery = self._gate_snapshot("run/g4c-egress-recovery.json")
+        reservations = snapshot["reservations"]
+        attempts = snapshot["attempts"]
+        check("ingress_crash_request_failed", row.get("terminal") != "finish", row=row)
+        check("ingress_crash_fake_zero",
+              snapshot["fake_counter"] == 0 and not snapshot["receipts"],
+              fake=snapshot["fake_counter"], receipts=len(snapshot["receipts"]))
+        check("ingress_crash_pending_reservation",
+              len(reservations) == 1
+              and reservations[0].get("status") == "PENDING"
+              and self._money(reservations[0].get("cost")) > 0,
+              rows=[{key: row.get(key) for key in ("status", "cost")}
+                    for row in reservations])
+        check("ingress_crash_durable_attempt",
+              len(attempts) == 1
+              and attempts[0].get("state") in {"SETTLEMENT_UNCERTAIN",
+                                               "ATTEMPT_STARTED"},
+              states=[row.get("state") for row in attempts])
+        check("ingress_crash_recovery_held",
+              self._money(recovery.get("worst_case_held_usd")) > 0
+              and self._money(recovery.get("known_cost_usd")) == 0,
+              held=recovery.get("worst_case_held_usd"),
+              known=recovery.get("known_cost_usd"))
+        check("ingress_crash_replay_not_sent",
+              replay.get("terminal") != "finish"
+              and snapshot["fake_counter"] == 0, row=replay)
+        check("ingress_crash_no_second_reservation",
+              len(reservations) == 1, rows=len(reservations))
+        check("ingress_crash_gate_single_authorization",
+              len(gate["authorized"]) == 1, authorized=len(gate["authorized"]))
+        expected_consumed = 1 if self.case == "crash-after-consume" else 0
+        check("ingress_crash_gate_consume_boundary",
+              len(gate["consumed"]) == expected_consumed,
+              expected=expected_consumed, consumed=len(gate["consumed"]))
+        check("ingress_crash_no_double_settlement",
+              len(snapshot["claims"]) == 1, claims=len(snapshot["claims"]))
+
     def kill_broker(self, *, reason: str = "broker-down") -> dict:
         """Kill the trusted Broker subprocess only (controller stays alive)."""
         code = (
@@ -1080,6 +1635,77 @@ class G4CLauncher(g3d_launch.Launcher):
         self.write_evidence_json(f"run/kill-broker-{reason}.json", document)
         return document
 
+    def _wait_for(self, predicate, *, timeout: float, interval: float = 0.05):
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            value = predicate()
+            if value:
+                return value
+            time.sleep(interval)
+        return None
+
+    def _probe_async(self, phase: str, *, timeout: float = 30.0) -> dict:
+        holder: dict = {}
+
+        def worker() -> None:
+            try:
+                holder["record"] = self.run_candidate_probe(phase, timeout=timeout)
+            except BaseException as exc:  # noqa: BLE001 - evidence records failures
+                holder["error"] = f"{type(exc).__name__}: {exc}"[:1000]
+
+        thread = threading.Thread(target=worker, daemon=True)
+        thread.start()
+        holder["thread"] = thread
+        return holder
+
+    def _join_probe(self, holder: dict, *, timeout: float) -> dict:
+        thread = holder.pop("thread", None)
+        if thread is not None:
+            thread.join(timeout=timeout)
+        return holder
+
+    def _run_probe_then_revoke(self, phase: str, *, window: str,
+                               timeout: float = 45.0) -> dict:
+        """Run one real request and revoke the synthetic authorization mid-flight.
+
+        ``window`` = ``after_reserve`` waits for the controller's test-only
+        delay marker (post-Reserve, pre-send) before rewriting the revocation
+        document; ``in_flight`` waits for the Fake receipt (post-wire) instead.
+        Both are real external writes followed by the real gate re-read.
+        """
+        if not self.revocation_enabled:
+            raise lib3d.G3DError("revocation window requested without --revocation")
+        marker = self.run_dir / "state" / "g4f5-delay-marker.json"
+        if marker.exists():
+            marker.unlink()
+        receipts = self.run_dir / "state" / "receipts"
+        before = len(list(receipts.glob("rcpt-*.json"))) if receipts.is_dir() else 0
+        holder = self._probe_async(phase, timeout=timeout)
+        observed = None
+        if window == "after_reserve":
+            observed = self._wait_for(
+                lambda: marker if marker.is_file() else None, timeout=30.0)
+            if not observed:
+                raise lib3d.G3DError("post-reserve delay marker was not observed")
+        elif window == "in_flight":
+            def new_receipt():
+                if not receipts.is_dir():
+                    return None
+                rows = sorted(receipts.glob("rcpt-*.json"))
+                return len(rows) if len(rows) > before else None
+            observed = self._wait_for(new_receipt, timeout=30.0)
+            if observed is None:
+                raise lib3d.G3DError("Fake receipt was not observed before revoke")
+        else:
+            raise lib3d.G3DError(f"unknown revocation window: {window}")
+        record = self.write_revocation(
+            revoked=True, reason=f"in-flight:{window}:{phase}")
+        result = self._join_probe(holder, timeout=timeout)
+        return {"window": window, "observed": observed,
+                "revocation": record, "probe": result,
+                "marker": (json.loads(marker.read_text(encoding="utf-8"))
+                           if marker.is_file() else None)}
+
     def run_steps(self, steps: list[str]) -> list[dict]:
         results = []
         for step in steps:
@@ -1091,6 +1717,15 @@ class G4CLauncher(g3d_launch.Launcher):
                                 "record": self.restart_trusted(reason=self.case)})
             elif step == "kill-broker":
                 results.append({"step": step, "record": self.kill_broker()})
+            elif step in {"revoke", "unrevoke"}:
+                results.append({"step": step, "record": self.write_revocation(
+                    revoked=(step == "revoke"), reason=f"step:{step}")})
+            elif step == "valid-revoke-after-reserve":
+                results.append({"step": step, "record": self._run_probe_then_revoke(
+                    "valid", window="after_reserve")})
+            elif step == "valid-revoke-in-flight":
+                results.append({"step": step, "record": self._run_probe_then_revoke(
+                    "valid", window="in_flight")})
             else:
                 results.append({"step": step, "record": self.run_candidate_probe(step)})
         self.write_evidence_json("run/steps.json", {"steps": results})

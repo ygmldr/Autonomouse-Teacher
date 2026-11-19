@@ -312,11 +312,29 @@ def _build_gate(policy: dict):
     def observer():
         return _observed_bindings(policy)
 
+    # G4-F5 optional synthetic-authorization revocation input. Absent from the
+    # frozen F3/F4 policies, in which case the gate is byte-for-byte unchanged.
+    revocation = policy.get("revocation") or {}
+    revocation_path = revocation.get("path")
+    authorization_id = revocation.get("authorization_id")
+    if revocation:
+        if not isinstance(revocation, dict):
+            raise SystemExit("G4C_REVOCATION_INVALID")
+        if not isinstance(revocation_path, str) or not revocation_path.startswith(
+                "/work/state/"):
+            raise SystemExit("G4C_REVOCATION_PATH_INVALID")
+        if not isinstance(authorization_id, str) or not authorization_id:
+            raise SystemExit("G4C_REVOCATION_AUTHORIZATION_INVALID")
+        if revocation.get("schema") != "m0.g4c.revocation-policy.v1":
+            raise SystemExit("G4C_REVOCATION_SCHEMA_INVALID")
+
     gate = TrustedSendGate(
         contract, budget=budget, auth_epoch=policy["auth_epoch"],
         journal_path=policy.get("journal_path") or str(JOURNAL_PATH),
         binding_approved=approved, binding_observer=observer,
-        binding_checkpoint="pre_dispatch")
+        binding_checkpoint="pre_dispatch",
+        authorization_id=authorization_id,
+        revocation_path=revocation_path)
     return gate, contract, approved, observed_start
 
 

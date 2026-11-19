@@ -663,8 +663,19 @@ class TrustedController:
                 broker_claim_digest=_sha256(dict(claim_map)),
                 estimated_cost_usd=request.estimated_cost_usd, **gate_kwargs)
         except EgressViolation as exc:
+            reasons = tuple(str(reason) for reason in exc.reasons)
+            revoked = any(reason in {"RUN_AUTHORIZATION_REVOKED",
+                                     "REVOCATION_STATE_INVALID"}
+                          for reason in reasons)
             self.attempts.mark_settlement_uncertain(
-                attempt_id, reason=("EGRESS_DENIED:" + ",".join(exc.reasons))[:200])
+                attempt_id,
+                reason=(("REVOKED_PRE_SEND:" if revoked else "EGRESS_DENIED:")
+                        + ",".join(reasons))[:200])
+            if revoked:
+                # G4-F5: no capability was minted, so the Fake was never
+                # entered. The reservation stays PENDING and the durable
+                # attempt is conserved; the client sees a stable frozen code.
+                raise BridgeError("ADMISSION_SELF_AUTH_DENIED") from exc
             raise BridgeError("EGRESS_DENIED") from exc
         self.send_authorizations.append(authorization.to_audit_dict())
         return authorization
@@ -705,6 +716,27 @@ class TrustedController:
                 source=source)
         except Exception:  # noqa: BLE001 - view bookkeeping must not fail a send
             pass
+
+    def _gate_revocation(self, checkpoint: str) -> dict[str, object]:
+        """Read-only G4-F5 revocation observation; never changes ledger state.
+
+        The gate owns the synthetic run authorization. This helper only asks it
+        whether that authorization is still valid at ``checkpoint``; the answer
+        is enforced by the caller *before* Reserve (``pre_reserve``) or by the
+        gate itself before minting/consuming a send capability. An exception in
+        the observer is fail-closed: a configured revocation source that cannot
+        be read must stop the request, never silently pass it.
+        """
+        gate = getattr(self, "dispatch_gate", None)
+        observer = getattr(gate, "revocation_check", None) if gate is not None else None
+        if not callable(observer):
+            return {"configured": False, "revoked": False, "reason": None}
+        try:
+            return dict(observer(checkpoint))
+        except Exception as exc:  # noqa: BLE001 - unknown revocation state denies
+            return {"configured": True, "revoked": True,
+                    "reason": "REVOCATION_STATE_INVALID",
+                    "error": f"{type(exc).__name__}"}
 
     def _handle_payload_stream(self, payload: Mapping[str, object],
                                transport_id: str, deadline: float,
@@ -854,6 +886,15 @@ class TrustedController:
                 audit["outcome"] = "prepared"
                 audit["step"] = step
                 audit["call_id"] = prepared.call_id
+                # G4-F5 pre-reserve checkpoint: a revoked synthetic run
+                # authorization must not create a Reservation, an Attempt or a
+                # business identity row. This runs before the replay identity
+                # claim so a refused request leaves no ledger trace at all.
+                revocation = self._gate_revocation("pre_reserve")
+                if revocation.get("reason"):
+                    audit["revocation"] = revocation
+                    audit["error_code"] = "ADMISSION_SELF_AUTH_DENIED"
+                    raise BridgeError("ADMISSION_SELF_AUTH_DENIED")
                 if (self.attempts.attempt_for_call(prepared.call_id) is not None
                         or self.attempts.intent_for_call(prepared.call_id) is not None):
                     raise BridgeError("ATTEMPT_ALREADY_STARTED")
@@ -880,6 +921,7 @@ class TrustedController:
             payload_bytes = canonical_json(fake_payload).encode("utf-8")
             payload_digest = hashlib.sha256(payload_bytes).hexdigest()
             task_id = "g3b-" + hashlib.sha256(self.admission.run_id.encode()).hexdigest()[:32]
+            self._test_delay("before_reserve")
             self._checkpoint(state, deadline, "before_reserve")
             reserved = self._broker_reserve(task_id=task_id, input_tokens=input_bound,
                                             output_tokens=prepared.max_output_tokens,
@@ -898,6 +940,11 @@ class TrustedController:
                 scope_id=self.admission.scope_id, call_id=prepared.call_id,
                 reservation_id=reservation_id, prepared_digest=prepared.request_digest,
                 payload_digest=payload_digest, payload_length=len(payload_bytes))
+            # G4-F5 test-only synchronization point: a post-Reserve,
+            # pre-send window in which the trusted launcher can (and does)
+            # revoke the synthetic run authorization. It is inert unless
+            # G3B_TEST_MODE=1 selects this exact hook.
+            self._test_delay("after_reserve_before_send")
             self._crash("after_reserve_before_claim")
             try:
                 self._checkpoint(state, deadline, "after_reserve")
@@ -942,6 +989,7 @@ class TrustedController:
                     payload_bytes=payload_bytes, payload_digest=payload_digest,
                     reservation_id=reservation_id, attempt_id=attempt_id,
                     reserved_cost_usd=reserved_cost_usd)
+                self._crash("after_send_authorize_before_consume")
             holder: dict[str, object] = {}
 
             def on_fake_frame(frame: object) -> None:
@@ -973,6 +1021,7 @@ class TrustedController:
                     if denial is not None:
                         holder["pre_dispatch_denied"] = denial
                         raise BridgeError("EGRESS_DENIED")
+                    self._crash("after_send_consume_before_fake")
                 if state is not None and state.event.is_set():
                     holder["cancelled_before_send"] = True
                     raise _Cancelled(state.reason or "aborted")
@@ -1020,10 +1069,20 @@ class TrustedController:
 
             self.transport.dispatch(request, decision.permission, provider=provider)
             if holder.get("pre_dispatch_denied"):
+                denial = str(holder["pre_dispatch_denied"])
                 if attempt_id is not None:
                     self.attempts.mark_settlement_uncertain(
                         attempt_id,
-                        reason=f"EGRESS_DENIED:{holder['pre_dispatch_denied']}"[:200])
+                        reason=(("REVOKED_PRE_SEND:" if denial in {
+                            "RUN_AUTHORIZATION_REVOKED",
+                            "REVOCATION_STATE_INVALID"} else "EGRESS_DENIED:")
+                            + denial)[:200])
+                if denial in {"RUN_AUTHORIZATION_REVOKED",
+                              "REVOCATION_STATE_INVALID"}:
+                    # G4-F5: the capability was burned at consume, before the
+                    # Fake boundary. No wire bytes were sent; the reservation
+                    # stays PENDING and is conserved.
+                    raise BridgeError("ADMISSION_SELF_AUTH_DENIED")
                 raise BridgeError("EGRESS_DENIED")
             if holder.get("cancelled_before_send"):
                 if attempt_id is not None:
@@ -1811,6 +1870,50 @@ class TrustedController:
         """Test-only crash hook; disabled unless launcher sets both env vars."""
         if os.environ.get("G3B_TEST_MODE") == "1" and os.environ.get("G3B_CRASH_HOOK") == hook:
             os._exit(97)
+
+    def _test_delay(self, hook: str) -> None:
+        """Test-only bounded synchronization delay for G4-F5 timing windows.
+
+        Disabled unless ``G3B_TEST_MODE=1`` and ``G3B_TEST_DELAY_HOOK`` selects
+        this exact hook. It never changes an allow/deny decision, never skips a
+        checkpoint and never touches the Broker/Fake: it only widens a real
+        pre-send window so the trusted launcher can write a real revocation
+        document (or let a real deadline elapse) at a deterministic point. A
+        marker file (``G3B_TEST_DELAY_MARKER``) is written before sleeping so
+        the launcher can observe which window is open; it contains no secret.
+        """
+        if os.environ.get("G3B_TEST_MODE") != "1":
+            return
+        if os.environ.get("G3B_TEST_DELAY_HOOK") != hook:
+            return
+        try:
+            milliseconds = int(os.environ.get("G3B_TEST_DELAY_MS", "0"))
+        except ValueError:
+            return
+        if milliseconds <= 0:
+            return
+        marker = os.environ.get("G3B_TEST_DELAY_MARKER")
+        if marker:
+            try:
+                document = {
+                    "schema": "m0.g4f.test-delay.v1", "hook": hook,
+                    "utc": _now_utc(), "pid": os.getpid(),
+                    "delay_ms": min(milliseconds, 10000),
+                }
+                payload = (json.dumps(document, sort_keys=True,
+                                      separators=(",", ":")) + "\n").encode("utf-8")
+                flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_CLOEXEC
+                if hasattr(os, "O_NOFOLLOW"):
+                    flags |= os.O_NOFOLLOW
+                descriptor = os.open(marker, flags, 0o600)
+                try:
+                    os.write(descriptor, payload)
+                    os.fsync(descriptor)
+                finally:
+                    os.close(descriptor)
+            except OSError:
+                pass
+        time.sleep(min(milliseconds, 10000) / 1000.0)
 
 
 def _acquire_controller_singleton(socket_path: Path) -> int | None:

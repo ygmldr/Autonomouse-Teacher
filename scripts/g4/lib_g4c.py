@@ -356,19 +356,44 @@ def validate_stage_g4(stage_dir: str | os.PathLike[str], *, base_sha: str,
 # ---------------------------------------------------------------------------
 # trusted argv + contract
 # ---------------------------------------------------------------------------
+# G4-F5 adds two test-only crash windows inside the existing test-hook
+# mechanism (authorize -> consume -> Fake). They are listed here, not in the
+# frozen G3-D hook set, because they are G4-F5 evidence hooks.
+G4F5_CRASH_HOOKS = frozenset({
+    "after_send_authorize_before_consume",
+    "after_send_consume_before_fake",
+})
+G4F5_DELAY_HOOKS = frozenset({"before_reserve", "after_reserve_before_send"})
+
+
 def trusted_argv(*, podman: str, rootfs: str, stage_trusted: str, deps: str,
                  run_dir: str, entry_dir: str, name: str,
                  config_path: str = lib3d.CONTROLLER_CONFIG_PATH,
                  evidence_dir: str | None = None,
                  crash_hook: str | None = None,
+                 test_delay_hook: str | None = None,
+                 test_delay_ms: int | None = None,
                  timeout_s: int = 300) -> list[str]:
     evidence = evidence_dir or str(Path(run_dir) / "evidence")
     extra_env: list[str] = []
     if crash_hook is not None:
-        if crash_hook not in lib3d.TRUSTED_CRASH_HOOKS:
+        if (crash_hook not in lib3d.TRUSTED_CRASH_HOOKS
+                and crash_hook not in G4F5_CRASH_HOOKS):
             raise lib.G4Error(f"unknown trusted crash hook: {crash_hook}")
         extra_env = ["--env", "G3B_TEST_MODE=1",
                      "--env", f"G3B_CRASH_HOOK={crash_hook}"]
+    if test_delay_hook is not None:
+        if test_delay_hook not in G4F5_DELAY_HOOKS:
+            raise lib.G4Error(f"unknown test delay hook: {test_delay_hook}")
+        if type(test_delay_ms) is not int or not 1 <= test_delay_ms <= 10000:
+            raise lib.G4Error("test delay ms must be 1..10000")
+        if "--env" not in extra_env:
+            extra_env += ["--env", "G3B_TEST_MODE=1"]
+        extra_env += [
+            "--env", f"G3B_TEST_DELAY_HOOK={test_delay_hook}",
+            "--env", f"G3B_TEST_DELAY_MS={test_delay_ms}",
+            "--env", "G3B_TEST_DELAY_MARKER=/work/state/g4f5-delay-marker.json",
+        ]
     return [
         podman, "run", "-d", "--name", name, "--rootfs",
         "--timeout", str(int(timeout_s)),
@@ -438,8 +463,8 @@ def trusted_argv_problems(argv: Sequence[str], *, run_dir: str,
 # ---------------------------------------------------------------------------
 def build_policy(*, contract: Mapping[str, object], closure: Mapping[str, object],
                  approved: Mapping[str, str], auth_epoch: str,
-                 run_id: str) -> dict:
-    return {
+                 run_id: str, revocation: Mapping[str, object] | None = None) -> dict:
+    document = {
         "schema": "m0.g4c.dispatch-policy.v1",
         "run_id": run_id,
         "auth_epoch": auth_epoch,
@@ -462,6 +487,9 @@ def build_policy(*, contract: Mapping[str, object], closure: Mapping[str, object
         },
         "journal_path": "/work/state/g4c-send-journal.jsonl",
     }
+    if revocation is not None:
+        document["revocation"] = dict(revocation)
+    return document
 
 
 def policy_bytes(document: Mapping[str, object]) -> bytes:

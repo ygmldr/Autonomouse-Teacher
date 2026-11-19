@@ -43,6 +43,15 @@ def valid_payload() -> dict:
         max_tokens=64)
 
 
+def valid2_payload() -> dict:
+    """A second, distinct business identity for "new request after revoke"."""
+    return pc.request_payload(
+        session="g4c-probe-session-2",
+        messages=[{"role": "user", "content": "g4c deterministic probe 2"}],
+        tools=[approved_tool()],
+        max_tokens=64)
+
+
 def exchange(label: str, payload: dict, *, timeout: float = 10.0) -> dict:
     transport = "tr-" + hashlib.sha256(
         (label + str(os.getpid()) + str(time.time_ns())).encode("utf-8")).hexdigest()[:32]
@@ -179,6 +188,9 @@ def main() -> int:
     elif phase in {"valid", "replay"}:
         document = {"phase": phase, "uid": os.getuid(),
                     "cases": [exchange(phase, valid_payload())]}
+    elif phase == "valid2":
+        document = {"phase": phase, "uid": os.getuid(),
+                    "cases": [exchange("valid2", valid2_payload())]}
     elif phase == "over_quota":
         document = {"phase": phase, "uid": os.getuid(),
                     "cases": [exchange("over_quota", pc.request_payload(
