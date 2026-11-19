@@ -104,11 +104,15 @@ class G4CLauncher(g3d_launch.Launcher):
     def __init__(self, args: argparse.Namespace) -> None:
         super().__init__(args)
         self.crash_hook = args.crash_hook
-        self.test_delay_hook = args.test_delay_hook
-        self.test_delay_ms = args.test_delay_ms
-        self.revocation_enabled = bool(args.revocation)
-        self.pre_revoke = bool(args.pre_revoke)
-        self.watch_revocation = args.watch_revocation
+        # G4-F5 added these launcher options.  Other G4 launchers (for example
+        # ``run_g4_f4.py``) build their own argparse Namespace, so read them
+        # defensively: a Namespace without the F5 options keeps the exact
+        # pre-F5 behaviour, while the F5 runner's CLI still sets them.
+        self.test_delay_hook = getattr(args, "test_delay_hook", None)
+        self.test_delay_ms = getattr(args, "test_delay_ms", None)
+        self.revocation_enabled = bool(getattr(args, "revocation", False))
+        self.pre_revoke = bool(getattr(args, "pre_revoke", False))
+        self.watch_revocation = getattr(args, "watch_revocation", None)
         self.dsh_revocation: dict | None = None
         self.revocations: list[dict] = []
         self.revocation_epoch: str | None = None
@@ -273,7 +277,10 @@ class G4CLauncher(g3d_launch.Launcher):
         super().write_configs()
         if self.args.max_calls is not None:
             self._override_admission_max_calls(int(self.args.max_calls))
-        if self.args.deadline_ms is not None:
+        # ``deadline_ms`` was added to the G4-C CLI after the G4-F2/F4 launcher
+        # subclasses froze their own argparse Namespace; absent means "no
+        # override", which is exactly the pre-existing G4-C behaviour.
+        if getattr(self.args, "deadline_ms", None) is not None:
             self._override_admission_deadline(int(self.args.deadline_ms))
         contract = self._contract_mapping()
         external = libc.stage_external_inputs(self.stage_dir)

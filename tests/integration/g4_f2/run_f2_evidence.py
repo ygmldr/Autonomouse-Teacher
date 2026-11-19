@@ -607,11 +607,15 @@ def merged_entry_ids() -> dict:
 # main
 # ---------------------------------------------------------------------------
 def main(argv: list[str] | None = None) -> int:
+    global OUT
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--stage", default=None)
     parser.add_argument("--only", default=None,
                         help="comma-separated: echo,tool,raw,adapter")
+    parser.add_argument("--out-dir", default=str(OUT),
+                        help="evidence directory (default: artifacts/g4f/f2)")
     args = parser.parse_args(argv)
+    OUT = Path(args.out_dir)
     if os.geteuid() != 0:
         sys.stderr.write("G4F2_EVIDENCE_NEEDS_HOST_ROOT\n")
         return lib.EXIT_ENVIRONMENT
