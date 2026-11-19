@@ -1,0 +1,447 @@
+{
+  "double_consume": 0,
+  "elapsed_seconds": 26.16,
+  "failure_count": 0,
+  "failures": [],
+  "label": "review-before-natural",
+  "loser_code_histogram": {
+    "AUTHORIZATION_REPLAYED": 30
+  },
+  "loser_invalid_count": 0,
+  "module_path": "/tmp/at-p203-before/src/autoteacher_m0/security/authorization.py",
+  "network_calls": 0,
+  "python": "3.11.15",
+  "real_key": false,
+  "record_count": 30,
+  "record_modes": [
+    "0o600"
+  ],
+  "residual_non_record_files": [],
+  "rounds": 30,
+  "rounds_detail": [
+    {
+      "authorization_id": "auth-review-before-natural-000-5245ddbf099c",
+      "elapsed_ms": 684.4,
+      "json_record_count": 1,
+      "loser_codes": [
+        "AUTHORIZATION_REPLAYED"
+      ],
+      "ok": true,
+      "record_mode": "0o600",
+      "record_valid": true,
+      "round": 0,
+      "temporary_files": [],
+      "winner_count": 1
+    },
+    {
+      "authorization_id": "auth-review-before-natural-001-f055cd317303",
+      "elapsed_ms": 622.5,
+      "json_record_count": 2,
+      "loser_codes": [
+        "AUTHORIZATION_REPLAYED"
+      ],
+      "ok": true,
+      "record_mode": "0o600",
+      "record_valid": true,
+      "round": 1,
+      "temporary_files": [],
+      "winner_count": 1
+    },
+    {
+      "authorization_id": "auth-review-before-natural-002-9b72f136aa08",
+      "elapsed_ms": 547.8,
+      "json_record_count": 3,
+      "loser_codes": [
+        "AUTHORIZATION_REPLAYED"
+      ],
+      "ok": true,
+      "record_mode": "0o600",
+      "record_valid": true,
+      "round": 2,
+      "temporary_files": [],
+      "winner_count": 1
+    },
+    {
+      "authorization_id": "auth-review-before-natural-003-e4df1a338680",
+      "elapsed_ms": 600.5,
+      "json_record_count": 4,
+      "loser_codes": [
+        "AUTHORIZATION_REPLAYED"
+      ],
+      "ok": true,
+      "record_mode": "0o600",
+      "record_valid": true,
+      "round": 3,
+      "temporary_files": [],
+      "winner_count": 1
+    },
+    {
+      "authorization_id": "auth-review-before-natural-004-881c1b10f64f",
+      "elapsed_ms": 568.4,
+      "json_record_count": 5,
+      "loser_codes": [
+        "AUTHORIZATION_REPLAYED"
+      ],
+      "ok": true,
+      "record_mode": "0o600",
+      "record_valid": true,
+      "round": 4,
+      "temporary_files": [],
+      "winner_count": 1
+    },
+    {
+      "authorization_id": "auth-review-before-natural-005-f4c8f1e1200b",
+      "elapsed_ms": 541.8,
+      "json_record_count": 6,
+      "loser_codes": [
+        "AUTHORIZATION_REPLAYED"
+      ],
+      "ok": true,
+      "record_mode": "0o600",
+      "record_valid": true,
+      "round": 5,
+      "temporary_files": [],
+      "winner_count": 1
+    },
+    {
+      "authorization_id": "auth-review-before-natural-006-34dfba598b4c",
+      "elapsed_ms": 592.1,
+      "json_record_count": 7,
+      "loser_codes": [
+        "AUTHORIZATION_REPLAYED"
+      ],
+      "ok": true,
+      "record_mode": "0o600",
+      "record_valid": true,
+      "round": 6,
+      "temporary_files": [],
+      "winner_count": 1
+    },
+    {
+      "authorization_id": "auth-review-before-natural-007-d84d1db21420",
+      "elapsed_ms": 575.9,
+      "json_record_count": 8,
+      "loser_codes": [
+        "AUTHORIZATION_REPLAYED"
+      ],
+      "ok": true,
+      "record_mode": "0o600",
+      "record_valid": true,
+      "round": 7,
+      "temporary_files": [],
+      "winner_count": 1
+    },
+    {
+      "authorization_id": "auth-review-before-natural-008-338941236d37",
+      "elapsed_ms": 588.8,
+      "json_record_count": 9,
+      "loser_codes": [
+        "AUTHORIZATION_REPLAYED"
+      ],
+      "ok": true,
+      "record_mode": "0o600",
+      "record_valid": true,
+      "round": 8,
+      "temporary_files": [],
+      "winner_count": 1
+    },
+    {
+      "authorization_id": "auth-review-before-natural-009-f2e17c527dc7",
+      "elapsed_ms": 595.7,
+      "json_record_count": 10,
+      "loser_codes": [
+        "AUTHORIZATION_REPLAYED"
+      ],
+      "ok": true,
+      "record_mode": "0o600",
+      "record_valid": true,
+      "round": 9,
+      "temporary_files": [],
+      "winner_count": 1
+    },
+    {
+      "authorization_id": "auth-review-before-natural-010-3ebee73d1ae5",
+      "elapsed_ms": 589.3,
+      "json_record_count": 11,
+      "loser_codes": [
+        "AUTHORIZATION_REPLAYED"
+      ],
+      "ok": true,
+      "record_mode": "0o600",
+      "record_valid": true,
+      "round": 10,
+      "temporary_files": [],
+      "winner_count": 1
+    },
+    {
+      "authorization_id": "auth-review-before-natural-011-1acacb5f8254",
+      "elapsed_ms": 673.2,
+      "json_record_count": 12,
+      "loser_codes": [
+        "AUTHORIZATION_REPLAYED"
+      ],
+      "ok": true,
+      "record_mode": "0o600",
+      "record_valid": true,
+      "round": 11,
+      "temporary_files": [],
+      "winner_count": 1
+    },
+    {
+      "authorization_id": "auth-review-before-natural-012-3f543e352832",
+      "elapsed_ms": 627.2,
+      "json_record_count": 13,
+      "loser_codes": [
+        "AUTHORIZATION_REPLAYED"
+      ],
+      "ok": true,
+      "record_mode": "0o600",
+      "record_valid": true,
+      "round": 12,
+      "temporary_files": [],
+      "winner_count": 1
+    },
+    {
+      "authorization_id": "auth-review-before-natural-013-299c89eb9178",
+      "elapsed_ms": 667.7,
+      "json_record_count": 14,
+      "loser_codes": [
+        "AUTHORIZATION_REPLAYED"
+      ],
+      "ok": true,
+      "record_mode": "0o600",
+      "record_valid": true,
+      "round": 13,
+      "temporary_files": [],
+      "winner_count": 1
+    },
+    {
+      "authorization_id": "auth-review-before-natural-014-d5132b94f739",
+      "elapsed_ms": 628.3,
+      "json_record_count": 15,
+      "loser_codes": [
+        "AUTHORIZATION_REPLAYED"
+      ],
+      "ok": true,
+      "record_mode": "0o600",
+      "record_valid": true,
+      "round": 14,
+      "temporary_files": [],
+      "winner_count": 1
+    },
+    {
+      "authorization_id": "auth-review-before-natural-015-6be9c7628486",
+      "elapsed_ms": 625.9,
+      "json_record_count": 16,
+      "loser_codes": [
+        "AUTHORIZATION_REPLAYED"
+      ],
+      "ok": true,
+      "record_mode": "0o600",
+      "record_valid": true,
+      "round": 15,
+      "temporary_files": [],
+      "winner_count": 1
+    },
+    {
+      "authorization_id": "auth-review-before-natural-016-5391dfe26043",
+      "elapsed_ms": 714.2,
+      "json_record_count": 17,
+      "loser_codes": [
+        "AUTHORIZATION_REPLAYED"
+      ],
+      "ok": true,
+      "record_mode": "0o600",
+      "record_valid": true,
+      "round": 16,
+      "temporary_files": [],
+      "winner_count": 1
+    },
+    {
+      "authorization_id": "auth-review-before-natural-017-ca5d367b4b83",
+      "elapsed_ms": 605.7,
+      "json_record_count": 18,
+      "loser_codes": [
+        "AUTHORIZATION_REPLAYED"
+      ],
+      "ok": true,
+      "record_mode": "0o600",
+      "record_valid": true,
+      "round": 17,
+      "temporary_files": [],
+      "winner_count": 1
+    },
+    {
+      "authorization_id": "auth-review-before-natural-018-b310d7329bb4",
+      "elapsed_ms": 571.2,
+      "json_record_count": 19,
+      "loser_codes": [
+        "AUTHORIZATION_REPLAYED"
+      ],
+      "ok": true,
+      "record_mode": "0o600",
+      "record_valid": true,
+      "round": 18,
+      "temporary_files": [],
+      "winner_count": 1
+    },
+    {
+      "authorization_id": "auth-review-before-natural-019-cd33944cbe7c",
+      "elapsed_ms": 612.1,
+      "json_record_count": 20,
+      "loser_codes": [
+        "AUTHORIZATION_REPLAYED"
+      ],
+      "ok": true,
+      "record_mode": "0o600",
+      "record_valid": true,
+      "round": 19,
+      "temporary_files": [],
+      "winner_count": 1
+    },
+    {
+      "authorization_id": "auth-review-before-natural-020-d378b220e41b",
+      "elapsed_ms": 578.6,
+      "json_record_count": 21,
+      "loser_codes": [
+        "AUTHORIZATION_REPLAYED"
+      ],
+      "ok": true,
+      "record_mode": "0o600",
+      "record_valid": true,
+      "round": 20,
+      "temporary_files": [],
+      "winner_count": 1
+    },
+    {
+      "authorization_id": "auth-review-before-natural-021-1ff4c99c67ec",
+      "elapsed_ms": 610.4,
+      "json_record_count": 22,
+      "loser_codes": [
+        "AUTHORIZATION_REPLAYED"
+      ],
+      "ok": true,
+      "record_mode": "0o600",
+      "record_valid": true,
+      "round": 21,
+      "temporary_files": [],
+      "winner_count": 1
+    },
+    {
+      "authorization_id": "auth-review-before-natural-022-c5f6adb2eaad",
+      "elapsed_ms": 618.2,
+      "json_record_count": 23,
+      "loser_codes": [
+        "AUTHORIZATION_REPLAYED"
+      ],
+      "ok": true,
+      "record_mode": "0o600",
+      "record_valid": true,
+      "round": 22,
+      "temporary_files": [],
+      "winner_count": 1
+    },
+    {
+      "authorization_id": "auth-review-before-natural-023-40d9e0a60d51",
+      "elapsed_ms": 650.6,
+      "json_record_count": 24,
+      "loser_codes": [
+        "AUTHORIZATION_REPLAYED"
+      ],
+      "ok": true,
+      "record_mode": "0o600",
+      "record_valid": true,
+      "round": 23,
+      "temporary_files": [],
+      "winner_count": 1
+    },
+    {
+      "authorization_id": "auth-review-before-natural-024-d08c88cbe724",
+      "elapsed_ms": 641.1,
+      "json_record_count": 25,
+      "loser_codes": [
+        "AUTHORIZATION_REPLAYED"
+      ],
+      "ok": true,
+      "record_mode": "0o600",
+      "record_valid": true,
+      "round": 24,
+      "temporary_files": [],
+      "winner_count": 1
+    },
+    {
+      "authorization_id": "auth-review-before-natural-025-896b1331bfa3",
+      "elapsed_ms": 613.0,
+      "json_record_count": 26,
+      "loser_codes": [
+        "AUTHORIZATION_REPLAYED"
+      ],
+      "ok": true,
+      "record_mode": "0o600",
+      "record_valid": true,
+      "round": 25,
+      "temporary_files": [],
+      "winner_count": 1
+    },
+    {
+      "authorization_id": "auth-review-before-natural-026-098c405e5e1c",
+      "elapsed_ms": 733.6,
+      "json_record_count": 27,
+      "loser_codes": [
+        "AUTHORIZATION_REPLAYED"
+      ],
+      "ok": true,
+      "record_mode": "0o600",
+      "record_valid": true,
+      "round": 26,
+      "temporary_files": [],
+      "winner_count": 1
+    },
+    {
+      "authorization_id": "auth-review-before-natural-027-0513fdefb1dd",
+      "elapsed_ms": 626.8,
+      "json_record_count": 28,
+      "loser_codes": [
+        "AUTHORIZATION_REPLAYED"
+      ],
+      "ok": true,
+      "record_mode": "0o600",
+      "record_valid": true,
+      "round": 27,
+      "temporary_files": [],
+      "winner_count": 1
+    },
+    {
+      "authorization_id": "auth-review-before-natural-028-9d838f05647c",
+      "elapsed_ms": 669.5,
+      "json_record_count": 29,
+      "loser_codes": [
+        "AUTHORIZATION_REPLAYED"
+      ],
+      "ok": true,
+      "record_mode": "0o600",
+      "record_valid": true,
+      "round": 28,
+      "temporary_files": [],
+      "winner_count": 1
+    },
+    {
+      "authorization_id": "auth-review-before-natural-029-82af9fe18bf4",
+      "elapsed_ms": 604.6,
+      "json_record_count": 30,
+      "loser_codes": [
+        "AUTHORIZATION_REPLAYED"
+      ],
+      "ok": true,
+      "record_mode": "0o600",
+      "record_valid": true,
+      "round": 29,
+      "temporary_files": [],
+      "winner_count": 1
+    }
+  ],
+  "schema": "at-m0/g4h0-p2-03-stress/v1",
+  "test_only_synthetic": true,
+  "utc_started": "2026-11-18T12:00:00Z",
+  "widen_write_ms": 0.0
+}

@@ -1,0 +1,587 @@
+{
+  "double_consume": 0,
+  "elapsed_seconds": 28.17,
+  "failure_count": 0,
+  "failures": [],
+  "label": "review-after-widened",
+  "loser_code_histogram": {
+    "AUTHORIZATION_REPLAYED": 40
+  },
+  "loser_invalid_count": 0,
+  "module_path": "/root/Autonomous Teacher/worktrees/m0-g4h0-review/src/autoteacher_m0/security/authorization.py",
+  "network_calls": 0,
+  "python": "3.11.15",
+  "real_key": false,
+  "record_count": 40,
+  "record_modes": [
+    "0o600"
+  ],
+  "residual_non_record_files": [],
+  "rounds": 40,
+  "rounds_detail": [
+    {
+      "authorization_id": "auth-review-after-widened-000-d420a07571d0",
+      "elapsed_ms": 550.1,
+      "json_record_count": 1,
+      "loser_codes": [
+        "AUTHORIZATION_REPLAYED"
+      ],
+      "ok": true,
+      "record_mode": "0o600",
+      "record_valid": true,
+      "round": 0,
+      "temporary_files": [],
+      "winner_count": 1
+    },
+    {
+      "authorization_id": "auth-review-after-widened-001-79808bc46833",
+      "elapsed_ms": 544.1,
+      "json_record_count": 2,
+      "loser_codes": [
+        "AUTHORIZATION_REPLAYED"
+      ],
+      "ok": true,
+      "record_mode": "0o600",
+      "record_valid": true,
+      "round": 1,
+      "temporary_files": [],
+      "winner_count": 1
+    },
+    {
+      "authorization_id": "auth-review-after-widened-002-6f992bc1393d",
+      "elapsed_ms": 537.7,
+      "json_record_count": 3,
+      "loser_codes": [
+        "AUTHORIZATION_REPLAYED"
+      ],
+      "ok": true,
+      "record_mode": "0o600",
+      "record_valid": true,
+      "round": 2,
+      "temporary_files": [],
+      "winner_count": 1
+    },
+    {
+      "authorization_id": "auth-review-after-widened-003-59e75c6fd36e",
+      "elapsed_ms": 548.2,
+      "json_record_count": 4,
+      "loser_codes": [
+        "AUTHORIZATION_REPLAYED"
+      ],
+      "ok": true,
+      "record_mode": "0o600",
+      "record_valid": true,
+      "round": 3,
+      "temporary_files": [],
+      "winner_count": 1
+    },
+    {
+      "authorization_id": "auth-review-after-widened-004-d61340933b5d",
+      "elapsed_ms": 555.0,
+      "json_record_count": 5,
+      "loser_codes": [
+        "AUTHORIZATION_REPLAYED"
+      ],
+      "ok": true,
+      "record_mode": "0o600",
+      "record_valid": true,
+      "round": 4,
+      "temporary_files": [],
+      "winner_count": 1
+    },
+    {
+      "authorization_id": "auth-review-after-widened-005-4222dc5c327a",
+      "elapsed_ms": 543.1,
+      "json_record_count": 6,
+      "loser_codes": [
+        "AUTHORIZATION_REPLAYED"
+      ],
+      "ok": true,
+      "record_mode": "0o600",
+      "record_valid": true,
+      "round": 5,
+      "temporary_files": [],
+      "winner_count": 1
+    },
+    {
+      "authorization_id": "auth-review-after-widened-006-7dabb31e0de1",
+      "elapsed_ms": 544.3,
+      "json_record_count": 7,
+      "loser_codes": [
+        "AUTHORIZATION_REPLAYED"
+      ],
+      "ok": true,
+      "record_mode": "0o600",
+      "record_valid": true,
+      "round": 6,
+      "temporary_files": [],
+      "winner_count": 1
+    },
+    {
+      "authorization_id": "auth-review-after-widened-007-dcefae851ee9",
+      "elapsed_ms": 545.3,
+      "json_record_count": 8,
+      "loser_codes": [
+        "AUTHORIZATION_REPLAYED"
+      ],
+      "ok": true,
+      "record_mode": "0o600",
+      "record_valid": true,
+      "round": 7,
+      "temporary_files": [],
+      "winner_count": 1
+    },
+    {
+      "authorization_id": "auth-review-after-widened-008-0df7e92c3b52",
+      "elapsed_ms": 547.1,
+      "json_record_count": 9,
+      "loser_codes": [
+        "AUTHORIZATION_REPLAYED"
+      ],
+      "ok": true,
+      "record_mode": "0o600",
+      "record_valid": true,
+      "round": 8,
+      "temporary_files": [],
+      "winner_count": 1
+    },
+    {
+      "authorization_id": "auth-review-after-widened-009-69b94cc35f1f",
+      "elapsed_ms": 547.4,
+      "json_record_count": 10,
+      "loser_codes": [
+        "AUTHORIZATION_REPLAYED"
+      ],
+      "ok": true,
+      "record_mode": "0o600",
+      "record_valid": true,
+      "round": 9,
+      "temporary_files": [],
+      "winner_count": 1
+    },
+    {
+      "authorization_id": "auth-review-after-widened-010-c4ce683e6abb",
+      "elapsed_ms": 552.6,
+      "json_record_count": 11,
+      "loser_codes": [
+        "AUTHORIZATION_REPLAYED"
+      ],
+      "ok": true,
+      "record_mode": "0o600",
+      "record_valid": true,
+      "round": 10,
+      "temporary_files": [],
+      "winner_count": 1
+    },
+    {
+      "authorization_id": "auth-review-after-widened-011-e58bce871489",
+      "elapsed_ms": 548.5,
+      "json_record_count": 12,
+      "loser_codes": [
+        "AUTHORIZATION_REPLAYED"
+      ],
+      "ok": true,
+      "record_mode": "0o600",
+      "record_valid": true,
+      "round": 11,
+      "temporary_files": [],
+      "winner_count": 1
+    },
+    {
+      "authorization_id": "auth-review-after-widened-012-3cd839748a7b",
+      "elapsed_ms": 544.7,
+      "json_record_count": 13,
+      "loser_codes": [
+        "AUTHORIZATION_REPLAYED"
+      ],
+      "ok": true,
+      "record_mode": "0o600",
+      "record_valid": true,
+      "round": 12,
+      "temporary_files": [],
+      "winner_count": 1
+    },
+    {
+      "authorization_id": "auth-review-after-widened-013-466fa99d0f15",
+      "elapsed_ms": 553.4,
+      "json_record_count": 14,
+      "loser_codes": [
+        "AUTHORIZATION_REPLAYED"
+      ],
+      "ok": true,
+      "record_mode": "0o600",
+      "record_valid": true,
+      "round": 13,
+      "temporary_files": [],
+      "winner_count": 1
+    },
+    {
+      "authorization_id": "auth-review-after-widened-014-7988050604e2",
+      "elapsed_ms": 557.1,
+      "json_record_count": 15,
+      "loser_codes": [
+        "AUTHORIZATION_REPLAYED"
+      ],
+      "ok": true,
+      "record_mode": "0o600",
+      "record_valid": true,
+      "round": 14,
+      "temporary_files": [],
+      "winner_count": 1
+    },
+    {
+      "authorization_id": "auth-review-after-widened-015-b8c289d73403",
+      "elapsed_ms": 543.3,
+      "json_record_count": 16,
+      "loser_codes": [
+        "AUTHORIZATION_REPLAYED"
+      ],
+      "ok": true,
+      "record_mode": "0o600",
+      "record_valid": true,
+      "round": 15,
+      "temporary_files": [],
+      "winner_count": 1
+    },
+    {
+      "authorization_id": "auth-review-after-widened-016-95f2170a69a7",
+      "elapsed_ms": 552.0,
+      "json_record_count": 17,
+      "loser_codes": [
+        "AUTHORIZATION_REPLAYED"
+      ],
+      "ok": true,
+      "record_mode": "0o600",
+      "record_valid": true,
+      "round": 16,
+      "temporary_files": [],
+      "winner_count": 1
+    },
+    {
+      "authorization_id": "auth-review-after-widened-017-369389b80cff",
+      "elapsed_ms": 537.4,
+      "json_record_count": 18,
+      "loser_codes": [
+        "AUTHORIZATION_REPLAYED"
+      ],
+      "ok": true,
+      "record_mode": "0o600",
+      "record_valid": true,
+      "round": 17,
+      "temporary_files": [],
+      "winner_count": 1
+    },
+    {
+      "authorization_id": "auth-review-after-widened-018-3f7752b6759d",
+      "elapsed_ms": 541.9,
+      "json_record_count": 19,
+      "loser_codes": [
+        "AUTHORIZATION_REPLAYED"
+      ],
+      "ok": true,
+      "record_mode": "0o600",
+      "record_valid": true,
+      "round": 18,
+      "temporary_files": [],
+      "winner_count": 1
+    },
+    {
+      "authorization_id": "auth-review-after-widened-019-66d78c824abf",
+      "elapsed_ms": 544.3,
+      "json_record_count": 20,
+      "loser_codes": [
+        "AUTHORIZATION_REPLAYED"
+      ],
+      "ok": true,
+      "record_mode": "0o600",
+      "record_valid": true,
+      "round": 19,
+      "temporary_files": [],
+      "winner_count": 1
+    },
+    {
+      "authorization_id": "auth-review-after-widened-020-eda69dabfde0",
+      "elapsed_ms": 550.5,
+      "json_record_count": 21,
+      "loser_codes": [
+        "AUTHORIZATION_REPLAYED"
+      ],
+      "ok": true,
+      "record_mode": "0o600",
+      "record_valid": true,
+      "round": 20,
+      "temporary_files": [],
+      "winner_count": 1
+    },
+    {
+      "authorization_id": "auth-review-after-widened-021-7ed6eff28a97",
+      "elapsed_ms": 542.6,
+      "json_record_count": 22,
+      "loser_codes": [
+        "AUTHORIZATION_REPLAYED"
+      ],
+      "ok": true,
+      "record_mode": "0o600",
+      "record_valid": true,
+      "round": 21,
+      "temporary_files": [],
+      "winner_count": 1
+    },
+    {
+      "authorization_id": "auth-review-after-widened-022-d4190f5db770",
+      "elapsed_ms": 542.9,
+      "json_record_count": 23,
+      "loser_codes": [
+        "AUTHORIZATION_REPLAYED"
+      ],
+      "ok": true,
+      "record_mode": "0o600",
+      "record_valid": true,
+      "round": 22,
+      "temporary_files": [],
+      "winner_count": 1
+    },
+    {
+      "authorization_id": "auth-review-after-widened-023-3db35d7e5b9d",
+      "elapsed_ms": 542.4,
+      "json_record_count": 24,
+      "loser_codes": [
+        "AUTHORIZATION_REPLAYED"
+      ],
+      "ok": true,
+      "record_mode": "0o600",
+      "record_valid": true,
+      "round": 23,
+      "temporary_files": [],
+      "winner_count": 1
+    },
+    {
+      "authorization_id": "auth-review-after-widened-024-97fecd07887a",
+      "elapsed_ms": 546.0,
+      "json_record_count": 25,
+      "loser_codes": [
+        "AUTHORIZATION_REPLAYED"
+      ],
+      "ok": true,
+      "record_mode": "0o600",
+      "record_valid": true,
+      "round": 24,
+      "temporary_files": [],
+      "winner_count": 1
+    },
+    {
+      "authorization_id": "auth-review-after-widened-025-e5e32cc79cbf",
+      "elapsed_ms": 522.1,
+      "json_record_count": 26,
+      "loser_codes": [
+        "AUTHORIZATION_REPLAYED"
+      ],
+      "ok": true,
+      "record_mode": "0o600",
+      "record_valid": true,
+      "round": 25,
+      "temporary_files": [],
+      "winner_count": 1
+    },
+    {
+      "authorization_id": "auth-review-after-widened-026-c2c1db988e39",
+      "elapsed_ms": 498.0,
+      "json_record_count": 27,
+      "loser_codes": [
+        "AUTHORIZATION_REPLAYED"
+      ],
+      "ok": true,
+      "record_mode": "0o600",
+      "record_valid": true,
+      "round": 26,
+      "temporary_files": [],
+      "winner_count": 1
+    },
+    {
+      "authorization_id": "auth-review-after-widened-027-a696d6321c84",
+      "elapsed_ms": 500.1,
+      "json_record_count": 28,
+      "loser_codes": [
+        "AUTHORIZATION_REPLAYED"
+      ],
+      "ok": true,
+      "record_mode": "0o600",
+      "record_valid": true,
+      "round": 27,
+      "temporary_files": [],
+      "winner_count": 1
+    },
+    {
+      "authorization_id": "auth-review-after-widened-028-85a231ba2ea6",
+      "elapsed_ms": 494.8,
+      "json_record_count": 29,
+      "loser_codes": [
+        "AUTHORIZATION_REPLAYED"
+      ],
+      "ok": true,
+      "record_mode": "0o600",
+      "record_valid": true,
+      "round": 28,
+      "temporary_files": [],
+      "winner_count": 1
+    },
+    {
+      "authorization_id": "auth-review-after-widened-029-3f845c438416",
+      "elapsed_ms": 495.5,
+      "json_record_count": 30,
+      "loser_codes": [
+        "AUTHORIZATION_REPLAYED"
+      ],
+      "ok": true,
+      "record_mode": "0o600",
+      "record_valid": true,
+      "round": 29,
+      "temporary_files": [],
+      "winner_count": 1
+    },
+    {
+      "authorization_id": "auth-review-after-widened-030-373b85faa404",
+      "elapsed_ms": 495.3,
+      "json_record_count": 31,
+      "loser_codes": [
+        "AUTHORIZATION_REPLAYED"
+      ],
+      "ok": true,
+      "record_mode": "0o600",
+      "record_valid": true,
+      "round": 30,
+      "temporary_files": [],
+      "winner_count": 1
+    },
+    {
+      "authorization_id": "auth-review-after-widened-031-a67b7de5eb43",
+      "elapsed_ms": 498.9,
+      "json_record_count": 32,
+      "loser_codes": [
+        "AUTHORIZATION_REPLAYED"
+      ],
+      "ok": true,
+      "record_mode": "0o600",
+      "record_valid": true,
+      "round": 31,
+      "temporary_files": [],
+      "winner_count": 1
+    },
+    {
+      "authorization_id": "auth-review-after-widened-032-1a9107f2ebb4",
+      "elapsed_ms": 520.3,
+      "json_record_count": 33,
+      "loser_codes": [
+        "AUTHORIZATION_REPLAYED"
+      ],
+      "ok": true,
+      "record_mode": "0o600",
+      "record_valid": true,
+      "round": 32,
+      "temporary_files": [],
+      "winner_count": 1
+    },
+    {
+      "authorization_id": "auth-review-after-widened-033-f383fc4e6d7e",
+      "elapsed_ms": 494.9,
+      "json_record_count": 34,
+      "loser_codes": [
+        "AUTHORIZATION_REPLAYED"
+      ],
+      "ok": true,
+      "record_mode": "0o600",
+      "record_valid": true,
+      "round": 33,
+      "temporary_files": [],
+      "winner_count": 1
+    },
+    {
+      "authorization_id": "auth-review-after-widened-034-00c411e72191",
+      "elapsed_ms": 504.0,
+      "json_record_count": 35,
+      "loser_codes": [
+        "AUTHORIZATION_REPLAYED"
+      ],
+      "ok": true,
+      "record_mode": "0o600",
+      "record_valid": true,
+      "round": 34,
+      "temporary_files": [],
+      "winner_count": 1
+    },
+    {
+      "authorization_id": "auth-review-after-widened-035-e302e30a98c6",
+      "elapsed_ms": 541.2,
+      "json_record_count": 36,
+      "loser_codes": [
+        "AUTHORIZATION_REPLAYED"
+      ],
+      "ok": true,
+      "record_mode": "0o600",
+      "record_valid": true,
+      "round": 35,
+      "temporary_files": [],
+      "winner_count": 1
+    },
+    {
+      "authorization_id": "auth-review-after-widened-036-aadb309f48a8",
+      "elapsed_ms": 557.5,
+      "json_record_count": 37,
+      "loser_codes": [
+        "AUTHORIZATION_REPLAYED"
+      ],
+      "ok": true,
+      "record_mode": "0o600",
+      "record_valid": true,
+      "round": 36,
+      "temporary_files": [],
+      "winner_count": 1
+    },
+    {
+      "authorization_id": "auth-review-after-widened-037-ff0622656153",
+      "elapsed_ms": 538.8,
+      "json_record_count": 38,
+      "loser_codes": [
+        "AUTHORIZATION_REPLAYED"
+      ],
+      "ok": true,
+      "record_mode": "0o600",
+      "record_valid": true,
+      "round": 37,
+      "temporary_files": [],
+      "winner_count": 1
+    },
+    {
+      "authorization_id": "auth-review-after-widened-038-6240a27a805a",
+      "elapsed_ms": 539.3,
+      "json_record_count": 39,
+      "loser_codes": [
+        "AUTHORIZATION_REPLAYED"
+      ],
+      "ok": true,
+      "record_mode": "0o600",
+      "record_valid": true,
+      "round": 38,
+      "temporary_files": [],
+      "winner_count": 1
+    },
+    {
+      "authorization_id": "auth-review-after-widened-039-200d71b6afad",
+      "elapsed_ms": 532.7,
+      "json_record_count": 40,
+      "loser_codes": [
+        "AUTHORIZATION_REPLAYED"
+      ],
+      "ok": true,
+      "record_mode": "0o600",
+      "record_valid": true,
+      "round": 39,
+      "temporary_files": [],
+      "winner_count": 1
+    }
+  ],
+  "schema": "at-m0/g4h0-p2-03-stress/v1",
+  "test_only_synthetic": true,
+  "utc_started": "2026-11-18T12:00:00Z",
+  "widen_write_ms": 100.0
+}

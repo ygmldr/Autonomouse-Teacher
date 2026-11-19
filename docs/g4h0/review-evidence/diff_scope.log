@@ -1,0 +1,58 @@
+== diff scope 3e7afee..813e6a6 ==
+A	docs/g4h0/A2_SOURCES.md
+A	docs/g4h0/A3_REFS.md
+A	docs/g4h0/BASELINE.md
+A	docs/g4h0/BILLABLE_PATH_INVENTORY.md
+A	docs/g4h0/DEPLOYMENT_RUNBOOK.md
+A	docs/g4h0/E5_PRELIVE_FULL_CHECKLIST.md
+A	docs/g4h0/HUMAN_SIGNOFF_TEMPLATE.md
+A	docs/g4h0/NO_KEY_AND_LIVEGATE_EVIDENCE.md
+A	docs/g4h0/P2_FIX_REPORT.md
+A	docs/g4h0/PRICE_AND_USAGE_VERIFICATION.md
+A	docs/g4h0/PROVIDER_CONTRACT_DRAFT.md
+A	docs/g4h0/RISK_DISPOSITION.md
+A	docs/g4h0/TRUST_BOUNDARY_DIAGRAM.md
+A	docs/g4h0/evidence/BASELINE_COMMANDS_20261119T174015Z.log
+A	docs/g4h0/evidence/BASELINE_HASHES_20261119T174453Z.txt
+A	docs/g4h0/evidence/ENV_TOOLS_LIVEGATE_20261119T174800Z.log
+A	docs/g4h0/evidence/P2-01_packet_v1_verify_20261119T174453Z.log
+A	docs/g4h0/evidence/P2-01_packet_v2_build_20261119T174016Z.log
+A	docs/g4h0/evidence/P2-01_packet_v2_verify_20261119T174135Z.log
+A	docs/g4h0/evidence/P2-01_v2.sha256
+A	docs/g4h0/evidence/a07_no_key_probes.json
+A	docs/g4h0/evidence/a07_no_key_probes.log
+A	docs/g4h0/evidence/p2_03_a12_loop30_after.log
+A	docs/g4h0/evidence/p2_03_a12_loop30_before.log
+A	docs/g4h0/evidence/p2_03_stress_after_fix_natural.json
+A	docs/g4h0/evidence/p2_03_stress_after_fix_natural.log
+A	docs/g4h0/evidence/p2_03_stress_after_fix_widened.json
+A	docs/g4h0/evidence/p2_03_stress_after_fix_widened.log
+A	docs/g4h0/evidence/p2_03_stress_before_fix_natural.json
+A	docs/g4h0/evidence/p2_03_stress_before_fix_natural.log
+A	docs/g4h0/evidence/p2_03_stress_before_fix_widened.json
+A	docs/g4h0/evidence/p2_03_stress_before_fix_widened.log
+A	docs/g4h0/evidence/p2_04_ruff_test_scan_git_secrets.log
+A	scripts/g4h0/no_key_probes.py
+A	scripts/g4h0/p2_03_stress.py
+M	src/autoteacher_m0/bridge/controller.py
+M	src/autoteacher_m0/security/authorization.py
+M	tests/integration/g4_f5/g4f5_support.py
+A	tests/integration/g4_f5/test_f5_pre_send_timeout_observation.py
+A	tests/integration/g4_f5/test_f5_recovery_reason.py
+A	tests/integration/g4_h0/conftest.py
+A	tests/integration/g4_h0/test_p2_03_concurrent_consume.py
+M	tests/security/test_scan_git_secrets.py
+
+== stat ==
+ .../g4_h0/test_p2_03_concurrent_consume.py         | 456 ++++++++++++++++
+ tests/security/test_scan_git_secrets.py            |   1 -
+ 43 files changed, 7703 insertions(+), 35 deletions(-)
+
+== protected paths diff (must be empty) ==
+(end; empty above = zero diff)
+
+== src files changed ==
+src/autoteacher_m0/bridge/controller.py
+src/autoteacher_m0/security/authorization.py
+
+== main worktree status @3e7afee ==

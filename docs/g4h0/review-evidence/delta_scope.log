@@ -1,0 +1,34 @@
+== delta scope review (read-only delta worktree @ b57494a) ==
+delta_worktree=/root/Autonomous Teacher/worktrees/m0-g4h0-review-delta
+delta_head=b57494a5eecb2406d5a20605b04e2a54cda0dae8
+delta_status_lines=0
+merge_commit_parents=b57494a5eecb2406d5a20605b04e2a54cda0dae8 bb35a013d0aa62f29b77dc6db6733aa72052e3e3 87aa52f34eab0185d3512a6e62e5b075748b5bbb
+test_fix_commit=87aa52f34eab0185d3512a6e62e5b075748b5bbb parents=87aa52f34eab0185d3512a6e62e5b075748b5bbb ff9afd0b592a34e12f27860a3363c8a84b58b18a
+
+== git diff --stat 813e6a6..b57494a ==
+ docs/g4h0/EVIDENCE_INDEX.md                        |  77 +++++++
+ docs/g4h0/HUMAN_DECISIONS_PROPOSED.md              | 100 +++++++++
+ docs/g4h0/PACKET_SUMMARY.md                        |  55 +++++
+ docs/g4h0/REVIEW_REQUEST.md                        | 224 +++++++++++++++++++++
+ docs/g4h0/evidence/p2_03_g4h0_standalone_3x.log    |  18 ++
+ .../g4_h0/test_p2_03_concurrent_consume.py         | 106 ++++++++--
+ 6 files changed, 560 insertions(+), 20 deletions(-)
+
+== git diff --name-status 813e6a6..b57494a ==
+A	docs/g4h0/EVIDENCE_INDEX.md
+A	docs/g4h0/HUMAN_DECISIONS_PROPOSED.md
+A	docs/g4h0/PACKET_SUMMARY.md
+A	docs/g4h0/REVIEW_REQUEST.md
+A	docs/g4h0/evidence/p2_03_g4h0_standalone_3x.log
+M	tests/integration/g4_h0/test_p2_03_concurrent_consume.py
+
+== git diff --stat 87aa52f^..87aa52f ==
+ docs/g4h0/evidence/p2_03_g4h0_standalone_3x.log    |  18 ++++
+ .../g4_h0/test_p2_03_concurrent_consume.py         | 106 +++++++++++++++++----
+ 2 files changed, 104 insertions(+), 20 deletions(-)
+
+== frozen impl object untouched: src/ scripts/ tests/security/ run_live.sh diff (expect empty) ==
+(end; empty=zero diff)
+
+== module path in delta worktree ==
+/root/Autonomous Teacher/worktrees/m0-g4h0-review-delta/src/autoteacher_m0/__init__.py

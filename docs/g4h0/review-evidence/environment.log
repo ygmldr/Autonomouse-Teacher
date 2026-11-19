@@ -1,0 +1,16 @@
+== reviewer environment ==
+Thu Nov 19 18:29:05 UTC 2026
+review_worktree=/root/Autonomous Teacher/worktrees/m0-g4h0-review
+review_head=813e6a680399ba245bd0e76296e1212118a83460
+review_branch=work/m0-g4h0-review
+review_status_lines=30
+base_head=3e7afee077845a071cd364e93ab209cac20b2d5f
+base_status_lines=0
+integration_head=bb35a013d0aa62f29b77dc6db6733aa72052e3e3
+integration_status_lines=0
+main_head=3e7afee077845a071cd364e93ab209cac20b2d5f
+main_status_lines=0
+python=Python 3.11.15
+pytest=pytest 9.2.0
+ruff=ruff 0.17.5
+module_path=/root/Autonomous Teacher/worktrees/m0-g4h0-review/src/autoteacher_m0/__init__.py
