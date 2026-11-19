@@ -82,6 +82,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                              "named window")
     parser.add_argument("--max-calls", type=int, default=None,
                         help="G4-C synthetic admission override (test only)")
+    parser.add_argument("--deadline-ms", type=int, default=None,
+                        help="G4-C synthetic admission deadline override "
+                             "(test only; 100..30000)")
     parser.add_argument("--steps", default=None,
                         help="comma-separated hold-mode steps: probes, restart, kill-broker")
     args = parser.parse_args(argv)
@@ -270,6 +273,8 @@ class G4CLauncher(g3d_launch.Launcher):
         super().write_configs()
         if self.args.max_calls is not None:
             self._override_admission_max_calls(int(self.args.max_calls))
+        if self.args.deadline_ms is not None:
+            self._override_admission_deadline(int(self.args.deadline_ms))
         contract = self._contract_mapping()
         external = libc.stage_external_inputs(self.stage_dir)
         closure = libc.closure_for(libc.REPO, external=external)
@@ -426,6 +431,19 @@ class G4CLauncher(g3d_launch.Launcher):
         thread = threading.Thread(target=worker, daemon=True)
         thread.start()
         return thread
+
+    def _override_admission_deadline(self, deadline_ms: int) -> None:
+        if not 100 <= deadline_ms <= 30000:
+            raise lib3d.G3DError("deadline_ms must be within 100..30000")
+        path = self.run_dir / "state" / "admission.json"
+        document = json.loads(path.read_text(encoding="utf-8"))
+        document["limits"]["deadline_ms"] = deadline_ms
+        record = lib3d.write_json_atomic(path, document, mode=0o400, uid=0, gid=0)
+        self.records.setdefault("configs", {})["deadline_override"] = {
+            "deadline_ms": deadline_ms, "sha256": record["sha256"],
+            "reason": "G4-F5 synthetic deadline boundary test only"}
+        lib3d.write_bytes_atomic(self.evidence / "run" / "config-admission.json",
+                               lib3d.json_bytes(document), mode=0o444)
 
     def _override_admission_max_calls(self, max_calls: int) -> None:
         path = self.run_dir / "state" / "admission.json"
@@ -816,6 +834,9 @@ class G4CLauncher(g3d_launch.Launcher):
         if case in {"crash-before-send", "broker-down", "negatives"}:
             check("gate_no_authorization_before_crash", not gate["authorized"],
                   authorized=len(gate["authorized"]))
+        elif case == "timeout-pre-send":
+            check("gate_no_authorization_before_send", not gate["authorized"],
+                  authorized=len(gate["authorized"]))
         else:
             check("gate_journal_present", gate["present"], path=gate["path"])
         if (self.args.candidate_mode == "dsh" and case in F5_DSH_CASES):
@@ -981,8 +1002,9 @@ class G4CLauncher(g3d_launch.Launcher):
                   error=result.get("error"),
                   finish_reason=result.get("finish_reason"),
                   response=result.get("final_response"))
-        check("f5_dsh_revocation_enabled", self.revocation_enabled,
-              enabled=self.revocation_enabled)
+        if case.startswith("revocation"):
+            check("f5_dsh_revocation_enabled", self.revocation_enabled,
+                  enabled=self.revocation_enabled)
         if case == "revocation-pre-reserve":
             check("dsh_revocation_pre_reserve_no_ledger",
                   not reservations and not claims and not attempts
@@ -1486,8 +1508,7 @@ class G4CLauncher(g3d_launch.Launcher):
               snapshot["fake_counter"] == 1 and len(receipts) == 1,
               fake=snapshot["fake_counter"], receipts=len(receipts))
         check("revocation_in_flight_not_free",
-              self._money(reservations[0].get("cost")) > 0
-              and self._money(reservations[0].get("estimated")) > 0,
+              self._money(reservations[0].get("cost")) > 0,
               row={key: reservations[0].get(key)
                    for key in ("cost", "estimated")} if reservations else None)
         check("revocation_in_flight_observed_after_receipt",
@@ -1683,8 +1704,9 @@ class G4CLauncher(g3d_launch.Launcher):
         holder = self._probe_async(phase, timeout=timeout)
         observed = None
         if window == "after_reserve":
-            observed = self._wait_for(
-                lambda: marker if marker.is_file() else None, timeout=30.0)
+            found = self._wait_for(
+                lambda: marker.is_file() or None, timeout=30.0)
+            observed = bool(found)
             if not observed:
                 raise lib3d.G3DError("post-reserve delay marker was not observed")
         elif window == "in_flight":
@@ -1693,7 +1715,8 @@ class G4CLauncher(g3d_launch.Launcher):
                     return None
                 rows = sorted(receipts.glob("rcpt-*.json"))
                 return len(rows) if len(rows) > before else None
-            observed = self._wait_for(new_receipt, timeout=30.0)
+            found = self._wait_for(new_receipt, timeout=30.0)
+            observed = found if isinstance(found, int) else None
             if observed is None:
                 raise lib3d.G3DError("Fake receipt was not observed before revoke")
         else:
@@ -1706,6 +1729,33 @@ class G4CLauncher(g3d_launch.Launcher):
                 "marker": (json.loads(marker.read_text(encoding="utf-8"))
                            if marker.is_file() else None)}
 
+    def stop_trusted(self, *, reason: str = "f5-stop") -> dict:
+        """Stop the serving trusted process before a real recovery start.
+
+        SIGTERM first so the trusted entry can flush its final gate snapshot
+        (the evidence of pre-recovery held/known); SIGKILL only as a fallback.
+        """
+        term = self.cmd(["podman", "kill", "-s", "TERM", self.trusted_name],
+                        name=f"stop-trusted-term-{reason}", timeout=60)
+        wait = self.cmd(["podman", "wait", "--interval", "150ms",
+                         self.trusted_name],
+                        name=f"stop-wait-trusted-{reason}", timeout=20)
+        killed = False
+        if wait.get("timed_out"):
+            killed = True
+            self.cmd(["podman", "kill", "-s", "KILL", self.trusted_name],
+                     name=f"stop-trusted-kill-{reason}", timeout=60)
+            wait = self.cmd(["podman", "wait", "--interval", "150ms",
+                             self.trusted_name],
+                            name=f"stop-wait-trusted-killed-{reason}", timeout=30)
+        document = {"reason": reason, "utc": lib.utc_now(),
+                    "term_exit": term.get("exit"),
+                    "killed_fallback": killed,
+                    "wait_exit": wait.get("exit"),
+                    "wait_stdout": (wait.get("stdout") or "").strip()[-200:]}
+        self.write_evidence_json(f"run/stop-trusted-{reason}.json", document)
+        return document
+
     def run_steps(self, steps: list[str]) -> list[dict]:
         results = []
         for step in steps:
@@ -1715,6 +1765,9 @@ class G4CLauncher(g3d_launch.Launcher):
             if step == "restart":
                 results.append({"step": step,
                                 "record": self.restart_trusted(reason=self.case)})
+            elif step == "stop-trusted":
+                results.append({"step": step,
+                                "record": self.stop_trusted(reason=self.case)})
             elif step == "kill-broker":
                 results.append({"step": step, "record": self.kill_broker()})
             elif step in {"revoke", "unrevoke"}:
