@@ -210,6 +210,8 @@ Controller 时，真实 resume 不会重发旧 PENDING/未知 Attempt，也不�
 | `manifest.json` | 两 run 共 390 个证据文件的 path/bytes/SHA-256 |
 | `logs/resume-20261119T121402Z.log` | 正向 runner log |
 | `logs/crash-resume-20261119T121413Z.log` | 负向 runner log |
+| `regression/g4_c_f3_d.txt` | G4-C/F3/D host pytest：127 passed |
+| `regression/g4c/summary.json` | G4-C 完整容器 runner：9/9 cases、106 checks、容器空、canonical |
 
 ### 4.2 正向 run
 
@@ -271,6 +273,8 @@ id/容器名），已单独存 `cleanup/unrelated-host-processes.json`，不属�
 
 ## 6. 回归与静态检查
 
+### 6.1 Host pytest（G4-C / G4-F3 / G4-D）
+
 ```text
 tests/integration/g4_c tests/integration/g4_f3 tests/integration/g4_d
 → 127 passed in 13.04s（exit 0）
@@ -282,8 +286,25 @@ tests/integration/g4_c tests/integration/g4_f3 tests/integration/g4_d
 - 本轮三目录不包含 G3-D 的 `git diff cf40c6b -- src` 类 frozen-src 断言，因此
   **frozen-src 预期失败数 = 0**；G3-D frozen-src 类失败按既有口径未纳入本回归（其历史断言
   因授权改码必然失败，见 G4 文档 C-R6/A-R2）。
-- Ruff（deps 内 0.17.5）：`scripts/g4/run_g4_f4.py`、`scripts/g4/audit_g4_f4.py`
-  → **All checks passed**。
+
+### 6.2 G4-C 完整容器 runner（真实双 Principal）
+
+`scripts/g4/run_g4_c.py` 在 HEAD 7000f72 的 stage（manifest `3878e5f1…`）上重跑全部 9 个 case：
+
+| 项 | 结果 |
+|---|---|
+| cases | **9/9 PASS**：c01、c02、c18、negatives、replay、crash-before-send、crash-after-receive、broker-down、quota |
+| checks | **106/106 PASS**（18+20+9+8+9+12+13+8+9） |
+| 容器 | 运行后 `podman ps -a` 空 |
+| rootfs/deps | canonical（`25491e45…` / `e07729d7…`） |
+| 真实 Key/模型/外网 | 0 / 0 / 0；LiveGate `BLOCKED` |
+
+证据：`artifacts/g4f/f4/regression/g4c/summary.json`、`regression/g4c-run.txt`。
+
+### 6.3 Ruff
+
+Ruff（deps 内 0.17.5）：`scripts/g4/run_g4_f4.py`、`scripts/g4/audit_g4_f4.py`
+→ **All checks passed**。
 
 ---
 
@@ -313,8 +334,10 @@ tests/integration/g4_c tests/integration/g4_f3 tests/integration/g4_d
 
 ## 8. 提交与结论
 
-- 提交信息：`feat: G4-F4 real dual-principal DSH session resume validation (no-key)`。
-- 父提交：`7000f727d0e5926b0bd95574f3c587a2707da6d8`（固定；本文件与 runner/audit 同一提交）。
+- 主提交：`b963ad4e89ade40021e78007a3f8ec61c0b6d62d`
+  （`feat: G4-F4 real dual-principal DSH session resume validation (no-key)`），
+  父提交 `7000f727d0e5926b0bd95574f3c587a2707da6d8`；包含 runner、audit 与本报告。
+- 随后 docs-only 提交补记 G4-C 完整容器回归计数（9/9、106 checks），父为主提交。
 - 只新增/修改：`scripts/g4/run_g4_f4.py`、`scripts/g4/audit_g4_f4.py`、
   `docs/M0_G4F_F4_REPORT.md`；未 push、未 amend、未 stage 任何他人文件。
 - **范围结论：`RESUME_L2_VERIFIED`**。正向真实 resume + 双请求独立账本 + 旧 Attempt/
