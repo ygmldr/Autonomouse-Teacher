@@ -1,0 +1,18 @@
+# g4_h0 P2-03 tests standalone determinism check — 2026-11-19T18:29:07Z
+# command: for each test id: for i in 1 2 3; pytest <id> -q -p no:cacheprovider ; P=pass F=fail
+# result: 14 tests, 42/42 runs PASS, TOTAL_FAIL=0
+
+test_link_race_publishes_exactly_one_complete_record PPP
+test_slow_body_write_never_exposes_a_partial_record PPP
+test_short_writes_are_looped_until_the_body_is_complete PPP
+test_link_eexist_after_another_publisher_replays PPP
+test_link_eexist_with_other_epoch_is_epoch_mismatch PPP
+test_link_failure_fails_closed_without_consuming PPP
+test_record_and_temporary_open_flags_and_mode PPP
+test_partial_legacy_record_is_retried_then_replayed PPP
+test_retry_bound_stays_fail_closed_for_a_late_publisher PPP
+test_persistent_empty_record_fails_closed PPP
+test_stale_temporary_file_is_not_counted_as_a_use PPP
+test_symlinked_use_record_is_never_followed[False] PPP
+test_symlinked_use_record_is_never_followed[True] PPP
+test_repeated_concurrent_rounds_are_stable PPP
