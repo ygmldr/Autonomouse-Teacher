@@ -128,6 +128,49 @@ class _RecordingOpenOS:
         return os.open(path, flags, mode)
 
 
+class _CountingSleep:
+    """Fake ``time`` proxy: count bounded-retry sleeps without real wall clock.
+
+    Only ``authorization_module.time`` is replaced (never the global ``time``
+    module), so the retry window is exhausted immediately and the test does not
+    depend on process cold-start/ed25519-load timing.
+    """
+
+    def __init__(self) -> None:
+        self.sleep_calls: list[float] = []
+
+    def __getattr__(self, name: str):
+        return getattr(time, name)
+
+    def sleep(self, seconds: float) -> None:
+        self.sleep_calls.append(seconds)
+
+
+class _ScriptedSleep:
+    """Fake ``time`` proxy that hands control to a scripted writer once.
+
+    The first bounded-retry sleep signals ``handoff`` and waits for the scripted
+    writer to finish (Events only, no wall-clock duration). The legacy
+    publisher therefore completes exactly inside the retry window, independent
+    of how long the first ``consume`` call takes cold.
+    """
+
+    def __init__(self) -> None:
+        self.sleep_calls: list[float] = []
+        self.handoff = threading.Event()
+        self.writer_done = threading.Event()
+
+    def __getattr__(self, name: str):
+        return getattr(time, name)
+
+    def sleep(self, seconds: float) -> None:
+        self.sleep_calls.append(seconds)
+        if len(self.sleep_calls) == 1:
+            self.handoff.set()
+            if not self.writer_done.wait(timeout=10):
+                raise AssertionError("scripted legacy writer did not finish")
+
+
 # ---------------------------------------------------------------------------
 # helpers
 # ---------------------------------------------------------------------------
@@ -331,19 +374,21 @@ def test_partial_legacy_record_is_retried_then_replayed(
     auth_id = _set_authorization(trusted, _new_authorization_id("legacy-partial"))
     record = trusted.record_path(auth_id)
     _write_record(record, b"")
-    monkeypatch.setattr(authorization_module, "_USE_RECORD_READ_ATTEMPTS", 200)
-    monkeypatch.setattr(authorization_module, "_USE_RECORD_READ_DELAY_SECONDS", 0.005)
+    monkeypatch.setattr(authorization_module, "_USE_RECORD_READ_ATTEMPTS", 20)
+    monkeypatch.setattr(authorization_module, "_USE_RECORD_READ_DELAY_SECONDS", 0.01)
+    fake_time = _ScriptedSleep()
+    monkeypatch.setattr(authorization_module, "time", fake_time)
     body = _use_record_body(auth_id)
-    finished = threading.Event()
 
     def legacy_writer() -> None:
-        time.sleep(0.05)
-        with open(record, "wb") as handle:  # non-atomic legacy publisher
+        # Wait for the reader's first bounded-retry sleep, then publish in two
+        # non-atomic writes; the reader resumes only after the complete body.
+        assert fake_time.handoff.wait(timeout=10)
+        with open(record, "wb") as handle:
             handle.write(body[: len(body) // 2])
             handle.flush()
-            time.sleep(0.02)
             handle.write(body[len(body) // 2:])
-        finished.set()
+        fake_time.writer_done.set()
 
     writer = threading.Thread(target=legacy_writer, daemon=True)
     writer.start()
@@ -351,10 +396,13 @@ def test_partial_legacy_record_is_retried_then_replayed(
         with pytest.raises(AuthorizationRejected) as error:
             trusted.consume()
     finally:
-        writer.join(timeout=5)
+        writer.join(timeout=10)
     assert error.value.reasons == ("AUTHORIZATION_REPLAYED",)
-    assert finished.is_set()
+    assert len(fake_time.sleep_calls) >= 1  # the transient partial read was retried
+    assert fake_time.writer_done.is_set()
+    assert record.read_bytes() == body
     assert len(_json_records(trusted)) == 1
+    assert _temp_entries(trusted) == []
 
 
 def test_retry_bound_stays_fail_closed_for_a_late_publisher(
@@ -363,30 +411,48 @@ def test_retry_bound_stays_fail_closed_for_a_late_publisher(
     record = trusted.record_path(auth_id)
     _write_record(record, b"")
     monkeypatch.setattr(authorization_module, "_USE_RECORD_READ_ATTEMPTS", 3)
-    monkeypatch.setattr(authorization_module, "_USE_RECORD_READ_DELAY_SECONDS", 0.005)
+    monkeypatch.setattr(authorization_module, "_USE_RECORD_READ_DELAY_SECONDS", 0.01)
+    fake_time = _CountingSleep()
+    monkeypatch.setattr(authorization_module, "time", fake_time)
     body = _use_record_body(auth_id)
-    finished = threading.Event()
+    reader_finished = threading.Event()
+    late_done = threading.Event()
 
     def late_writer() -> None:
-        time.sleep(0.3)
+        # Publish only after consume() has definitively exhausted its bounded
+        # retry window and returned. No wall-clock sleep, so process cold-start
+        # duration cannot make this "late" publisher early.
+        assert reader_finished.wait(timeout=10)
         record.write_bytes(body)
-        finished.set()
+        late_done.set()
 
     writer = threading.Thread(target=late_writer, daemon=True)
     writer.start()
     try:
-        started = time.monotonic()
         with pytest.raises(AuthorizationRejected) as error:
             trusted.consume()
-        elapsed = time.monotonic() - started
+        assert error.value.reasons == ("AUTHORIZATION_USE_RECORD_INVALID",)
+        # The reader alone exhausted the bound: all retry sleeps happened and
+        # the empty record was still empty when it gave up.
+        assert len(fake_time.sleep_calls) == 2, fake_time.sleep_calls
+        assert all(seconds == authorization_module._USE_RECORD_READ_DELAY_SECONDS
+                   for seconds in fake_time.sleep_calls)
+        assert late_done.is_set() is False
+        assert record.stat().st_size == 0
     finally:
-        writer.join(timeout=5)
-    assert error.value.reasons == ("AUTHORIZATION_USE_RECORD_INVALID",)
-    assert elapsed < 0.3, elapsed  # the bound, not the writer, ended the wait
-    assert finished.is_set()
-    # The reader denied; it did not repair/consume the authorization itself.
+        reader_finished.set()
+        writer.join(timeout=10)
+    # The late publisher then completes the record; the earlier attempt stayed
+    # denied and created no second record/consumption of its own.
+    assert late_done.is_set()
+    assert record.read_bytes() == body
     assert len(_json_records(trusted)) == 1
     assert _temp_entries(trusted) == []
+    # Any *future* attempt now classifies the completed record as a replay.
+    with pytest.raises(AuthorizationRejected) as replay:
+        trusted.consume()
+    assert replay.value.reasons == ("AUTHORIZATION_REPLAYED",)
+    assert len(_json_records(trusted)) == 1
 
 
 def test_persistent_empty_record_fails_closed(
