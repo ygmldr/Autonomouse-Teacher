@@ -1,0 +1,41 @@
+{
+  "schema_version": "m1.offline.v0",
+  "question_id": "q-sys-004",
+  "track": "system_design",
+  "topic": "多路召回融合与配额",
+  "question": "多路召回（协同、向量、热门、探索）如何融合与分配配额？请说明融合策略、去重、以及如何评估每一路的贡献。",
+  "rubric_points": {
+    "factual_correctness": [
+      "融合|加权|quota|配额",
+      "去重|dedup|一致性 hash",
+      "探索|exploration|多样性",
+      "贡献|归因|消融|ablation"
+    ],
+    "explanation_clarity": [
+      "先定义|是什么|概念",
+      "原因|为什么|因为",
+      "方法|怎么做|步骤",
+      "结论|总结|因此"
+    ],
+    "engineering_feasibility": [
+      "延迟|毫秒",
+      "QPS|数据量|规模",
+      "容量|成本|资源"
+    ],
+    "evidence_sufficiency": [
+      "指标|监控",
+      "实验|消融|A/B",
+      "来源|日志"
+    ]
+  },
+  "follow_up_ladder": [
+    "先不用展开：用一句话定义「多路召回融合与配额」的核心概念，并说明它解决什么问题。",
+    "假设要在真实推荐系统里应用「多路召回融合与配额」：你会先验证哪个关键假设？给出可证伪的预测。",
+    "复杂度分析：数据规模、训练/推理延迟、存储与成本分别卡在哪里？请给出量级估算。",
+    "设计实验验证「多路召回融合与配额」的方案：离线指标、线上 A/B、样本量与护栏指标分别怎么定？",
+    "上线后若核心收益指标下降，你会按什么顺序定位到召回/排序/特征/实验层？列出前三个检查点。"
+  ],
+  "requires_project_facts": false,
+  "synthetic": true,
+  "license": "CC0-1.0"
+}

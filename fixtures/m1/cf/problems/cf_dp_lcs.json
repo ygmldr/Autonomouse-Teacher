@@ -1,0 +1,43 @@
+{
+  "schema_version": "m1.offline.v0",
+  "problem_id": "cf_dp_lcs",
+  "title": "最长公共子序列长度",
+  "statement": "给定两个字符串 a 和 b，返回它们的最长公共子序列（LCS）的长度。子序列不要求连续；任一字符串为空时返回 0。",
+  "skills": [
+    "dp-basics"
+  ],
+  "difficulty": 4,
+  "function_name": "lcs_length",
+  "public_tests": [
+    {
+      "args": [
+        "abcde",
+        "ace"
+      ],
+      "expected": 3,
+      "kind": "normal"
+    },
+    {
+      "args": [
+        "abc",
+        "abc"
+      ],
+      "expected": 3,
+      "kind": "normal"
+    }
+  ],
+  "hidden_ref": "hidden/cf_dp_lcs.json",
+  "hint_ladder": {
+    "LIGHT_HINT": "比较两个前缀 a[:i] 与 b[:j]：若最后一个字符相同，它一定可以放进公共子序列；若不同呢？",
+    "INVARIANT_HINT": "dp[i][j] = a[:i] 与 b[:j] 的 LCS 长度；a[i-1]==b[j-1] 时 dp[i][j]=dp[i-1][j-1]+1，否则 dp[i][j]=max(dp[i-1][j], dp[i][j-1])。",
+    "STRUCTURE_HINT": "步骤：前一行 prev 全 0；对 a 的每个字符：当前行 cur=[0]*(len(b)+1)；对 b 的每个字符按上述递推填表；用 prev=cur 滚动压缩空间。返回 prev[-1]。",
+    "FULL_SOLUTION": "def lcs_length(a, b):\n    previous = [0] * (len(b) + 1)\n    for char_a in a:\n        current = [0] * (len(b) + 1)\n        for index_b, char_b in enumerate(b, start=1):\n            if char_a == char_b:\n                current[index_b] = previous[index_b - 1] + 1\n            else:\n                current[index_b] = max(previous[index_b], current[index_b - 1])\n        previous = current\n    return previous[-1]"
+  },
+  "reference_solution": "def lcs_length(a, b):\n    previous = [0] * (len(b) + 1)\n    for char_a in a:\n        current = [0] * (len(b) + 1)\n        for index_b, char_b in enumerate(b, start=1):\n            if char_a == char_b:\n                current[index_b] = previous[index_b - 1] + 1\n            else:\n                current[index_b] = max(previous[index_b], current[index_b - 1])\n        previous = current\n    return previous[-1]",
+  "synthetic": true,
+  "license": "CC0-1.0",
+  "complexity_expectation": {
+    "time": "O(len(a) * len(b))",
+    "space": "O(min(len(a), len(b)))"
+  }
+}

@@ -1,0 +1,56 @@
+{
+  "schema_version": "m1.offline.v0",
+  "problem_id": "cf_graph_count_components",
+  "title": "无向图连通分量计数",
+  "statement": "给定 n 个节点（编号 0..n-1）和边列表 edges（每条边 [u, v] 表示无向边），返回连通分量的数量。允许重复边与自环；孤立节点各自算一个分量。",
+  "skills": [
+    "graph-basics"
+  ],
+  "difficulty": 3,
+  "function_name": "count_components",
+  "public_tests": [
+    {
+      "args": [
+        5,
+        [
+          [
+            0,
+            1
+          ],
+          [
+            1,
+            2
+          ],
+          [
+            3,
+            4
+          ]
+        ]
+      ],
+      "expected": 2,
+      "kind": "normal"
+    },
+    {
+      "args": [
+        3,
+        []
+      ],
+      "expected": 3,
+      "kind": "normal"
+    }
+  ],
+  "hidden_ref": "hidden/cf_graph_count_components.json",
+  "hint_ladder": {
+    "LIGHT_HINT": "把每个节点看成自己的集合，一条边就是把两个集合合并。合并完成后数一数还剩几个集合。",
+    "INVARIANT_HINT": "并查集：parent[x] 指向 x 所在集合的代表。find 时做路径压缩；union 前先比较代表；最终分量数 = 不同代表的数量。",
+    "STRUCTURE_HINT": "步骤：parent=list(range(n))；对每条边 (u,v) 求 find(u)、find(v)，不同则合并；最后统计 len({find(i) for i in range(n)})。自环 find 相等自然跳过；注意 n=0 返回 0。",
+    "FULL_SOLUTION": "def count_components(n, edges):\n    parent = list(range(n))\n    def find(x):\n        while parent[x] != x:\n            parent[x] = parent[parent[x]]\n            x = parent[x]\n        return x\n    for u, v in edges:\n        a, b = find(u), find(v)\n        if a != b:\n            parent[a] = b\n    return len({find(i) for i in range(n)})"
+  },
+  "reference_solution": "def count_components(n, edges):\n    parent = list(range(n))\n\n    def find(x):\n        while parent[x] != x:\n            parent[x] = parent[parent[x]]\n            x = parent[x]\n        return x\n\n    for u, v in edges:\n        a, b = find(u), find(v)\n        if a != b:\n            parent[a] = b\n    return len({find(i) for i in range(n)})",
+  "synthetic": true,
+  "license": "CC0-1.0",
+  "complexity_expectation": {
+    "time": "O((n + m) alpha(n))",
+    "space": "O(n)"
+  }
+}

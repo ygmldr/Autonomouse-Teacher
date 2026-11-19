@@ -1,0 +1,63 @@
+{
+  "checks": [
+    {
+      "check_id": "C1_hidden_public_separation",
+      "counts": {
+        "hidden_file_count": 21,
+        "public_file_count": 103
+      },
+      "description": "hidden fixtures exist and are not part of the public surface",
+      "status": "PASS"
+    },
+    {
+      "check_id": "C2_hidden_leakage",
+      "counts": {
+        "hash_window_hits": 0,
+        "needles_checked": 34,
+        "scanned_public_files": 103,
+        "substring_hits": 0
+      },
+      "description": "hidden-only fixture text does not appear in public docs/traces/fixtures/teacher sources",
+      "status": "PASS"
+    },
+    {
+      "check_id": "C3_injection_not_in_system_prompt",
+      "counts": {
+        "injection_documents": 4,
+        "needles_checked": 9,
+        "system_instruction_chunks": 1
+      },
+      "description": "untrusted injection documents never appear verbatim in system instructions",
+      "status": "PASS"
+    },
+    {
+      "check_id": "C4_no_network_or_real_data",
+      "counts": {
+        "findings": 0,
+        "scanned_files": 138
+      },
+      "description": "scoped code/fixtures/docs contain no network imports, API keys or real-data shapes",
+      "status": "PASS"
+    }
+  ],
+  "command": "cd /root/at-m1-offline && \"/root/Autonomous Teacher/.venv/bin/python\" -c \"run_contamination_suite(...)\"",
+  "disclaimer": "Offline synthetic leakage scan on local files only; not a security audit and not real teaching evidence.",
+  "environment": {
+    "cwd": "/root/at-m1-offline",
+    "git_branch": "work/m1-offline-design",
+    "git_sha": "3e7afee077845a071cd364e93ab209cac20b2d5f",
+    "platform": "Linux-6.17.13-2-pve-x86_64-with-glibc2.39",
+    "python_executable": "/root/Autonomous Teacher/.venv/bin/python",
+    "python_version": "3.11.15",
+    "utc_date": "2026-11-19",
+    "utc_timestamp": "2026-11-19T18:20:45Z"
+  },
+  "hidden_text_echoed": false,
+  "overall_ok": true,
+  "schema": "m1.contamination.report.v0",
+  "status_counts": {
+    "FAIL": 0,
+    "NOT_RUN": 0,
+    "PASS": 4
+  }
+}

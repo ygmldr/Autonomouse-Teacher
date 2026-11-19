@@ -1,0 +1,28 @@
+{
+  "schema_version": "m1.offline.v0",
+  "update_id": "k-recheck-futuredate-001",
+  "topic": "特征穿越排查",
+  "old_source": {
+    "source_id": "doc:leak-001",
+    "uri": "https://docs.synthetic.invalid/rec/leakage",
+    "publisher": "SyntheticOfficialDocs",
+    "published_at": "2026-07-01T00:00:00+00:00",
+    "observed_at": "2026-07-10T09:00:00+00:00",
+    "valid_until": "2027-07-01T00:00:00+00:00",
+    "confidence": 0.9,
+    "claim_status": "VERIFIED"
+  },
+  "new_source": {
+    "source_id": "doc:leak-001",
+    "uri": "https://docs.synthetic.invalid/rec/leakage",
+    "publisher": "SyntheticOfficialDocs",
+    "published_at": "2027-01-01T00:00:00+00:00",
+    "observed_at": "2026-11-05T09:00:00+00:00",
+    "valid_until": "2028-01-01T00:00:00+00:00",
+    "confidence": 0.9,
+    "claim_status": "VERIFIED"
+  },
+  "expected_change_kind": "RECHECK",
+  "synthetic": true,
+  "license": "CC0-1.0"
+}

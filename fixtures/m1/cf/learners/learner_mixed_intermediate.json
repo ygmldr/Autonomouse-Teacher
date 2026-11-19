@@ -1,0 +1,70 @@
+{
+  "schema_version": "m1.offline.v0",
+  "learner_id": "learner_mixed_intermediate",
+  "display_name": "Synthetic Mixed Intermediate",
+  "baseline_level": "INTERMEDIATE",
+  "synthetic": true,
+  "license": "CC0-1.0",
+  "profile": {
+    "learner_id": "learner_mixed_intermediate",
+    "display_name": "Synthetic Mixed Intermediate",
+    "baseline_level": "INTERMEDIATE"
+  },
+  "mastery": {
+    "array-basics": 0.65,
+    "prefix-sums": 0.55,
+    "two-pointers": 0.5,
+    "sorting": 0.6,
+    "binary-search": 0.45,
+    "graph-basics": 0.25,
+    "bfs": 0.2,
+    "dp-basics": 0.15
+  },
+  "error_counts": {
+    "binary-search": 2,
+    "dp-basics": 3,
+    "graph-basics": 1
+  },
+  "focus_skills": [
+    "binary-search",
+    "dp-basics"
+  ],
+  "error_traces": [
+    {
+      "trace_id": "trace-mixed-001",
+      "task_id": "cf_bs_search_insert",
+      "kind": "CODE_SUBMISSION",
+      "expected_error_class": "WRONG_ANSWER",
+      "observed_score": 0.0,
+      "payload": {
+        "code": "def search_insert(nums, target):\n    for index, value in enumerate(nums):\n        if value >= target:\n            return index + 1\n    return len(nums)\n",
+        "note": "返回 index + 1，所有插入位置整体偏移 1"
+      },
+      "created_at": "2026-11-02T10:00:00Z"
+    },
+    {
+      "trace_id": "trace-mixed-002",
+      "task_id": "cf_array_max_subarray",
+      "kind": "CODE_SUBMISSION",
+      "expected_error_class": "BOUNDARY_ERROR",
+      "observed_score": 0.0,
+      "payload": {
+        "code": "def max_subarray_sum(nums):\n    best = 0\n    current = 0\n    for value in nums:\n        current = max(0, current + value)\n        best = max(best, current)\n    return best\n",
+        "note": "best/current 初始化为 0，全负数组时返回 0 而不是最大负值"
+      },
+      "created_at": "2026-11-02T10:10:00Z"
+    },
+    {
+      "trace_id": "trace-mixed-003",
+      "task_id": "cf_dp_coin_change",
+      "kind": "CODE_SUBMISSION",
+      "expected_error_class": "WRONG_ANSWER",
+      "observed_score": 0.0,
+      "payload": {
+        "code": "def coin_change(coins, amount):\n    if amount == 0:\n        return 0\n    ordered = sorted(coins, reverse=True)\n    count = 0\n    remaining = amount\n    for coin in ordered:\n        while remaining >= coin:\n            remaining -= coin\n            count += 1\n    return count if remaining == 0 else -1\n",
+        "note": "贪心策略在 [2, 5, 10, 1], 27 上得到 5 而非最优 4"
+      },
+      "created_at": "2026-11-02T10:20:00Z"
+    }
+  ]
+}

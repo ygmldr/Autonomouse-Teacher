@@ -1,0 +1,84 @@
+{
+  "schema_version": "m1.offline.v0",
+  "learner_id": "learner_weak_beginner",
+  "display_name": "Synthetic Weak Beginner",
+  "baseline_level": "BEGINNER",
+  "synthetic": true,
+  "license": "CC0-1.0",
+  "profile": {
+    "learner_id": "learner_weak_beginner",
+    "display_name": "Synthetic Weak Beginner",
+    "baseline_level": "BEGINNER"
+  },
+  "mastery": {
+    "array-basics": 0.25,
+    "prefix-sums": 0.15,
+    "two-pointers": 0.1,
+    "sorting": 0.2,
+    "binary-search": 0.05,
+    "graph-basics": 0.0,
+    "bfs": 0.0,
+    "dp-basics": 0.0
+  },
+  "error_counts": {
+    "array-basics": 3,
+    "prefix-sums": 2,
+    "two-pointers": 2,
+    "binary-search": 1,
+    "dp-basics": 2
+  },
+  "focus_skills": [
+    "array-basics",
+    "prefix-sums"
+  ],
+  "error_traces": [
+    {
+      "trace_id": "trace-weak-001",
+      "task_id": "cf_array_running_sum",
+      "kind": "CODE_SUBMISSION",
+      "expected_error_class": "BOUNDARY_ERROR",
+      "observed_score": 0.0,
+      "payload": {
+        "code": "def running_sum(nums):\n    result = [nums[0]]\n    total = nums[0]\n    for value in nums[1:]:\n        total += value\n        result.append(total)\n    return result\n",
+        "note": "空列表输入时直接下标访问 nums[0] 触发 IndexError"
+      },
+      "created_at": "2026-11-01T09:00:00Z"
+    },
+    {
+      "trace_id": "trace-weak-002",
+      "task_id": "cf_array_sum_even",
+      "kind": "CODE_SUBMISSION",
+      "expected_error_class": "SYNTAX_ERROR",
+      "observed_score": 0.0,
+      "payload": {
+        "code": "def sum_even(nums)\n    total = 0\n    for value in nums:\n        if value % 2 == 0:\n            total += value\n    return total\n",
+        "note": "函数定义行缺少冒号"
+      },
+      "created_at": "2026-11-01T09:10:00Z"
+    },
+    {
+      "trace_id": "trace-weak-003",
+      "task_id": "cf_dp_climb_stairs",
+      "kind": "CODE_SUBMISSION",
+      "expected_error_class": "RUNTIME_ERROR",
+      "observed_score": 0.0,
+      "payload": {
+        "code": "def climb_stairs(n):\n    if n == 1:\n        return 1\n    return climb_stairs(n - 1) + climb_stairs(n - 2)\n",
+        "note": "缺少 n == 2 的基准情形，n=2 时无限递归"
+      },
+      "created_at": "2026-11-01T09:20:00Z"
+    },
+    {
+      "trace_id": "trace-weak-004",
+      "task_id": "cf_tp_pair_sum_sorted",
+      "kind": "CODE_SUBMISSION",
+      "expected_error_class": "TIME_LIMIT_EXCEEDED",
+      "observed_score": 0.0,
+      "payload": {
+        "code": "def pair_sum_sorted(nums, target):\n    for i in range(len(nums)):\n        for j in range(i + 1, len(nums)):\n            if nums[i] + nums[j] == target:\n                return [j, i]\n    return [-1, -1]\n",
+        "note": "O(n^2) 双循环同时返回颠倒索引；小用例上答案即错，n=20000 的隐藏用例直接超时"
+      },
+      "created_at": "2026-11-01T09:30:00Z"
+    }
+  ]
+}

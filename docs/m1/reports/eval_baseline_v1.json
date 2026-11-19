@@ -1,0 +1,186 @@
+{
+  "artifacts": [],
+  "checks": [
+    {
+      "check_id": "C1_hidden_public_separation",
+      "description": "hidden fixtures exist and are not part of the public surface",
+      "details": null,
+      "status": "PASS"
+    },
+    {
+      "check_id": "C2_hidden_leakage",
+      "description": "hidden-only fixture text does not appear in public docs/traces/fixtures/teacher sources",
+      "details": null,
+      "status": "PASS"
+    },
+    {
+      "check_id": "C3_injection_not_in_system_prompt",
+      "description": "untrusted injection documents never appear verbatim in system instructions",
+      "details": null,
+      "status": "PASS"
+    },
+    {
+      "check_id": "C4_no_network_or_real_data",
+      "description": "scoped code/fixtures/docs contain no network imports, API keys or real-data shapes",
+      "details": null,
+      "status": "PASS"
+    }
+  ],
+  "command": "cd /root/at-m1-offline && \"/root/Autonomous Teacher/.venv/bin/python\" -m m1_offline.demo",
+  "disclaimer": "Offline synthetic evaluation only. These numbers describe a deterministic local simulator over synthetic fixtures; they are not real teaching effectiveness, not real learner outcomes and must not be extrapolated.",
+  "environment": {
+    "cwd": "/root/at-m1-offline",
+    "git_branch": "work/m1-offline-design",
+    "git_sha": "3e7afee077845a071cd364e93ab209cac20b2d5f",
+    "platform": "Linux-6.17.13-2-pve-x86_64-with-glibc2.39",
+    "python_executable": "/root/Autonomous Teacher/.venv/bin/python",
+    "python_version": "3.11.15",
+    "utc_date": "2026-11-19",
+    "utc_timestamp": "2026-11-19T18:20:44Z"
+  },
+  "measured_metric_count": 16,
+  "metrics": [
+    {
+      "actual": "3",
+      "evidence": "MEASURED",
+      "name": "closed_loop_rounds_v1",
+      "note": "",
+      "planned": ">=3",
+      "source": "m1_offline.demo"
+    },
+    {
+      "actual": "19",
+      "evidence": "MEASURED",
+      "name": "closed_loop_trace_events",
+      "note": "",
+      "planned": ">=19 (4 baseline + 5 steps x 3 rounds)",
+      "source": "m1_offline.demo"
+    },
+    {
+      "actual": "PASS",
+      "evidence": "MEASURED",
+      "name": "replay_equivalence",
+      "note": "",
+      "planned": "100%",
+      "source": "m1_offline.demo"
+    },
+    {
+      "actual": "12 assessed / 14 catalog",
+      "evidence": "MEASURED",
+      "name": "v0v1_cases_assessed",
+      "note": "",
+      "planned": "fixed catalog >=12 cases",
+      "source": "m1_offline.demo"
+    },
+    {
+      "actual": "72",
+      "evidence": "MEASURED",
+      "name": "v0v1_rounds",
+      "note": "",
+      "planned": ">=12",
+      "source": "m1_offline.demo"
+    },
+    {
+      "actual": "58",
+      "evidence": "MEASURED",
+      "name": "v0v1_failure_cases",
+      "note": "",
+      "planned": ">=1",
+      "source": "m1_offline.demo"
+    },
+    {
+      "actual": "{\"FAIL\": 0, \"NOT_RUN\": 0, \"PASS\": 4}",
+      "evidence": "MEASURED",
+      "name": "contamination_status",
+      "note": "",
+      "planned": "all PASS",
+      "source": "m1_offline.demo"
+    },
+    {
+      "actual": "PASS",
+      "evidence": "MEASURED",
+      "name": "demo_determinism",
+      "note": "",
+      "planned": "byte-identical trace across two runs",
+      "source": "m1_offline.demo (in-process double run)"
+    },
+    {
+      "actual": "mean=0.248512 var=0.004634",
+      "evidence": "MEASURED",
+      "name": "teacher_v0_correctness",
+      "note": "",
+      "planned": "record mean/variance",
+      "source": "m1_offline.demo"
+    },
+    {
+      "actual": "mean=0.916667 var=0.00463",
+      "evidence": "MEASURED",
+      "name": "teacher_v0_rounds_to_first_success",
+      "note": "",
+      "planned": "record mean/variance",
+      "source": "m1_offline.demo"
+    },
+    {
+      "actual": "mean=0.75 var=0.0",
+      "evidence": "MEASURED",
+      "name": "teacher_v0_hint_efficiency",
+      "note": "",
+      "planned": "record mean/variance",
+      "source": "m1_offline.demo"
+    },
+    {
+      "actual": "mean=1.0 var=0.0",
+      "evidence": "MEASURED",
+      "name": "teacher_v0_independence",
+      "note": "",
+      "planned": "record mean/variance",
+      "source": "m1_offline.demo"
+    },
+    {
+      "actual": "mean=0.304067 var=0.001465",
+      "evidence": "MEASURED",
+      "name": "teacher_v1_correctness",
+      "note": "",
+      "planned": "record mean/variance",
+      "source": "m1_offline.demo"
+    },
+    {
+      "actual": "mean=0.916667 var=0.00463",
+      "evidence": "MEASURED",
+      "name": "teacher_v1_rounds_to_first_success",
+      "note": "",
+      "planned": "record mean/variance",
+      "source": "m1_offline.demo"
+    },
+    {
+      "actual": "mean=0.522222 var=0.000189",
+      "evidence": "MEASURED",
+      "name": "teacher_v1_hint_efficiency",
+      "note": "",
+      "planned": "record mean/variance",
+      "source": "m1_offline.demo"
+    },
+    {
+      "actual": "mean=0.5 var=0.018519",
+      "evidence": "MEASURED",
+      "name": "teacher_v1_independence",
+      "note": "",
+      "planned": "record mean/variance",
+      "source": "m1_offline.demo"
+    }
+  ],
+  "not_run": [
+    "real provider / live runtime evaluation (out of scope: offline synthetic only)",
+    "real learner outcomes (impossible offline; not claimed)"
+  ],
+  "notes": [
+    "Numbers come from a deterministic local simulator over synthetic fixtures.",
+    "Offline synthetic simulation only. Between-policy differences (teacher_v1 minus teacher_v0: correctness: delta(v1-v0)=+0.056; rounds_to_first_success: delta(v1-v0)=+0.000; hint_efficiency: delta(v1-v0)=-0.228; independence: delta(v1-v0)=-0.500) are simulator-internal behaviour differences on fixed synthetic cases and 3 seeds. This is not real teaching effect: no significance is claimed and no real-world effectiveness is demonstrated. Conclusions are limited to this deterministic simulator."
+  ],
+  "schema": "m1.eval_report.v0",
+  "title": "M1 offline evaluation baseline (demo run)",
+  "unverified": [
+    "M0 Runtime API capabilities (UNVERIFIED; RuntimePort is a mock abstraction)",
+    "real teaching effectiveness (not measured; no extrapolation allowed)"
+  ]
+}

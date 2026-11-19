@@ -1,0 +1,27 @@
+{
+  "schema_version": "m1.offline.v0",
+  "answer_id": "a-fabricated-003",
+  "question_id": "q-eng-001",
+  "synthetic": true,
+  "license": "CC0-1.0",
+  "answer": {
+    "text": "我主导了线上服务的延迟优化：我重新设计了缓存并引入批处理，把 P99 从 820ms 降到 190ms，延迟降低 77%。同时我推动 CTR 提升 37%，GMV 提升 12%，DAU 增长 20%。我们使用了全链路压测和灰度发布，效果非常显著，是团队年度最佳项目。",
+    "evidence_refs": [],
+    "project_facts": [],
+    "quantitative_claims": [
+      {
+        "statement": "P99 从 820ms 降到 190ms",
+        "evidence_refs": []
+      },
+      {
+        "statement": "CTR 提升 37%",
+        "evidence_refs": []
+      },
+      {
+        "statement": "GMV 提升 12%",
+        "evidence_refs": []
+      }
+    ],
+    "misconceptions": []
+  }
+}

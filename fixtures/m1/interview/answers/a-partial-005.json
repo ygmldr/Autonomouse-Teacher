@@ -1,0 +1,18 @@
+{
+  "schema_version": "m1.offline.v0",
+  "answer_id": "a-partial-005",
+  "question_id": "q-ml-002",
+  "synthetic": true,
+  "license": "CC0-1.0",
+  "answer": {
+    "text": "AUC 衡量排序质量，LogLoss 衡量概率质量。AUC 只看正负样本的相对顺序，所以对校准不敏感；LogLoss 用了预测概率，对过自信很敏感。\n\n不过我认为 AUC 越高的模型一定越好，因为 AUC 是排序指标，排序对了业务就对了，LogLoss 涨一点无所谓。",
+    "evidence_refs": [
+      "synthetic:q-ml-002/metric-definitions"
+    ],
+    "project_facts": [],
+    "quantitative_claims": [],
+    "misconceptions": [
+      "AUC 越高的模型一定越好；LogLoss 不重要"
+    ]
+  }
+}

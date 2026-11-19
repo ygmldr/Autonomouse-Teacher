@@ -1,0 +1,28 @@
+{
+  "schema_version": "m1.offline.v0",
+  "update_id": "k-update-002",
+  "topic": "负采样与检索评估",
+  "old_source": {
+    "source_id": "paper:ns-001",
+    "uri": "https://arxiv.synthetic.invalid/abs/2601.00001v1",
+    "publisher": "SyntheticArxivPaper",
+    "published_at": "2025-11-02T00:00:00+00:00",
+    "observed_at": "2025-11-20T08:00:00+00:00",
+    "valid_until": "2026-12-01T00:00:00+00:00",
+    "confidence": 0.65,
+    "claim_status": "VERIFIED"
+  },
+  "new_source": {
+    "source_id": "paper:ns-001",
+    "uri": "https://arxiv.synthetic.invalid/abs/2601.00001v2",
+    "publisher": "SyntheticArxivPaper",
+    "published_at": "2026-10-20T00:00:00+00:00",
+    "observed_at": "2026-11-05T08:00:00+00:00",
+    "valid_until": "2027-10-20T00:00:00+00:00",
+    "confidence": 0.88,
+    "claim_status": "VERIFIED"
+  },
+  "expected_change_kind": "UPDATE",
+  "synthetic": true,
+  "license": "CC0-1.0"
+}

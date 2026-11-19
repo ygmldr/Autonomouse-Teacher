@@ -1,0 +1,53 @@
+{
+  "schema_version": "m1.offline.v0",
+  "problem_id": "cf_sort_insertion",
+  "title": "插入排序",
+  "statement": "给定整数列表 nums，返回按升序排好序的新列表，不修改输入。请实现插入排序（O(n^2) 最坏复杂度即可），不要直接调用 sorted。",
+  "skills": [
+    "sorting"
+  ],
+  "difficulty": 1,
+  "function_name": "insertion_sort",
+  "public_tests": [
+    {
+      "args": [
+        [
+          3,
+          1,
+          2
+        ]
+      ],
+      "expected": [
+        1,
+        2,
+        3
+      ],
+      "kind": "normal"
+    },
+    {
+      "args": [
+        [
+          1
+        ]
+      ],
+      "expected": [
+        1
+      ],
+      "kind": "edge"
+    }
+  ],
+  "hidden_ref": "hidden/cf_sort_insertion.json",
+  "hint_ladder": {
+    "LIGHT_HINT": "像整理扑克牌：左手是已排好的牌，右手每次抽一张插进左手正确的位置。对应到数组，哪一段是「已排好」的？",
+    "INVARIANT_HINT": "外层 index 从 1 开始：nums[0:index] 已经有序；把 nums[index] 暂存为 current，向左把比它大的元素依次右移一格，最后把 current 放到空位。",
+    "STRUCTURE_HINT": "步骤：values=list(nums)；for index in 1..len-1：current=values[index]，position=index-1；while position>=0 且 values[position]>current：values[position+1]=values[position]，position-=1；values[position+1]=current。返回 values。",
+    "FULL_SOLUTION": "def insertion_sort(nums):\n    values = list(nums)\n    for index in range(1, len(values)):\n        current = values[index]\n        position = index - 1\n        while position >= 0 and values[position] > current:\n            values[position + 1] = values[position]\n            position -= 1\n        values[position + 1] = current\n    return values"
+  },
+  "reference_solution": "def insertion_sort(nums):\n    values = list(nums)\n    for index in range(1, len(values)):\n        current = values[index]\n        position = index - 1\n        while position >= 0 and values[position] > current:\n            values[position + 1] = values[position]\n            position -= 1\n        values[position + 1] = current\n    return values",
+  "synthetic": true,
+  "license": "CC0-1.0",
+  "complexity_expectation": {
+    "time": "O(n^2)",
+    "space": "O(n)"
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "schema_version": "m1.offline.v0",
+  "answer_id": "a-unsourced-007",
+  "question_id": "q-rec-001",
+  "synthetic": true,
+  "license": "CC0-1.0",
+  "answer": {
+    "text": "位置偏差来自曝光选择：高位置曝光多，模型会把位置当成相关性信号。首先可以用逆倾向加权（IPS）做无偏估计，其次可以做随机曝光实验得到倾向分。\n\n学术研究已经证明 IPS 能把位置偏差降低 37%，这是业界标准做法，所以直接照做即可，不需要再验证。",
+    "evidence_refs": [],
+    "project_facts": [],
+    "quantitative_claims": [
+      {
+        "statement": "IPS 能把位置偏差降低 37%",
+        "evidence_refs": []
+      }
+    ],
+    "misconceptions": []
+  }
+}

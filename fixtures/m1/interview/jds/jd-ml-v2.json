@@ -1,0 +1,23 @@
+{
+  "schema_version": "m1.offline.v0",
+  "jd_id": "jd-ml-v2",
+  "role": "机器学习工程师（合成岗位）",
+  "company_synthetic": true,
+  "requirements": [
+    "扎实的机器学习基础",
+    "熟悉 GBDT/深度模型调优",
+    "具备因果推断基础",
+    "能独立设计离线评估"
+  ],
+  "skills": [
+    "ml_fundamentals",
+    "gbdt",
+    "causal_inference",
+    "model_tuning"
+  ],
+  "valid_from": "2026-09-01",
+  "valid_until": "2027-02-28",
+  "supersedes": "jd-ml-v1",
+  "synthetic": true,
+  "license": "CC0-1.0"
+}

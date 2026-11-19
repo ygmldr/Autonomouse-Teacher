@@ -1,0 +1,14 @@
+{
+  "schema_version": "m1.offline.v0",
+  "answer_id": "a-missingfacts-004",
+  "question_id": "q-eng-001",
+  "synthetic": true,
+  "license": "CC0-1.0",
+  "answer": {
+    "text": "我会先定位瓶颈：用火焰图和链路追踪确认耗时集中在特征拉取还是模型推理。如果是特征拉取，就加本地缓存并做批量合并；如果是推理，就做模型裁剪或增加实例。优化后用 P99 和错误率对比基线，并用灰度验证回归。\n\n需要说明的是：我没有参与过线上延迟优化的项目，所以没有真实的基线、规模数据和提升百分比，以上只是方法论推演。",
+    "evidence_refs": [],
+    "project_facts": [],
+    "quantitative_claims": [],
+    "misconceptions": []
+  }
+}

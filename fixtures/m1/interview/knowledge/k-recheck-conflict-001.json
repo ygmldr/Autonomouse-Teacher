@@ -1,0 +1,28 @@
+{
+  "schema_version": "m1.offline.v0",
+  "update_id": "k-recheck-conflict-001",
+  "topic": "AUC 与 LogLoss 取舍",
+  "old_source": {
+    "source_id": "doc:auc-002",
+    "uri": "https://docs.synthetic.invalid/rec/auc-vs-logloss",
+    "publisher": "SyntheticOfficialDocs",
+    "published_at": "2026-06-01T00:00:00+00:00",
+    "observed_at": "2026-06-10T09:00:00+00:00",
+    "valid_until": "2027-06-01T00:00:00+00:00",
+    "confidence": 0.9,
+    "claim_status": "VERIFIED"
+  },
+  "new_source": {
+    "source_id": "community:post-009",
+    "uri": "https://forum.synthetic.invalid/t/auc-myth/9",
+    "publisher": "SyntheticCommunityForum",
+    "published_at": "2026-10-20T00:00:00+00:00",
+    "observed_at": "2026-11-08T09:00:00+00:00",
+    "valid_until": "2027-01-01T00:00:00+00:00",
+    "confidence": 0.35,
+    "claim_status": "CONFLICT"
+  },
+  "expected_change_kind": "RECHECK",
+  "synthetic": true,
+  "license": "CC0-1.0"
+}

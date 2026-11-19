@@ -1,0 +1,41 @@
+{
+  "schema_version": "m1.offline.v0",
+  "question_id": "q-eng-003",
+  "track": "engineering_metrics",
+  "topic": "A/B 实验样本量与 MDE",
+  "question": "做一次 A/B 实验时，你如何确定样本量和最小可检测效应（MDE）？如果实验结论与预期相反，你的实际项目里是怎么处理的？",
+  "rubric_points": {
+    "factual_correctness": [
+      "样本量|sample size|功效|power",
+      "MDE|最小可检测效应|最小显著",
+      "显著性|p 值|置信区间",
+      "护栏指标|guardrail|长期指标| novelty"
+    ],
+    "explanation_clarity": [
+      "先定义|是什么|概念",
+      "原因|为什么|因为",
+      "方法|怎么做|步骤",
+      "结论|总结|因此"
+    ],
+    "engineering_feasibility": [
+      "流量|样本量|规模",
+      "实验时长|成本|资源",
+      "分流|一致性|hash"
+    ],
+    "evidence_sufficiency": [
+      "指标|口径|实验",
+      "实验|A/B|ab",
+      "来源|监控|参考"
+    ]
+  },
+  "follow_up_ladder": [
+    "先不用展开：用一句话定义「A/B 实验样本量与 MDE」的核心概念，并说明它解决什么问题。",
+    "假设要在真实推荐系统里应用「A/B 实验样本量与 MDE」：你会先验证哪个关键假设？给出可证伪的预测。",
+    "复杂度分析：数据规模、训练/推理延迟、存储与成本分别卡在哪里？请给出量级估算。",
+    "设计实验验证「A/B 实验样本量与 MDE」的方案：离线指标、线上 A/B、样本量与护栏指标分别怎么定？",
+    "上线后若核心收益指标下降，你会按什么顺序定位到召回/排序/特征/实验层？列出前三个检查点。"
+  ],
+  "requires_project_facts": true,
+  "synthetic": true,
+  "license": "CC0-1.0"
+}

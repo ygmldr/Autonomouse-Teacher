@@ -1,0 +1,14 @@
+{
+  "schema_version": "m1.offline.v0",
+  "answer_id": "a-vague-002",
+  "question_id": "q-rec-001",
+  "synthetic": true,
+  "license": "CC0-1.0",
+  "answer": {
+    "text": "位置偏差就是位置带来的影响，可能是比较复杂的问题。一些方法可以处理，比如加一些权重，或者用一些模型修正。大概注意一下曝光分布就行，很多时候效果应该可以。",
+    "evidence_refs": [],
+    "project_facts": [],
+    "quantitative_claims": [],
+    "misconceptions": []
+  }
+}

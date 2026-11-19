@@ -1,0 +1,28 @@
+{
+  "schema_version": "m1.offline.v0",
+  "update_id": "k-recheck-expired-001",
+  "topic": "CTR 模型校准",
+  "old_source": {
+    "source_id": "doc:cal-001",
+    "uri": "https://docs.synthetic.invalid/rec/calibration",
+    "publisher": "SyntheticOfficialDocs",
+    "published_at": "2025-09-01T00:00:00+00:00",
+    "observed_at": "2025-09-10T09:00:00+00:00",
+    "valid_until": "2026-03-01T00:00:00+00:00",
+    "confidence": 0.9,
+    "claim_status": "VERIFIED"
+  },
+  "new_source": {
+    "source_id": "doc:cal-001",
+    "uri": "https://docs.synthetic.invalid/rec/calibration",
+    "publisher": "SyntheticOfficialDocs",
+    "published_at": "2026-10-01T00:00:00+00:00",
+    "observed_at": "2026-11-10T09:00:00+00:00",
+    "valid_until": "2027-04-01T00:00:00+00:00",
+    "confidence": 0.9,
+    "claim_status": "VERIFIED"
+  },
+  "expected_change_kind": "RECHECK",
+  "synthetic": true,
+  "license": "CC0-1.0"
+}

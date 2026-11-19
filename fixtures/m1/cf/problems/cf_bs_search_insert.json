@@ -1,0 +1,79 @@
+{
+  "schema_version": "m1.offline.v0",
+  "problem_id": "cf_bs_search_insert",
+  "title": "二分查找：插入位置",
+  "statement": "给定严格升序整数列表 nums 与 target，若存在则返回其下标；否则返回它应当插入的位置，使列表保持升序。空列表返回 0。",
+  "skills": [
+    "binary-search"
+  ],
+  "difficulty": 2,
+  "function_name": "search_insert",
+  "public_tests": [
+    {
+      "args": [
+        [
+          1,
+          3,
+          5,
+          6
+        ],
+        5
+      ],
+      "expected": 2,
+      "kind": "normal"
+    },
+    {
+      "args": [
+        [
+          1,
+          3,
+          5,
+          6
+        ],
+        2
+      ],
+      "expected": 1,
+      "kind": "normal"
+    },
+    {
+      "args": [
+        [
+          1,
+          3,
+          5,
+          6
+        ],
+        7
+      ],
+      "expected": 4,
+      "kind": "edge"
+    },
+    {
+      "args": [
+        [
+          1,
+          3,
+          5,
+          6
+        ],
+        0
+      ],
+      "expected": 0,
+      "kind": "edge"
+    }
+  ],
+  "hidden_ref": "hidden/cf_bs_search_insert.json",
+  "hint_ladder": {
+    "LIGHT_HINT": "插入位置就是「第一个 >= target 的下标」。可以用二分去找这个边界。",
+    "INVARIANT_HINT": "维护半开区间 [low, high)：区间内的元素都可能 >= target；当 nums[mid] < target 时答案一定在 mid 右侧，否则答案在 mid 或左侧。",
+    "STRUCTURE_HINT": "步骤：low=0, high=len(nums)；while low < high：mid=(low+high)//2；若 nums[mid] < target：low=mid+1；否则 high=mid。返回 low。",
+    "FULL_SOLUTION": "def search_insert(nums, target):\n    low = 0\n    high = len(nums)\n    while low < high:\n        mid = (low + high) // 2\n        if nums[mid] < target:\n            low = mid + 1\n        else:\n            high = mid\n    return low"
+  },
+  "reference_solution": "def search_insert(nums, target):\n    low = 0\n    high = len(nums)\n    while low < high:\n        mid = (low + high) // 2\n        if nums[mid] < target:\n            low = mid + 1\n        else:\n            high = mid\n    return low",
+  "synthetic": true,
+  "license": "CC0-1.0",
+  "complexity_expectation": {
+    "time": "O(log n)",
+    "space": "O(1)"
+  }
+}

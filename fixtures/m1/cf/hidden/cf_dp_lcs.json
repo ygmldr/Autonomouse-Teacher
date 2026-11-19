@@ -1,0 +1,65 @@
+{
+  "schema_version": "m1.offline.v0",
+  "problem_id": "cf_dp_lcs",
+  "timeout_s": 2.0,
+  "tests": [
+    {
+      "args": [
+        "",
+        ""
+      ],
+      "expected": 0,
+      "kind": "edge"
+    },
+    {
+      "args": [
+        "abc",
+        ""
+      ],
+      "expected": 0,
+      "kind": "edge"
+    },
+    {
+      "args": [
+        "a",
+        "b"
+      ],
+      "expected": 0,
+      "kind": "edge"
+    },
+    {
+      "args": [
+        "ABCBDAB",
+        "BDCABA"
+      ],
+      "expected": 4,
+      "kind": "normal"
+    },
+    {
+      "args": [
+        "aaaa",
+        "aa"
+      ],
+      "expected": 2,
+      "kind": "normal"
+    },
+    {
+      "args": [
+        "abcde",
+        "ace"
+      ],
+      "expected": 3,
+      "kind": "normal"
+    },
+    {
+      "args": [
+        "abcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcd",
+        "bcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcda"
+      ],
+      "expected": 599,
+      "kind": "large"
+    }
+  ],
+  "synthetic": true,
+  "license": "CC0-1.0"
+}

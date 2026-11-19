@@ -1,0 +1,52 @@
+{
+  "schema_version": "m1.offline.v0",
+  "problem_id": "cf_bs_first_index",
+  "title": "二分查找：首个出现位置",
+  "statement": "给定非递减整数列表 nums 与 target，返回 target 第一次出现的下标；不存在返回 -1。列表可能含重复值，且可能为空。",
+  "skills": [
+    "binary-search"
+  ],
+  "difficulty": 2,
+  "function_name": "first_index",
+  "public_tests": [
+    {
+      "args": [
+        [
+          1,
+          2,
+          2,
+          3
+        ],
+        2
+      ],
+      "expected": 1,
+      "kind": "normal"
+    },
+    {
+      "args": [
+        [
+          1,
+          2,
+          3
+        ],
+        4
+      ],
+      "expected": -1,
+      "kind": "edge"
+    }
+  ],
+  "hidden_ref": "hidden/cf_bs_first_index.json",
+  "hint_ladder": {
+    "LIGHT_HINT": "普通二分找到一个 target 就返回，但目标要求「第一个」。找到之后还能继续往哪半边找？",
+    "INVARIANT_HINT": "记录 answer = -1：当 nums[mid] == target 时，mid 是一个候选，但更小的下标可能还在左半边，所以 answer=mid 后令 high=mid-1。",
+    "STRUCTURE_HINT": "步骤：low=0, high=len-1, answer=-1；while low<=high：mid=(low+high)//2；若 nums[mid]==target：answer=mid, high=mid-1；若 nums[mid]<target：low=mid+1；否则 high=mid-1。返回 answer。",
+    "FULL_SOLUTION": "def first_index(nums, target):\n    low = 0\n    high = len(nums) - 1\n    answer = -1\n    while low <= high:\n        mid = (low + high) // 2\n        if nums[mid] == target:\n            answer = mid\n            high = mid - 1\n        elif nums[mid] < target:\n            low = mid + 1\n        else:\n            high = mid - 1\n    return answer"
+  },
+  "reference_solution": "def first_index(nums, target):\n    low = 0\n    high = len(nums) - 1\n    answer = -1\n    while low <= high:\n        mid = (low + high) // 2\n        if nums[mid] == target:\n            answer = mid\n            high = mid - 1\n        elif nums[mid] < target:\n            low = mid + 1\n        else:\n            high = mid - 1\n    return answer",
+  "synthetic": true,
+  "license": "CC0-1.0",
+  "complexity_expectation": {
+    "time": "O(log n)",
+    "space": "O(1)"
+  }
+}

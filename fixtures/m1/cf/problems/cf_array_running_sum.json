@@ -1,0 +1,54 @@
+{
+  "schema_version": "m1.offline.v0",
+  "problem_id": "cf_array_running_sum",
+  "title": "前缀和数组",
+  "statement": "给定整数列表 nums，返回等长列表 result，其中 result[i] = nums[0] + ... + nums[i]。空列表返回空列表。",
+  "skills": [
+    "array-basics",
+    "prefix-sums"
+  ],
+  "difficulty": 1,
+  "function_name": "running_sum",
+  "public_tests": [
+    {
+      "args": [
+        [
+          1,
+          2,
+          3
+        ]
+      ],
+      "expected": [
+        1,
+        3,
+        6
+      ],
+      "kind": "normal"
+    },
+    {
+      "args": [
+        [
+          5
+        ]
+      ],
+      "expected": [
+        5
+      ],
+      "kind": "edge"
+    }
+  ],
+  "hidden_ref": "hidden/cf_array_running_sum.json",
+  "hint_ladder": {
+    "LIGHT_HINT": "result 的每个位置只比前一个位置多一个 nums[i]，这个「前一个位置」在边界处是什么？",
+    "INVARIANT_HINT": "维护 total = 前 i 个元素之和；写出 result[i] = total + nums[i] 后立刻更新 total。",
+    "STRUCTURE_HINT": "步骤：total=0；对每个 x：total += x；把 total 追加到 result。边界：nums 为空时循环不执行，直接返回 []。",
+    "FULL_SOLUTION": "def running_sum(nums):\n    result = []\n    total = 0\n    for value in nums:\n        total += value\n        result.append(total)\n    return result"
+  },
+  "reference_solution": "def running_sum(nums):\n    result = []\n    total = 0\n    for value in nums:\n        total += value\n        result.append(total)\n    return result",
+  "synthetic": true,
+  "license": "CC0-1.0",
+  "complexity_expectation": {
+    "time": "O(n)",
+    "space": "O(n)"
+  }
+}

@@ -1,0 +1,71 @@
+{
+  "schema_version": "m1.offline.v0",
+  "learner_id": "learner_advanced",
+  "display_name": "Synthetic Advanced",
+  "baseline_level": "ADVANCED",
+  "synthetic": true,
+  "license": "CC0-1.0",
+  "profile": {
+    "learner_id": "learner_advanced",
+    "display_name": "Synthetic Advanced",
+    "baseline_level": "ADVANCED"
+  },
+  "mastery": {
+    "array-basics": 0.95,
+    "prefix-sums": 0.9,
+    "two-pointers": 0.85,
+    "sorting": 0.9,
+    "binary-search": 0.8,
+    "graph-basics": 0.55,
+    "bfs": 0.5,
+    "dp-basics": 0.6
+  },
+  "error_counts": {
+    "two-pointers": 1,
+    "binary-search": 1,
+    "dp-basics": 1
+  },
+  "focus_skills": [
+    "graph-basics",
+    "bfs",
+    "dp-basics"
+  ],
+  "error_traces": [
+    {
+      "trace_id": "trace-advanced-001",
+      "task_id": "cf_tp_pair_sum_sorted",
+      "kind": "CODE_SUBMISSION",
+      "expected_error_class": "INEFFICIENT_COMPLEXITY",
+      "observed_score": 0.0,
+      "payload": {
+        "code": "def pair_sum_sorted(nums, target):\n    for i in range(len(nums)):\n        for j in range(i + 1, len(nums)):\n            if nums[i] + nums[j] == target:\n                return [i, j]\n    return [-1, -1]\n",
+        "note": "O(n^2) 暴力双循环，小数据正确，n=20000 的隐藏用例超时"
+      },
+      "created_at": "2026-11-03T11:00:00Z"
+    },
+    {
+      "trace_id": "trace-advanced-002",
+      "task_id": "cf_bs_first_index",
+      "kind": "CODE_SUBMISSION",
+      "expected_error_class": "WRONG_ANSWER",
+      "observed_score": 0.0,
+      "payload": {
+        "code": "def first_index(nums, target):\n    low, high = 0, len(nums) - 1\n    while low <= high:\n        mid = (low + high) // 2\n        if nums[mid] == target:\n            return mid\n        if nums[mid] < target:\n            low = mid + 1\n        else:\n            high = mid - 1\n    return -1\n",
+        "note": "二分找到一个匹配就返回，遇到重复元素时可能不是第一个"
+      },
+      "created_at": "2026-11-03T11:10:00Z"
+    },
+    {
+      "trace_id": "trace-advanced-003",
+      "task_id": "cf_graph_bfs_dist",
+      "kind": "CODE_SUBMISSION",
+      "expected_error_class": "WRONG_ANSWER",
+      "observed_score": 0.0,
+      "payload": {
+        "code": "def shortest_path(n, edges, start, goal):\n    graph = [[] for _ in range(n)]\n    for u, v in edges:\n        graph[u].append(v)\n        graph[v].append(u)\n    distance = [-1] * n\n    distance[start] = 0\n    stack = [start]\n    while stack:\n        node = stack.pop()\n        for neighbour in graph[node]:\n            if distance[neighbour] == -1:\n                distance[neighbour] = distance[node] + 1\n                stack.append(neighbour)\n    return distance[goal]\n",
+        "note": "用 DFS 栈代替 BFS 队列，求出的距离不是最少边数"
+      },
+      "created_at": "2026-11-03T11:20:00Z"
+    }
+  ]
+}

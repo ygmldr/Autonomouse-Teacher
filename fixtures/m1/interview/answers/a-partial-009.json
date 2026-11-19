@@ -1,0 +1,16 @@
+{
+  "schema_version": "m1.offline.v0",
+  "answer_id": "a-partial-009",
+  "question_id": "q-sys-004",
+  "synthetic": true,
+  "license": "CC0-1.0",
+  "answer": {
+    "text": "多路召回可以按配额融合：协同过滤、向量召回、热门、探索各分一部分流量，然后加权打分合并、去重。评估时看每一路的贡献和整体指标。\n\n具体权重可以用人工调参，跑一段时间看效果再调整。探索那一路不能太多，否则影响体验，也不能没有。",
+    "evidence_refs": [
+      "synthetic:q-sys-004/ab-config"
+    ],
+    "project_facts": [],
+    "quantitative_claims": [],
+    "misconceptions": []
+  }
+}

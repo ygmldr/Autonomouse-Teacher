@@ -1,0 +1,41 @@
+{
+  "schema_version": "m1.offline.v0",
+  "problem_id": "cf_dp_climb_stairs",
+  "title": "爬楼梯",
+  "statement": "楼梯有 n 级，每次可以跨 1 级或 2 级。给定 n（n >= 1），返回走到第 n 级的不同走法数量。",
+  "skills": [
+    "dp-basics"
+  ],
+  "difficulty": 2,
+  "function_name": "climb_stairs",
+  "public_tests": [
+    {
+      "args": [
+        2
+      ],
+      "expected": 2,
+      "kind": "normal"
+    },
+    {
+      "args": [
+        3
+      ],
+      "expected": 3,
+      "kind": "normal"
+    }
+  ],
+  "hidden_ref": "hidden/cf_dp_climb_stairs.json",
+  "hint_ladder": {
+    "LIGHT_HINT": "走到第 n 级的最后一步要么从 n-1 跨 1 级，要么从 n-2 跨 2 级。那走法数量之间是什么关系？",
+    "INVARIANT_HINT": "设 ways[i] 为走到第 i 级的走法数，则 ways[i] = ways[i-1] + ways[i-2]；只需保留前两项即可 O(1) 空间。",
+    "STRUCTURE_HINT": "步骤：n<=2 时直接返回 n；first=1, second=2；从 3 到 n 迭代：first, second = second, first+second；返回 second。不要用指数级递归，n=45 会超时。",
+    "FULL_SOLUTION": "def climb_stairs(n):\n    if n <= 2:\n        return n\n    first = 1\n    second = 2\n    for _ in range(3, n + 1):\n        first, second = second, first + second\n    return second"
+  },
+  "reference_solution": "def climb_stairs(n):\n    if n <= 2:\n        return n\n    first = 1\n    second = 2\n    for _ in range(3, n + 1):\n        first, second = second, first + second\n    return second",
+  "synthetic": true,
+  "license": "CC0-1.0",
+  "complexity_expectation": {
+    "time": "O(n)",
+    "space": "O(1)"
+  }
+}

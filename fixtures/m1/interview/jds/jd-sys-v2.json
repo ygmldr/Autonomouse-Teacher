@@ -1,0 +1,23 @@
+{
+  "schema_version": "m1.offline.v0",
+  "jd_id": "jd-sys-v2",
+  "role": "推荐系统工程师（合成岗位）",
+  "company_synthetic": true,
+  "requirements": [
+    "熟悉推荐系统召回/排序架构",
+    "具备分布式系统设计能力",
+    "有实时特征管道经验",
+    "了解特征存储"
+  ],
+  "skills": [
+    "system_design",
+    "realtime_features",
+    "feature_store",
+    "distributed_systems"
+  ],
+  "valid_from": "2026-10-15",
+  "valid_until": "2027-04-14",
+  "supersedes": "jd-sys-v1",
+  "synthetic": true,
+  "license": "CC0-1.0"
+}

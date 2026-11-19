@@ -1,0 +1,28 @@
+{
+  "schema_version": "m1.offline.v0",
+  "update_id": "k-update-001",
+  "topic": "AUC 评估口径",
+  "old_source": {
+    "source_id": "doc:auc-001",
+    "uri": "https://docs.synthetic.invalid/rec/auc-metric",
+    "publisher": "SyntheticOfficialDocs",
+    "published_at": "2026-04-01T00:00:00+00:00",
+    "observed_at": "2026-05-02T09:00:00+00:00",
+    "valid_until": "2027-04-01T00:00:00+00:00",
+    "confidence": 0.8,
+    "claim_status": "VERIFIED"
+  },
+  "new_source": {
+    "source_id": "doc:auc-001",
+    "uri": "https://docs.synthetic.invalid/rec/auc-metric",
+    "publisher": "SyntheticOfficialDocs",
+    "published_at": "2026-09-15T00:00:00+00:00",
+    "observed_at": "2026-11-02T09:00:00+00:00",
+    "valid_until": "2027-03-15T00:00:00+00:00",
+    "confidence": 0.94,
+    "claim_status": "VERIFIED"
+  },
+  "expected_change_kind": "UPDATE",
+  "synthetic": true,
+  "license": "CC0-1.0"
+}

@@ -1,0 +1,23 @@
+{
+  "schema_version": "m1.offline.v0",
+  "jd_id": "jd-rec-v2",
+  "role": "推荐算法工程师（合成岗位）",
+  "company_synthetic": true,
+  "requirements": [
+    "熟悉 CTR 预估与排序模型",
+    "掌握向量召回与 ANN 检索",
+    "具备 LLM 排序探索经验者优先",
+    "熟练使用 Python 与 SQL"
+  ],
+  "skills": [
+    "ctr_prediction",
+    "vector_recall",
+    "ann_retrieval",
+    "python"
+  ],
+  "valid_from": "2026-10-01",
+  "valid_until": "2027-03-31",
+  "supersedes": "jd-rec-v1",
+  "synthetic": true,
+  "license": "CC0-1.0"
+}

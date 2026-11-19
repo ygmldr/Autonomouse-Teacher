@@ -1,0 +1,26 @@
+{
+  "schema_version": "m1.offline.v0",
+  "answer_id": "a-strong-008",
+  "question_id": "q-sys-002",
+  "synthetic": true,
+  "license": "CC0-1.0",
+  "answer": {
+    "text": "实时特征管道分四段设计。第一段数据源：客户端埋点走 Kafka，服务端日志走日志采集，统一打上事件时间戳。第二段计算：Flink 做窗口聚合，保留事件时间与水位线，实时特征写入 KV 存储并同时落一份离线表用于回放。第三段在线服务：点查走本地缓存加 Redis，把 P99 控制在 10ms 内，超时降级为离线快照特征。第四段回放与一致性：按 point-in-time 做离线回放，定时对比在线/离线特征分布并告警。\n\n结论：源头统一时间语义，计算侧做窗口与回放，服务侧做缓存与降级，监控侧做在线离线偏差巡检。",
+    "evidence_refs": [
+      "synthetic:q-sys-002/architecture-review",
+      "synthetic:q-sys-002/feature-monitor"
+    ],
+    "project_facts": [
+      "合成项目 B：按上述四段式把特征 P99 从 35ms 控制到 12ms（合成压测数据，仅作流程演示）"
+    ],
+    "quantitative_claims": [
+      {
+        "statement": "特征点查 P99 控制在 10ms 以内",
+        "evidence_refs": [
+          "synthetic:q-sys-002/architecture-review"
+        ]
+      }
+    ],
+    "misconceptions": []
+  }
+}

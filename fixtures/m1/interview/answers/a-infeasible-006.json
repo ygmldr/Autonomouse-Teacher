@@ -1,0 +1,14 @@
+{
+  "schema_version": "m1.offline.v0",
+  "answer_id": "a-infeasible-006",
+  "question_id": "q-sys-001",
+  "synthetic": true,
+  "license": "CC0-1.0",
+  "answer": {
+    "text": "为了做到最实时，我会对全量用户每秒重训一次排序模型，并把所有特征全部实时计算，不做缓存也不需要降级。召回侧直接对全量物品暴力计算内积，不做 ANN 索引，因为暴力计算最准确。线上延迟如果过高就加机器，资源不是问题。",
+    "evidence_refs": [],
+    "project_facts": [],
+    "quantitative_claims": [],
+    "misconceptions": []
+  }
+}

@@ -1,0 +1,42 @@
+{
+  "schema_version": "m1.offline.v0",
+  "question_id": "q-rec-004",
+  "track": "recommendation_ctr",
+  "topic": "特征穿越排查",
+  "question": "在你实际参与的项目里排查一次特征穿越（feature leakage）：说明你如何发现、如何验证、如何修复，以及修复后离线指标有什么变化。",
+  "rubric_points": {
+    "factual_correctness": [
+      "特征穿越|feature leakage|数据泄漏|标签泄漏",
+      "时间窗口|时间对齐|as-of|point-in-time",
+      "离线指标异常|离线AUC虚高|离线虚高",
+      "修复|重算|回溯|特征回填"
+    ],
+    "explanation_clarity": [
+      "先定义|是什么|概念",
+      "原因|为什么|因为",
+      "方法|怎么做|步骤",
+      "结论|总结|因此"
+    ],
+    "engineering_feasibility": [
+      "延迟|latency|耗时",
+      "QPS|吞吐|并发|数据量|规模",
+      "成本|资源|容量",
+      "降级|回滚|监控"
+    ],
+    "evidence_sufficiency": [
+      "来源|日志|监控|实验",
+      "实验|A/B|ab",
+      "指标|口径"
+    ]
+  },
+  "follow_up_ladder": [
+    "先不用展开：用一句话定义「特征穿越排查」的核心概念，并说明它解决什么问题。",
+    "假设要在真实推荐系统里应用「特征穿越排查」：你会先验证哪个关键假设？给出可证伪的预测。",
+    "复杂度分析：数据规模、训练/推理延迟、存储与成本分别卡在哪里？请给出量级估算。",
+    "设计实验验证「特征穿越排查」的方案：离线指标、线上 A/B、样本量与护栏指标分别怎么定？",
+    "上线后若核心收益指标下降，你会按什么顺序定位到召回/排序/特征/实验层？列出前三个检查点。"
+  ],
+  "requires_project_facts": true,
+  "synthetic": true,
+  "license": "CC0-1.0"
+}

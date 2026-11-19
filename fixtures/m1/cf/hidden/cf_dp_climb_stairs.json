@@ -1,0 +1,58 @@
+{
+  "schema_version": "m1.offline.v0",
+  "problem_id": "cf_dp_climb_stairs",
+  "timeout_s": 2.0,
+  "tests": [
+    {
+      "args": [
+        1
+      ],
+      "expected": 1,
+      "kind": "edge"
+    },
+    {
+      "args": [
+        2
+      ],
+      "expected": 2,
+      "kind": "edge"
+    },
+    {
+      "args": [
+        3
+      ],
+      "expected": 3,
+      "kind": "normal"
+    },
+    {
+      "args": [
+        5
+      ],
+      "expected": 8,
+      "kind": "normal"
+    },
+    {
+      "args": [
+        10
+      ],
+      "expected": 89,
+      "kind": "normal"
+    },
+    {
+      "args": [
+        30
+      ],
+      "expected": 1346269,
+      "kind": "normal"
+    },
+    {
+      "args": [
+        45
+      ],
+      "expected": 1836311903,
+      "kind": "large"
+    }
+  ],
+  "synthetic": true,
+  "license": "CC0-1.0"
+}

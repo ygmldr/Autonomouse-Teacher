@@ -1,0 +1,28 @@
+{
+  "schema_version": "m1.offline.v0",
+  "update_id": "k-recheck-older-001",
+  "topic": "多目标建模",
+  "old_source": {
+    "source_id": "doc:mtl-001",
+    "uri": "https://docs.synthetic.invalid/rec/multi-task",
+    "publisher": "SyntheticOfficialDocs",
+    "published_at": "2026-08-01T00:00:00+00:00",
+    "observed_at": "2026-08-10T09:00:00+00:00",
+    "valid_until": "2027-08-01T00:00:00+00:00",
+    "confidence": 0.88,
+    "claim_status": "VERIFIED"
+  },
+  "new_source": {
+    "source_id": "mirror:mtl-001",
+    "uri": "https://mirror.synthetic.invalid/rec/multi-task",
+    "publisher": "SyntheticMirrorSite",
+    "published_at": "2026-03-01T00:00:00+00:00",
+    "observed_at": "2026-11-06T09:00:00+00:00",
+    "valid_until": "2027-01-01T00:00:00+00:00",
+    "confidence": 0.6,
+    "claim_status": "VERIFIED"
+  },
+  "expected_change_kind": "RECHECK",
+  "synthetic": true,
+  "license": "CC0-1.0"
+}

@@ -1,0 +1,28 @@
+{
+  "schema_version": "m1.offline.v0",
+  "update_id": "k-keep-002",
+  "topic": "双塔召回与精排",
+  "old_source": {
+    "source_id": "doc:tower-001",
+    "uri": "https://docs.synthetic.invalid/rec/two-tower",
+    "publisher": "SyntheticOfficialDocs",
+    "published_at": "2026-05-20T00:00:00+00:00",
+    "observed_at": "2026-06-01T09:00:00+00:00",
+    "valid_until": "2027-05-20T00:00:00+00:00",
+    "confidence": 0.9,
+    "claim_status": "VERIFIED"
+  },
+  "new_source": {
+    "source_id": "mirror:tower-001",
+    "uri": "https://docs.synthetic.invalid/rec/two-tower",
+    "publisher": "SyntheticOfficialDocs",
+    "published_at": "2026-05-20T00:00:00+00:00",
+    "observed_at": "2026-11-03T09:00:00+00:00",
+    "valid_until": "2027-05-20T00:00:00+00:00",
+    "confidence": 0.9,
+    "claim_status": "VERIFIED"
+  },
+  "expected_change_kind": "KEEP",
+  "synthetic": true,
+  "license": "CC0-1.0"
+}

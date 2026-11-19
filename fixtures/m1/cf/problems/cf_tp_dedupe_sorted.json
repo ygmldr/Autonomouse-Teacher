@@ -1,0 +1,57 @@
+{
+  "schema_version": "m1.offline.v0",
+  "problem_id": "cf_tp_dedupe_sorted",
+  "title": "有序数组去重",
+  "statement": "给定非递减整数列表 nums，返回去重后的升序列表（每个值只保留一个）。空列表返回空列表。请在原列表上使用读写双指针完成原地压缩，不要依赖 set 之外的排序。",
+  "skills": [
+    "two-pointers",
+    "array-basics"
+  ],
+  "difficulty": 2,
+  "function_name": "dedupe_sorted",
+  "public_tests": [
+    {
+      "args": [
+        [
+          1,
+          1,
+          2
+        ]
+      ],
+      "expected": [
+        1,
+        2
+      ],
+      "kind": "normal"
+    },
+    {
+      "args": [
+        [
+          1,
+          2,
+          3
+        ]
+      ],
+      "expected": [
+        1,
+        2,
+        3
+      ],
+      "kind": "normal"
+    }
+  ],
+  "hidden_ref": "hidden/cf_tp_dedupe_sorted.json",
+  "hint_ladder": {
+    "LIGHT_HINT": "有序数组里重复值一定相邻。如果把第一个元素视为已确认，后面每个元素需要和谁比较？",
+    "INVARIANT_HINT": "维护 write 指针：nums[0:write] 始终是已去重的前缀；用 read 扫描，若 nums[read] != nums[write-1] 就把 read 处的值写到 write 处并 write += 1。",
+    "STRUCTURE_HINT": "步骤：空列表直接返回 []；write=1；for read in range(1, len(nums))：若 nums[read] != nums[write-1]，则 nums[write]=nums[read] 且 write+=1；最后返回 nums[:write]。",
+    "FULL_SOLUTION": "def dedupe_sorted(nums):\n    if not nums:\n        return []\n    write = 1\n    for read in range(1, len(nums)):\n        if nums[read] != nums[write - 1]:\n            nums[write] = nums[read]\n            write += 1\n    return nums[:write]"
+  },
+  "reference_solution": "def dedupe_sorted(nums):\n    if not nums:\n        return []\n    write = 1\n    for read in range(1, len(nums)):\n        if nums[read] != nums[write - 1]:\n            nums[write] = nums[read]\n            write += 1\n    return nums[:write]",
+  "synthetic": true,
+  "license": "CC0-1.0",
+  "complexity_expectation": {
+    "time": "O(n)",
+    "space": "O(1)"
+  }
+}

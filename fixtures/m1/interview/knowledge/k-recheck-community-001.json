@@ -1,0 +1,28 @@
+{
+  "schema_version": "m1.offline.v0",
+  "update_id": "k-recheck-community-001",
+  "topic": "冷启动召回",
+  "old_source": {
+    "source_id": "doc:cold-001",
+    "uri": "https://docs.synthetic.invalid/rec/cold-start",
+    "publisher": "SyntheticOfficialDocs",
+    "published_at": "2026-07-01T00:00:00+00:00",
+    "observed_at": "2026-07-05T09:00:00+00:00",
+    "valid_until": "2027-07-01T00:00:00+00:00",
+    "confidence": 0.9,
+    "claim_status": "VERIFIED"
+  },
+  "new_source": {
+    "source_id": "community:cold-007",
+    "uri": "https://forum.synthetic.invalid/t/cold-start-trick/7",
+    "publisher": "SyntheticCommunityForum",
+    "published_at": "2026-10-25T00:00:00+00:00",
+    "observed_at": "2026-11-09T09:00:00+00:00",
+    "valid_until": "2026-12-31T00:00:00+00:00",
+    "confidence": 0.35,
+    "claim_status": "VERIFIED"
+  },
+  "expected_change_kind": "RECHECK",
+  "synthetic": true,
+  "license": "CC0-1.0"
+}

@@ -1,0 +1,66 @@
+{
+  "schema_version": "m1.offline.v0",
+  "problem_id": "cf_graph_bfs_dist",
+  "title": "无权图最短距离（BFS）",
+  "statement": "给定 n 个节点（编号 0..n-1）、无向边列表 edges、起点 start 与终点 goal，返回从 start 到 goal 的最少边数；不可达返回 -1。start == goal 时距离为 0。",
+  "skills": [
+    "graph-basics",
+    "bfs"
+  ],
+  "difficulty": 3,
+  "function_name": "shortest_path",
+  "public_tests": [
+    {
+      "args": [
+        4,
+        [
+          [
+            0,
+            1
+          ],
+          [
+            1,
+            2
+          ],
+          [
+            2,
+            3
+          ]
+        ],
+        0,
+        3
+      ],
+      "expected": 3,
+      "kind": "normal"
+    },
+    {
+      "args": [
+        3,
+        [
+          [
+            0,
+            1
+          ]
+        ],
+        0,
+        2
+      ],
+      "expected": -1,
+      "kind": "normal"
+    }
+  ],
+  "hidden_ref": "hidden/cf_graph_bfs_dist.json",
+  "hint_ladder": {
+    "LIGHT_HINT": "无权图求最短路径，按层扩展：先访问距离 1 的所有点，再访问距离 2 的。用什么数据结构保证「按层」？",
+    "INVARIANT_HINT": "BFS 队列里节点的 distance 单调不减；每个节点第一次被访问时的距离就是最短距离，因此只需入队一次。",
+    "STRUCTURE_HINT": "步骤：建邻接表；distance 数组初始 -1，start 置 0；deque([start])；while 队列非空：node=popleft()，若 node==goal 返回 distance[node]；对每个邻居若未访问则 distance+1 入队。循环结束返回 -1。",
+    "FULL_SOLUTION": "from collections import deque\n\ndef shortest_path(n, edges, start, goal):\n    graph = [[] for _ in range(n)]\n    for u, v in edges:\n        graph[u].append(v)\n        graph[v].append(u)\n    distance = [-1] * n\n    distance[start] = 0\n    queue = deque([start])\n    while queue:\n        node = queue.popleft()\n        if node == goal:\n            return distance[node]\n        for neighbour in graph[node]:\n            if distance[neighbour] == -1:\n                distance[neighbour] = distance[node] + 1\n                queue.append(neighbour)\n    return -1"
+  },
+  "reference_solution": "from collections import deque\n\n\ndef shortest_path(n, edges, start, goal):\n    graph = [[] for _ in range(n)]\n    for u, v in edges:\n        graph[u].append(v)\n        graph[v].append(u)\n    distance = [-1] * n\n    distance[start] = 0\n    queue = deque([start])\n    while queue:\n        node = queue.popleft()\n        if node == goal:\n            return distance[node]\n        for neighbour in graph[node]:\n            if distance[neighbour] == -1:\n                distance[neighbour] = distance[node] + 1\n                queue.append(neighbour)\n    return -1",
+  "synthetic": true,
+  "license": "CC0-1.0",
+  "complexity_expectation": {
+    "time": "O(n + m)",
+    "space": "O(n + m)"
+  }
+}

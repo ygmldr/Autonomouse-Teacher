@@ -1,0 +1,46 @@
+{
+  "schema_version": "m1.offline.v0",
+  "problem_id": "cf_array_sum_even",
+  "title": "偶数求和",
+  "statement": "给定一个整数列表 nums，返回其中所有偶数的和。空列表或没有偶数时返回 0。负数按普通取模规则判断（-2 是偶数）。",
+  "skills": [
+    "array-basics"
+  ],
+  "difficulty": 1,
+  "function_name": "sum_even",
+  "public_tests": [
+    {
+      "args": [
+        [
+          1,
+          2,
+          3,
+          4
+        ]
+      ],
+      "expected": 6,
+      "kind": "normal"
+    },
+    {
+      "args": [
+        []
+      ],
+      "expected": 0,
+      "kind": "edge"
+    }
+  ],
+  "hidden_ref": "hidden/cf_array_sum_even.json",
+  "hint_ladder": {
+    "LIGHT_HINT": "先用 nums = [1, 2, 3, 4] 手算一遍期望结果，再想：循环里对每个元素要做哪一次判断？",
+    "INVARIANT_HINT": "维护累计和 total：进入循环第 k 次时，total 恰好等于前 k 个元素中所有偶数之和。",
+    "STRUCTURE_HINT": "步骤：1) total=0；2) 遍历 nums；3) 若元素 % 2 == 0 则加到 total；4) 返回 total。注意空列表自然返回 0。",
+    "FULL_SOLUTION": "def sum_even(nums):\n    total = 0\n    for value in nums:\n        if value % 2 == 0:\n            total += value\n    return total"
+  },
+  "reference_solution": "def sum_even(nums):\n    total = 0\n    for value in nums:\n        if value % 2 == 0:\n            total += value\n    return total",
+  "synthetic": true,
+  "license": "CC0-1.0",
+  "complexity_expectation": {
+    "time": "O(n)",
+    "space": "O(1)"
+  }
+}

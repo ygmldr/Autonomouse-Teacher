@@ -1,0 +1,20 @@
+{
+  "schema_version": "m1.offline.v0",
+  "jd_id": "jd-rec-v1",
+  "role": "推荐算法工程师（合成岗位）",
+  "company_synthetic": true,
+  "requirements": [
+    "熟悉 CTR 预估与排序模型",
+    "掌握 AUC/GAUC 等离线评估",
+    "熟练使用 Python 与 SQL"
+  ],
+  "skills": [
+    "ctr_prediction",
+    "feature_engineering",
+    "python"
+  ],
+  "valid_from": "2026-06-01",
+  "valid_until": "2026-09-30",
+  "synthetic": true,
+  "license": "CC0-1.0"
+}

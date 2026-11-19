@@ -1,0 +1,28 @@
+{
+  "schema_version": "m1.offline.v0",
+  "update_id": "k-keep-001",
+  "topic": "位置偏差与无偏评估",
+  "old_source": {
+    "source_id": "doc:pb-001",
+    "uri": "https://docs.synthetic.invalid/rec/position-bias",
+    "publisher": "SyntheticOfficialDocs",
+    "published_at": "2026-05-10T00:00:00+00:00",
+    "observed_at": "2026-06-01T09:00:00+00:00",
+    "valid_until": "2027-05-10T00:00:00+00:00",
+    "confidence": 0.92,
+    "claim_status": "VERIFIED"
+  },
+  "new_source": {
+    "source_id": "doc:pb-001",
+    "uri": "https://docs.synthetic.invalid/rec/position-bias",
+    "publisher": "SyntheticOfficialDocs",
+    "published_at": "2026-05-10T00:00:00+00:00",
+    "observed_at": "2026-11-01T09:00:00+00:00",
+    "valid_until": "2027-05-10T00:00:00+00:00",
+    "confidence": 0.92,
+    "claim_status": "VERIFIED"
+  },
+  "expected_change_kind": "KEEP",
+  "synthetic": true,
+  "license": "CC0-1.0"
+}

@@ -1,0 +1,41 @@
+{
+  "schema_version": "m1.offline.v0",
+  "question_id": "q-ml-002",
+  "track": "ml_fundamentals",
+  "topic": "AUC 与 LogLoss 的取舍",
+  "question": "AUC 和 LogLoss 分别在评估什么？在点击率预估任务里为什么两个指标都要看？如果 AUC 提升但 LogLoss 变差，可能发生了什么？",
+  "rubric_points": {
+    "factual_correctness": [
+      "AUC|排序|ROC",
+      "LogLoss|交叉熵|概率校准",
+      "校准|calibration|概率",
+      "排序|区分度|阈值"
+    ],
+    "explanation_clarity": [
+      "先定义|是什么|概念",
+      "原因|为什么|因为",
+      "方法|怎么做|步骤",
+      "结论|总结|因此"
+    ],
+    "engineering_feasibility": [
+      "训练成本|资源",
+      "数据量|规模",
+      "延迟|推理"
+    ],
+    "evidence_sufficiency": [
+      "指标|口径|评估",
+      "实验|A/B|离线",
+      "来源|论文|参考"
+    ]
+  },
+  "follow_up_ladder": [
+    "先不用展开：用一句话定义「AUC 与 LogLoss 的取舍」的核心概念，并说明它解决什么问题。",
+    "假设要在真实推荐系统里应用「AUC 与 LogLoss 的取舍」：你会先验证哪个关键假设？给出可证伪的预测。",
+    "复杂度分析：数据规模、训练/推理延迟、存储与成本分别卡在哪里？请给出量级估算。",
+    "设计实验验证「AUC 与 LogLoss 的取舍」的方案：离线指标、线上 A/B、样本量与护栏指标分别怎么定？",
+    "上线后若核心收益指标下降，你会按什么顺序定位到召回/排序/特征/实验层？列出前三个检查点。"
+  ],
+  "requires_project_facts": false,
+  "synthetic": true,
+  "license": "CC0-1.0"
+}

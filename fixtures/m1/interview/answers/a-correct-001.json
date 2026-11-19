@@ -1,0 +1,19 @@
+{
+  "schema_version": "m1.offline.v0",
+  "answer_id": "a-correct-001",
+  "question_id": "q-ml-001",
+  "synthetic": true,
+  "license": "CC0-1.0",
+  "answer": {
+    "text": "判断过拟合，我会同时看三个信号。首先看训练集和验证集的损失/指标 gap：gap 持续扩大且验证集不再改善，通常说明过拟合。其次看学习曲线：训练损失继续下降、验证损失先降后升，是典型形态。第三看不同时间切分的验证集是否一致，排除数据泄漏。\n\n缓解手段有三类。第一，加正则化：L2 抑制权重幅度，L1 做稀疏，dropout 在训练时随机置零以降低共适应。第二，早停：以验证集指标为准选择 checkpoint，而不是训练轮数。第三，增加有效数据或降低模型容量：数据增强、重采样、减少特征交叉。\n\n结论：诊断要训练/验证对照，处理要正则化加早停，同时用时间切分验证避免把泄漏误判成过拟合。",
+    "evidence_refs": [
+      "synthetic:q-ml-001/validation-curve",
+      "synthetic:q-ml-001/ref-regularization"
+    ],
+    "project_facts": [
+      "合成项目 A：用时间切分验证集把离线/线上 gap 从 0.06 收敛到 0.02（合成数据，仅作流程演示）"
+    ],
+    "quantitative_claims": [],
+    "misconceptions": []
+  }
+}

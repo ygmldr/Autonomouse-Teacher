@@ -1,0 +1,49 @@
+{
+  "schema_version": "m1.offline.v0",
+  "problem_id": "cf_dp_coin_change",
+  "title": "零钱兑换（最少硬币数）",
+  "statement": "给定硬币面额列表 coins 与金额 amount，返回凑出 amount 所需的最少硬币数量；无法凑出返回 -1。amount == 0 时返回 0。每种硬币数量不限。",
+  "skills": [
+    "dp-basics"
+  ],
+  "difficulty": 4,
+  "function_name": "coin_change",
+  "public_tests": [
+    {
+      "args": [
+        [
+          1,
+          2,
+          5
+        ],
+        11
+      ],
+      "expected": 3,
+      "kind": "normal"
+    },
+    {
+      "args": [
+        [
+          2
+        ],
+        3
+      ],
+      "expected": -1,
+      "kind": "normal"
+    }
+  ],
+  "hidden_ref": "hidden/cf_dp_coin_change.json",
+  "hint_ladder": {
+    "LIGHT_HINT": "先想：要凑出金额 a，最后一枚硬币可能是哪些面额？把这个观察写成递推式。",
+    "INVARIANT_HINT": "best[a] = 凑出金额 a 的最少硬币数；best[0] = 0；对每个 a，best[a] = min(best[a - coin] + 1)（coin <= a）。不可达时保持无穷大。",
+    "STRUCTURE_HINT": "步骤：INF=amount+1；best=[0]+[INF]*amount；for a in 1..amount：for coin in coins：若 coin<=a：best[a]=min(best[a], best[a-coin]+1)；最后若 best[amount]==INF 返回 -1 否则返回 best[amount]。不要用贪心。",
+    "FULL_SOLUTION": "def coin_change(coins, amount):\n    infinity = amount + 1\n    best = [0] + [infinity] * amount\n    for value in range(1, amount + 1):\n        for coin in coins:\n            if coin <= value and best[value - coin] + 1 < best[value]:\n                best[value] = best[value - coin] + 1\n    return best[amount] if best[amount] != infinity else -1"
+  },
+  "reference_solution": "def coin_change(coins, amount):\n    infinity = amount + 1\n    best = [0] + [infinity] * amount\n    for value in range(1, amount + 1):\n        for coin in coins:\n            if coin <= value and best[value - coin] + 1 < best[value]:\n                best[value] = best[value - coin] + 1\n    return best[amount] if best[amount] != infinity else -1",
+  "synthetic": true,
+  "license": "CC0-1.0",
+  "complexity_expectation": {
+    "time": "O(amount * len(coins))",
+    "space": "O(amount)"
+  }
+}
