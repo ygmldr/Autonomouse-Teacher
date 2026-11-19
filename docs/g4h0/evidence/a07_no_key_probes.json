@@ -1,0 +1,218 @@
+{
+  "base": "3e7afee077845a071cd364e93ab209cac20b2d5f",
+  "checks": [
+    {
+      "id": "live_gate_inspect_always_blocked",
+      "ok": true,
+      "reasons": [
+        "EXTERNAL_HUMAN_AUTHORIZATION_BOUNDARY_NOT_DEPLOYED"
+      ],
+      "status": "BLOCKED"
+    },
+    {
+      "code": "SECURITY_BLOCKED",
+      "id": "live_gate_require_live_always_raises",
+      "ok": true
+    },
+    {
+      "approval_attributes": [],
+      "combinations": 32,
+      "id": "live_gate_no_approval_entrypoint_and_never_opens",
+      "ok": true
+    },
+    {
+      "exit": 3,
+      "id": "run_live_script_exit_3_blocked",
+      "ok": true
+    },
+    {
+      "exit": 3,
+      "id": "cli_live_rejected_exit_3",
+      "ok": true,
+      "stdout": "{\"status\": \"BLOCKED\", \"error_code\": \"SECURITY_BLOCKED\", \"reason\": \"EXTERNAL_HUMAN_AUTHORIZATION_BOUNDARY_NOT_DEPLOYED; BASELINE_EVIDENCE_MISSING; ACTUAL_TOOL_REGISTRY_NOT_APPROVED; SESSION_LOG_UPLOAD_"
+    },
+    {
+      "id": "cli_live_fake_key_never_printed",
+      "leaked": [],
+      "ok": true
+    },
+    {
+      "id": "no_network_syscalls_run_live",
+      "offending": [],
+      "ok": true
+    },
+    {
+      "id": "no_network_syscalls_cli_smoke_live",
+      "offending": [],
+      "ok": true
+    },
+    {
+      "codes": {
+        "_new_harness": "SECURITY_BLOCKED",
+        "_require_live_authorization": "SECURITY_BLOCKED",
+        "resume": "SECURITY_BLOCKED",
+        "run": "SECURITY_BLOCKED"
+      },
+      "id": "adapter_four_live_entrypoints_blocked",
+      "ok": true
+    },
+    {
+      "id": "provider_sdk_never_imported",
+      "ok": true
+    },
+    {
+      "id": "probe_process_has_no_key_like_env",
+      "names": [],
+      "ok": true
+    },
+    {
+      "id": "no_dotenv_file_in_repo",
+      "ok": true
+    },
+    {
+      "id": "source_never_reads_key_like_env",
+      "ok": true,
+      "reads": []
+    },
+    {
+      "files": [],
+      "id": "source_never_loads_dotenv",
+      "ok": true
+    },
+    {
+      "env_reads": [
+        {
+          "file": "src/autoteacher_m0/bridge/controller.py",
+          "line": 1947,
+          "text": "if os.environ.get(\"G3B_TEST_MODE\") == \"1\" and os.environ.get(\"G3B_CRASH_HOOK\") == hook:"
+        },
+        {
+          "file": "src/autoteacher_m0/bridge/controller.py",
+          "line": 1961,
+          "text": "if os.environ.get(\"G3B_TEST_MODE\") != \"1\":"
+        },
+        {
+          "file": "src/autoteacher_m0/bridge/controller.py",
+          "line": 1963,
+          "text": "if os.environ.get(\"G3B_TEST_DELAY_HOOK\") != hook:"
+        },
+        {
+          "file": "src/autoteacher_m0/bridge/controller.py",
+          "line": 1966,
+          "text": "milliseconds = int(os.environ.get(\"G3B_TEST_DELAY_MS\", \"0\"))"
+        },
+        {
+          "file": "src/autoteacher_m0/bridge/controller.py",
+          "line": 1971,
+          "text": "marker = os.environ.get(\"G3B_TEST_DELAY_MARKER\")"
+        }
+      ],
+      "id": "only_known_test_hook_env_reads",
+      "ok": true
+    },
+    {
+      "candidate_env_keys": [
+        "HOME",
+        "PATH"
+      ],
+      "id": "credential_boundary_scrubs_fake_key",
+      "ok": true,
+      "violations": [
+        "ENV_NOT_ALLOWED:DEEPSEEK_API_KEY",
+        "ENV_NOT_ALLOWED:OPENCODE_API_KEY"
+      ]
+    },
+    {
+      "changed": [],
+      "id": "frozen_live_files_unmodified",
+      "ok": true
+    },
+    {
+      "blockers": [],
+      "id": "static_live_entrypoint_audit_clean",
+      "ok": true
+    },
+    {
+      "files_scanned": 21,
+      "findings": [],
+      "id": "new_src_has_no_network_or_provider_client",
+      "ok": true
+    },
+    {
+      "findings": [],
+      "id": "new_code_has_no_credential_material",
+      "ok": true
+    },
+    {
+      "findings": [],
+      "id": "new_src_has_no_env_unlock_switch_or_dotenv",
+      "ok": true
+    },
+    {
+      "id": "no_ip_socket_attempt_in_process",
+      "ok": true
+    }
+  ],
+  "commands": [
+    {
+      "argv": [
+        "/bin/sh",
+        "/root/Autonomous Teacher/worktrees/m0-g4h0-fix/scripts/run_live.sh"
+      ],
+      "exit": 3,
+      "name": "run_live"
+    },
+    {
+      "argv": [
+        "/root/Autonomous Teacher/.venv/bin/python",
+        "-m",
+        "autoteacher_m0.cli",
+        "smoke",
+        "--live"
+      ],
+      "exit": 3,
+      "name": "cli_smoke_live"
+    },
+    {
+      "argv": [
+        "/usr/bin/strace",
+        "-f",
+        "/bin/sh",
+        "/root/Autonomous Teacher/worktrees/m0-g4h0-fix/scripts/run_live.sh"
+      ],
+      "exit": 3,
+      "name": "strace_run_live",
+      "trace": "/tmp/at-a07-strace-jxln_4ww/trace.log"
+    },
+    {
+      "argv": [
+        "/usr/bin/strace",
+        "-f",
+        "/root/Autonomous Teacher/.venv/bin/python",
+        "-m",
+        "autoteacher_m0.cli",
+        "smoke",
+        "--live"
+      ],
+      "exit": 3,
+      "name": "strace_cli_smoke_live",
+      "trace": "/tmp/at-a07-strace-jxln_4ww/trace.log"
+    }
+  ],
+  "head": "3e7afee077845a071cd364e93ab209cac20b2d5f",
+  "key_present": false,
+  "network_attempts": [],
+  "python": "3.11.15",
+  "real_external_http_calls": 0,
+  "real_model_calls": 0,
+  "repo_root": "/root/Autonomous Teacher/worktrees/m0-g4h0-fix",
+  "schema": "at-m0/g4h0-no-key-probes/v1",
+  "scope": "local no-key negatives only; no model, provider, HTTP or paid call",
+  "summary": {
+    "failed": 0,
+    "passed": 22,
+    "status": "PASS",
+    "total": 22
+  },
+  "utc": "2026-11-19T18:09:38Z"
+}

@@ -1,0 +1,33 @@
+round 000: winners=1 loser_codes=['AUTHORIZATION_REPLAYED'] records=1 temp=0 mode=0o600 293ms
+round 001: winners=1 loser_codes=['AUTHORIZATION_REPLAYED'] records=2 temp=0 mode=0o600 285ms
+round 002: winners=1 loser_codes=['AUTHORIZATION_REPLAYED'] records=3 temp=0 mode=0o600 290ms
+round 003: winners=1 loser_codes=['AUTHORIZATION_REPLAYED'] records=4 temp=0 mode=0o600 290ms
+round 004: winners=1 loser_codes=['AUTHORIZATION_REPLAYED'] records=5 temp=0 mode=0o600 284ms
+round 005: winners=1 loser_codes=['AUTHORIZATION_REPLAYED'] records=6 temp=0 mode=0o600 284ms
+round 006: winners=1 loser_codes=['AUTHORIZATION_REPLAYED'] records=7 temp=0 mode=0o600 289ms
+round 007: winners=1 loser_codes=['AUTHORIZATION_REPLAYED'] records=8 temp=0 mode=0o600 287ms
+round 008: winners=1 loser_codes=['AUTHORIZATION_REPLAYED'] records=9 temp=0 mode=0o600 288ms
+round 009: winners=1 loser_codes=['AUTHORIZATION_REPLAYED'] records=10 temp=0 mode=0o600 288ms
+round 010: winners=1 loser_codes=['AUTHORIZATION_REPLAYED'] records=11 temp=0 mode=0o600 285ms
+round 011: winners=1 loser_codes=['AUTHORIZATION_REPLAYED'] records=12 temp=0 mode=0o600 291ms
+round 012: winners=1 loser_codes=['AUTHORIZATION_REPLAYED'] records=13 temp=0 mode=0o600 284ms
+round 013: winners=1 loser_codes=['AUTHORIZATION_REPLAYED'] records=14 temp=0 mode=0o600 289ms
+round 014: winners=1 loser_codes=['AUTHORIZATION_REPLAYED'] records=15 temp=0 mode=0o600 290ms
+round 015: winners=1 loser_codes=['AUTHORIZATION_REPLAYED'] records=16 temp=0 mode=0o600 292ms
+round 016: winners=1 loser_codes=['AUTHORIZATION_REPLAYED'] records=17 temp=0 mode=0o600 285ms
+round 017: winners=1 loser_codes=['AUTHORIZATION_REPLAYED'] records=18 temp=0 mode=0o600 287ms
+round 018: winners=1 loser_codes=['AUTHORIZATION_REPLAYED'] records=19 temp=0 mode=0o600 290ms
+round 019: winners=1 loser_codes=['AUTHORIZATION_REPLAYED'] records=20 temp=0 mode=0o600 286ms
+round 020: winners=1 loser_codes=['AUTHORIZATION_REPLAYED'] records=21 temp=0 mode=0o600 288ms
+round 021: winners=1 loser_codes=['AUTHORIZATION_REPLAYED'] records=22 temp=0 mode=0o600 289ms
+round 022: winners=1 loser_codes=['AUTHORIZATION_REPLAYED'] records=23 temp=0 mode=0o600 289ms
+round 023: winners=1 loser_codes=['AUTHORIZATION_REPLAYED'] records=24 temp=0 mode=0o600 287ms
+round 024: winners=1 loser_codes=['AUTHORIZATION_REPLAYED'] records=25 temp=0 mode=0o600 287ms
+round 025: winners=1 loser_codes=['AUTHORIZATION_REPLAYED'] records=26 temp=0 mode=0o600 292ms
+round 026: winners=1 loser_codes=['AUTHORIZATION_USE_RECORD_INVALID'] records=27 temp=0 mode=0o600 287ms
+round 027: winners=1 loser_codes=['AUTHORIZATION_REPLAYED'] records=28 temp=0 mode=0o600 285ms
+round 028: winners=1 loser_codes=['AUTHORIZATION_REPLAYED'] records=29 temp=0 mode=0o600 293ms
+round 029: winners=1 loser_codes=['AUTHORIZATION_REPLAYED'] records=30 temp=0 mode=0o600 302ms
+{"double_consume": 0, "elapsed_seconds": 12.38, "failure_count": 1, "label": "before-fix-natural", "loser_code_histogram": {"AUTHORIZATION_REPLAYED": 29, "AUTHORIZATION_USE_RECORD_INVALID": 1}, "loser_invalid_count": 1, "record_count": 30, "record_modes": ["0o600"], "residual_non_record_files": [], "rounds": 30, "widen_write_ms": 0.0}
+FAILURES:
+  - round 26: loser_codes=['AUTHORIZATION_USE_RECORD_INVALID']

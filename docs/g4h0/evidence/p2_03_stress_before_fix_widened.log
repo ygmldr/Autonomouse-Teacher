@@ -1,0 +1,62 @@
+round 000: winners=1 loser_codes=['AUTHORIZATION_USE_RECORD_INVALID'] records=1 temp=0 mode=0o600 390ms
+round 001: winners=1 loser_codes=['AUTHORIZATION_USE_RECORD_INVALID'] records=2 temp=0 mode=0o600 400ms
+round 002: winners=1 loser_codes=['AUTHORIZATION_USE_RECORD_INVALID'] records=3 temp=0 mode=0o600 385ms
+round 003: winners=1 loser_codes=['AUTHORIZATION_USE_RECORD_INVALID'] records=4 temp=0 mode=0o600 390ms
+round 004: winners=1 loser_codes=['AUTHORIZATION_USE_RECORD_INVALID'] records=5 temp=0 mode=0o600 387ms
+round 005: winners=1 loser_codes=['AUTHORIZATION_USE_RECORD_INVALID'] records=6 temp=0 mode=0o600 386ms
+round 006: winners=1 loser_codes=['AUTHORIZATION_USE_RECORD_INVALID'] records=7 temp=0 mode=0o600 389ms
+round 007: winners=1 loser_codes=['AUTHORIZATION_USE_RECORD_INVALID'] records=8 temp=0 mode=0o600 390ms
+round 008: winners=1 loser_codes=['AUTHORIZATION_USE_RECORD_INVALID'] records=9 temp=0 mode=0o600 385ms
+round 009: winners=1 loser_codes=['AUTHORIZATION_USE_RECORD_INVALID'] records=10 temp=0 mode=0o600 388ms
+round 010: winners=1 loser_codes=['AUTHORIZATION_USE_RECORD_INVALID'] records=11 temp=0 mode=0o600 386ms
+round 011: winners=1 loser_codes=['AUTHORIZATION_USE_RECORD_INVALID'] records=12 temp=0 mode=0o600 395ms
+round 012: winners=1 loser_codes=['AUTHORIZATION_USE_RECORD_INVALID'] records=13 temp=0 mode=0o600 389ms
+round 013: winners=1 loser_codes=['AUTHORIZATION_USE_RECORD_INVALID'] records=14 temp=0 mode=0o600 394ms
+round 014: winners=1 loser_codes=['AUTHORIZATION_USE_RECORD_INVALID'] records=15 temp=0 mode=0o600 384ms
+round 015: winners=1 loser_codes=['AUTHORIZATION_USE_RECORD_INVALID'] records=16 temp=0 mode=0o600 386ms
+round 016: winners=1 loser_codes=['AUTHORIZATION_USE_RECORD_INVALID'] records=17 temp=0 mode=0o600 390ms
+round 017: winners=1 loser_codes=['AUTHORIZATION_USE_RECORD_INVALID'] records=18 temp=0 mode=0o600 389ms
+round 018: winners=1 loser_codes=['AUTHORIZATION_USE_RECORD_INVALID'] records=19 temp=0 mode=0o600 399ms
+round 019: winners=1 loser_codes=['AUTHORIZATION_USE_RECORD_INVALID'] records=20 temp=0 mode=0o600 399ms
+round 020: winners=1 loser_codes=['AUTHORIZATION_USE_RECORD_INVALID'] records=21 temp=0 mode=0o600 386ms
+round 021: winners=1 loser_codes=['AUTHORIZATION_USE_RECORD_INVALID'] records=22 temp=0 mode=0o600 387ms
+round 022: winners=1 loser_codes=['AUTHORIZATION_USE_RECORD_INVALID'] records=23 temp=0 mode=0o600 385ms
+round 023: winners=1 loser_codes=['AUTHORIZATION_USE_RECORD_INVALID'] records=24 temp=0 mode=0o600 400ms
+round 024: winners=1 loser_codes=['AUTHORIZATION_USE_RECORD_INVALID'] records=25 temp=0 mode=0o600 401ms
+round 025: winners=1 loser_codes=['AUTHORIZATION_USE_RECORD_INVALID'] records=26 temp=0 mode=0o600 398ms
+round 026: winners=1 loser_codes=['AUTHORIZATION_USE_RECORD_INVALID'] records=27 temp=0 mode=0o600 399ms
+round 027: winners=1 loser_codes=['AUTHORIZATION_USE_RECORD_INVALID'] records=28 temp=0 mode=0o600 385ms
+round 028: winners=1 loser_codes=['AUTHORIZATION_USE_RECORD_INVALID'] records=29 temp=0 mode=0o600 383ms
+round 029: winners=1 loser_codes=['AUTHORIZATION_USE_RECORD_INVALID'] records=30 temp=0 mode=0o600 385ms
+{"double_consume": 0, "elapsed_seconds": 15.51, "failure_count": 30, "label": "before-fix-widened", "loser_code_histogram": {"AUTHORIZATION_USE_RECORD_INVALID": 30}, "loser_invalid_count": 30, "record_count": 30, "record_modes": ["0o600"], "residual_non_record_files": [], "rounds": 30, "widen_write_ms": 100.0}
+FAILURES:
+  - round 0: loser_codes=['AUTHORIZATION_USE_RECORD_INVALID']
+  - round 1: loser_codes=['AUTHORIZATION_USE_RECORD_INVALID']
+  - round 2: loser_codes=['AUTHORIZATION_USE_RECORD_INVALID']
+  - round 3: loser_codes=['AUTHORIZATION_USE_RECORD_INVALID']
+  - round 4: loser_codes=['AUTHORIZATION_USE_RECORD_INVALID']
+  - round 5: loser_codes=['AUTHORIZATION_USE_RECORD_INVALID']
+  - round 6: loser_codes=['AUTHORIZATION_USE_RECORD_INVALID']
+  - round 7: loser_codes=['AUTHORIZATION_USE_RECORD_INVALID']
+  - round 8: loser_codes=['AUTHORIZATION_USE_RECORD_INVALID']
+  - round 9: loser_codes=['AUTHORIZATION_USE_RECORD_INVALID']
+  - round 10: loser_codes=['AUTHORIZATION_USE_RECORD_INVALID']
+  - round 11: loser_codes=['AUTHORIZATION_USE_RECORD_INVALID']
+  - round 12: loser_codes=['AUTHORIZATION_USE_RECORD_INVALID']
+  - round 13: loser_codes=['AUTHORIZATION_USE_RECORD_INVALID']
+  - round 14: loser_codes=['AUTHORIZATION_USE_RECORD_INVALID']
+  - round 15: loser_codes=['AUTHORIZATION_USE_RECORD_INVALID']
+  - round 16: loser_codes=['AUTHORIZATION_USE_RECORD_INVALID']
+  - round 17: loser_codes=['AUTHORIZATION_USE_RECORD_INVALID']
+  - round 18: loser_codes=['AUTHORIZATION_USE_RECORD_INVALID']
+  - round 19: loser_codes=['AUTHORIZATION_USE_RECORD_INVALID']
+  - round 20: loser_codes=['AUTHORIZATION_USE_RECORD_INVALID']
+  - round 21: loser_codes=['AUTHORIZATION_USE_RECORD_INVALID']
+  - round 22: loser_codes=['AUTHORIZATION_USE_RECORD_INVALID']
+  - round 23: loser_codes=['AUTHORIZATION_USE_RECORD_INVALID']
+  - round 24: loser_codes=['AUTHORIZATION_USE_RECORD_INVALID']
+  - round 25: loser_codes=['AUTHORIZATION_USE_RECORD_INVALID']
+  - round 26: loser_codes=['AUTHORIZATION_USE_RECORD_INVALID']
+  - round 27: loser_codes=['AUTHORIZATION_USE_RECORD_INVALID']
+  - round 28: loser_codes=['AUTHORIZATION_USE_RECORD_INVALID']
+  - round 29: loser_codes=['AUTHORIZATION_USE_RECORD_INVALID']

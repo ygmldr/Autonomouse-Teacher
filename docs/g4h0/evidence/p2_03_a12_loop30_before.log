@@ -1,0 +1,30 @@
+# P2-03 a12 standalone reproduction loop (BEFORE fix, base 3e7afee) — 2026-11-19T17:53:32Z
+# command: for i in $(seq 1 30); do python -m pytest tests/integration/g4_a/test_a12_replay_epoch.py::test_a12_concurrent_consumption_admits_exactly_one -q; done
+# baseline HEAD: 3e7afee (no fix applied); python: 3.11.15
+# result: 27 passed / 3 failed (3/30 failures)
+
+## per-run exit codes (1..30)
+1=PASS 2=PASS 3=FAIL 4=PASS 5=PASS 6=PASS 7=PASS 8=PASS 9=PASS 10=PASS 11=PASS 12=PASS 13=PASS 14=FAIL 15=PASS 16=PASS 17=PASS 18=PASS 19=PASS 20=PASS 21=PASS 22=PASS 23=PASS 24=PASS 25=PASS 26=PASS 27=PASS 28=FAIL 29=PASS 30=PASS 
+
+## failing runs: 3, 14, 28
+### /tmp/p203/run_3.log
+        assert len(results) == 1
+        assert len(errors) == 1
+E       AssertionError: assert 'AUTHORIZATION_REPLAYED' in ('AUTHORIZATION_USE_RECORD_INVALID',)
+E        +  where ('AUTHORIZATION_USE_RECORD_INVALID',) = AuthorizationRejected('AUTHORIZATION_USE_RECORD_INVALID').reasons
+tests/integration/g4_a/test_a12_replay_epoch.py:83: AssertionError
+
+### /tmp/p203/run_14.log
+        assert len(results) == 1
+        assert len(errors) == 1
+E       AssertionError: assert 'AUTHORIZATION_REPLAYED' in ('AUTHORIZATION_USE_RECORD_INVALID',)
+E        +  where ('AUTHORIZATION_USE_RECORD_INVALID',) = AuthorizationRejected('AUTHORIZATION_USE_RECORD_INVALID').reasons
+tests/integration/g4_a/test_a12_replay_epoch.py:83: AssertionError
+
+### /tmp/p203/run_28.log
+        assert len(results) == 1
+        assert len(errors) == 1
+E       AssertionError: assert 'AUTHORIZATION_REPLAYED' in ('AUTHORIZATION_USE_RECORD_INVALID',)
+E        +  where ('AUTHORIZATION_USE_RECORD_INVALID',) = AuthorizationRejected('AUTHORIZATION_USE_RECORD_INVALID').reasons
+tests/integration/g4_a/test_a12_replay_epoch.py:83: AssertionError
+
