@@ -278,6 +278,52 @@ def build_demo_report(loop_v1, replay_ok: bool, determinism_ok: bool, comparison
             )
     for check in contamination.checks:
         run.add_check(check.check_id, check.description, check.status)
+    run.add_section(
+        "comparison",
+        {
+            "protocol": comparison_payload["protocol"],
+            "run_digest": comparison_payload["run_digest"],
+            "case_catalog_size": comparison_payload["case_catalog_size"],
+            "cases_assessed": comparison_payload["cases_assessed"],
+            "seeds": comparison_payload["seeds"],
+            "max_rounds": comparison_payload["max_rounds"],
+            "total_rounds_measured": comparison_payload["total_rounds_measured"],
+            "failure_case_count": comparison_payload["failure_case_count"],
+            "failure_cases": comparison_payload["failure_cases"],
+            "statistics": {
+                policy: comparison_payload["policies"][policy]["statistics"]
+                for policy in ("teacher_v0", "teacher_v1")
+            },
+            "runs": {
+                policy: comparison_payload["policies"][policy]["runs"]
+                for policy in ("teacher_v0", "teacher_v1")
+            },
+            "delta_v1_minus_v0": comparison_payload["delta_v1_minus_v0"],
+            "conclusion": comparison_payload["conclusion"],
+            "disclaimer": comparison_payload["disclaimer"],
+        },
+    )
+    run.add_section(
+        "contamination",
+        {
+            "overall_ok": contamination.ok,
+            "status_counts": contamination.status_counts,
+            "checks": [
+                {
+                    "check_id": check.check_id,
+                    "description": check.description,
+                    "status": check.status,
+                    "counts": _contamination_counts(check.details),
+                }
+                for check in contamination.checks
+            ],
+        },
+    )
+    run.artifacts = [
+        "docs/m1/traces/loop_v1_3rounds.jsonl",
+        "docs/m1/traces/loop_v0_3rounds.jsonl",
+        "docs/m1/reports/contamination_v1.json",
+    ]
     run.not_run = [
         "real provider / live runtime evaluation (out of scope: offline synthetic only)",
         "real learner outcomes (impossible offline; not claimed)",

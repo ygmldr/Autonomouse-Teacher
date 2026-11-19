@@ -233,7 +233,26 @@ problem(fixture) ──► CFTeacher.diagnose(problem, submission, state)
 - 3 次不同题目的通过证据把 `array-basics` 掌握度推过 planner 复习阈值（0.70），第 4 次规划的首选任务从 `cf_array_sum_even` 变为 `cf_array_running_sum`，并出现 `REVIEW:` 规划理由——**证据改变了下一任务选择**。
 - 失败路径：连续 2 次真实失败评估写入证据后，`next_action` 从 L1 升到 L2（`test_loop_failure_evidence_escalates_hint`），且始终 ≤ L3。
 
-真实运行产出的闭环 trace：`docs/m1/traces/cf_teaching_loop.jsonl`（15 个 `TraceEvent`，loop id `cf_loop_v1_seed0`，固定时间戳；两次生成 SHA-256 一致：`cd3de838d05bf6d8e22a209614c5137ad4029726ed7d78aff7882a6c2ba931c4`；4 个教学动作、3 次评估全通过、最终 mastery `{"array-basics":0.725375,"dp-basics":0.35,"prefix-sums":0.35}`）。其中 `plan/assess/memory/next_task` payload 只含任务 id、case 计数、哈希与分数，不含隐藏用例正文。
+### 8.4 Trace 格式与回放兼容性（P2-6 披露）
+
+本节说明两份 CF 闭环 trace 的**格式差异与用途边界**；两者不可混用，也不得把非 canonical trace 当作闭环回放证据。
+
+**（1）`docs/m1/traces/cf_teaching_loop.jsonl` —— CF 域审计格式（非 canonical 回放格式）**
+
+- 由 CF Teacher 域内脚本生成（15 个 `TraceEvent`，loop id `cf_loop_v1_seed0`，固定时间戳；两次生成 SHA-256 一致：`cd3de838d05bf6d8e22a209614c5137ad4029726ed7d78aff7882a6c2ba931c4`；4 个教学动作、3 次评估全通过、最终 mastery `{"array-basics":0.725375,"dp-basics":0.35,"prefix-sums":0.35}`）。
+- 该格式把每轮 assessment 字段**平铺**在 `assess` payload 顶层（`assessment_id/passed/score/hidden_cases_passed/hidden_cases_total/failure_modes`），而不是共享回放器期望的 `payload["assessment"]`（`AssessmentResult.to_dict()`）；`memory` 事件也不带 `payload["evidence"]`。其优点是 `event_id`/`seq`/`step` 齐全、按 event_id 可**人工审计**、且含每轮 mastery 快照。
+- **兼容性限制（独立评审 P2-6，接受为已披露限制）**：用 b-eval 共享回放器 `m1_offline.evaluation.harness.replay_trace(events)` 读取该文件时，会**返回 0 条 assessment、空 evidence、`final_state=None` 且不抛异常**（静默空结果）。因此它**不是** canonical 闭环回放证据，不能用于"回放一致性"断言；B-05 的闭环回放结论不依赖该文件。
+
+**（2）`docs/m1/traces/cf_loop_canonical.jsonl` —— canonical TraceEvent 回放格式**
+
+- 由共享 `m1_offline.evaluation.harness.run_closed_loop(...)` 直接生成（`learner_fixture_name="learner_advanced"`、`max_rounds=3`、`seed=0`、`loop_id="cf_loop_canonical_seed0"`），事件序列为 `goal/diagnose/gap/plan` + 3 轮 `action/response/assess/memory/next_task`，共 **19** 个事件，`payload.seq` 连续。
+- 每个 `assess` payload 携带 `payload["assessment"]`（`AssessmentResult.to_dict()`），每个 `memory` payload 携带 `payload["evidence"]`（`EvidenceEvent.to_dict()`），符合 EVALUATION_PROTOCOL §6 的回放契约。
+- 验证（MEASURED，2026-11-19）：`replay_trace(events, learner_profile=..., loop_id="cf_loop_canonical_seed0")` 重建出 **3 条 assessment、6 条 evidence**；`assessment_ids` 与在线运行一致，`final_state == live.final_state`；两次生成 SHA-256 一致：`6e3d96aebbda434c3df2299f28b4bf542c2e1602501135eb20830209fdf58063`（21,649 bytes）。
+- 复现注意：`replay_trace` 不传 `learner_profile` 时 `final_state=None`（仍可解析 assessment/evidence）；传入 `_profile_from_fixture(load_learner_fixture("learner_advanced"))` 后可得到最终 `LearnerState`。
+
+**（3）canonical ≥3 轮闭环回放的官方证据仍以 b-eval 为准**：`docs/m1/traces/loop_v0_3rounds.jsonl` / `loop_v1_3rounds.jsonl` 与 `docs/m1/EVALUATION_PROTOCOL.md` §5/§6；`cf_loop_canonical.jsonl` 是同一 canonical 格式下针对 CF fixture（`learner_advanced`）的补充实例，用于证明 CF 线闭环同样可由共享回放器完整重建。
+
+两份 trace 的 payload 均不含隐藏用例正文（只含 case 计数、哈希、分数与合成 fixture 元数据），满足协议 §5/§6 的泄漏约束。
 
 ## 9. 评测指标（计划值 vs 实际值）
 
@@ -252,6 +271,7 @@ problem(fixture) ──► CFTeacher.diagnose(problem, submission, state)
 | 多轮教学动作 | ≥3 | 4（测试）/ trace 4 | 多轮测试 + trace |
 | 证据影响下一任务 | 必须可观察 | 首选任务 A→B 且出现 REVIEW 理由 | 多轮测试 |
 | 判题确定性 | 同输入同输出 | 逐字段相等（跨实例） | 确定性测试 |
+| canonical trace 回放一致 | ≥3 轮、assessment/evidence/final_state 可重建 | 3 assessment / 6 evidence / `final_state` 相等（19 事件） | `cf_loop_canonical.jsonl` + 共享 `replay_trace` 实测 |
 
 复现命令：
 
@@ -295,3 +315,4 @@ cd /root/at-m1-offline
 | 版本 | 日期 | 变更 |
 | --- | --- | --- |
 | v0 | 2026-11-19 | 初版：CFJudge + CFTeacher + 14 题/112 隐藏用例/3 学习者 fixture + 75 项测试 + 闭环 trace |
+| v0.1 | 2026-11-19 | docs-only 补充（P2-6）：新增 §8.4 披露 `cf_teaching_loop.jsonl` 为 CF 域审计格式、共享 `replay_trace` 对其静默返回空结果；新增 canonical 回放 trace `cf_loop_canonical.jsonl` 并记录回放验证；无代码/测试变更 |

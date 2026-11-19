@@ -7,7 +7,9 @@ the conclusion text never overclaims real teaching effectiveness.
 
 from __future__ import annotations
 
+import json
 import math
+from pathlib import Path
 
 import pytest
 
@@ -23,6 +25,9 @@ from m1_offline.evaluation.compare import (
     run_comparison,
 )
 from m1_offline.evaluation.harness import load_cf_cases
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+BASELINE_REPORT = REPO_ROOT / "docs/m1/reports/eval_baseline_v1.json"
 
 
 @pytest.fixture(scope="module")
@@ -157,3 +162,33 @@ def json_dumps(value) -> str:
     import json
 
     return json.dumps(value, ensure_ascii=False, sort_keys=True)
+
+
+def test_persisted_report_contains_comparison_failure_cases(comparison) -> None:
+    """P1-1: the artifact must persist the real per-failure list, not just aggregates."""
+
+    assert BASELINE_REPORT.is_file(), "eval_baseline_v1.json artifact is required"
+    artifact = json.loads(BASELINE_REPORT.read_text(encoding="utf-8"))
+    assert "comparison" in artifact, sorted(artifact)
+    section = artifact["comparison"]
+
+    assert section["run_digest"] == comparison.run_digest
+    failures = section["failure_cases"]
+    assert isinstance(failures, list)
+    assert len(failures) == section["failure_case_count"]
+    assert section["failure_case_count"] == comparison.to_dict()["failure_case_count"]
+    assert len(failures) >= 1
+
+    required = {"policy", "seed", "round", "case_id", "scorer_id", "failure_modes"}
+    for failure in failures:
+        assert required <= set(failure), failure
+        assert failure["policy"] in {"teacher_v0", "teacher_v1"}
+        assert failure["scorer_id"] == "independent_cf_judge_v0"
+        assert failure["failure_modes"]
+
+    assert set(section["statistics"]) == {"teacher_v0", "teacher_v1"}
+    for policy in ("teacher_v0", "teacher_v1"):
+        for dimension in DIMENSIONS:
+            assert "mean" in section["statistics"][policy][dimension]
+            assert "variance" in section["statistics"][policy][dimension]
+    assert "not real teaching effect" in section["disclaimer"].casefold()

@@ -148,6 +148,12 @@ Goal(LearningGoal) ──┐
 3. **枚举**：枚举使用大写字符串 + 常量校验（非 Python Enum，便于 JSON/跨模块直接比较）：
    `claim_status`、`change_kind`、`baseline_level`、`EvidenceEvent.kind`、`task_type`、
    `TeacherAction.kind`、`DiagnosticResult.status`；非法值 `SchemaError`。
+   - `TeacherAction.kind` 的完整取值（`TEACHER_ACTION_KIND_VALUES`）：`LIGHT_HINT`、
+     `INVARIANT_HINT`、`STRUCTURE_HINT`、`FULL_SOLUTION`、`SOCRATIC_QUESTION`、`EXPLAIN`、
+     `PRACTICE`、`REVIEW`、`ASK_CLARIFICATION`。其中 **`PRACTICE` 为 reserved / 保留值**：
+     类型契约保留该取值，但当前 `FixedPolicy`（teacher_v0）与 `AdaptivePolicy`（teacher_v1）
+     均**不发出**该动作；仅为未来练习类动作预留。如未来启用，须先经契约决策，并同步更新策略、
+     测试与文档（本说明为文档补记，未修改 `types.py` 代码）。
 4. **时间**：时间字段为 UTC ISO-8601 字符串（`YYYY-MM-DDTHH:MM:SSZ`，`now_utc()`）；可选时间字段
    默认 `now_utc()`；显式时间原样保留 → replay 确定性。`published_at`/`observed_at`/`valid_until`
    由 freshness 层解释，types 层只保证格式/类型。

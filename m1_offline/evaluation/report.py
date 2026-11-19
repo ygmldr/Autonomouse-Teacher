@@ -13,6 +13,7 @@ teaching effectiveness.  Hidden fixture content is never included.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import platform
@@ -24,6 +25,22 @@ from pathlib import Path
 from typing import Any, Iterable
 
 DEFAULT_REPO_ROOT = Path(__file__).resolve().parents[2]
+
+#: Worktree baseline commit (work/m1-offline-design was created from this SHA;
+#: it is NOT necessarily the current HEAD -- see ``environment_snapshot``).
+BASE_COMMIT_SHA = "3e7afee077845a071cd364e93ab209cac20b2d5f"
+
+#: Files covered by the reproducible dependency fingerprint.  The frozen
+#: b-core/b-cf/b-interview modules + fixtures are what evaluation numbers depend
+#: on; evaluation/ and demo.py are covered too so a changed simulator is visible.
+FINGERPRINT_GLOBS: tuple[str, ...] = ("m1_offline/**/*.py", "fixtures/m1/**/*")
+
+#: Note recorded next to the implementation commit in reports/artifacts.
+IMPLEMENTATION_COMMIT_NOTE = (
+    "frozen reviewed implementation commit; post-review report/doc fixes were "
+    "generated on top of it -- the final commit SHA is recorded in "
+    "docs/parallel/STATUS.md (Lead-owned), never implied to be this base SHA"
+)
 
 MEASURED = "MEASURED"
 NOT_RUN = "NOT_RUN"
@@ -58,14 +75,92 @@ def _git(root: Path, *args: str) -> str:
     return value if completed.returncode == 0 and value else "UNAVAILABLE"
 
 
+def _git_is_dirty(root: Path) -> bool | None:
+    """True when the worktree has uncommitted changes (None when git is unavailable)."""
+
+    try:
+        completed = subprocess.run(
+            ["git", "status", "--porcelain"],
+            cwd=str(root),
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if completed.returncode != 0:
+        return None
+    return bool(completed.stdout.strip())
+
+
+def dependency_manifest(root: Path | str = DEFAULT_REPO_ROOT) -> list[str]:
+    """Reproducible dependency manifest lines, sorted by relative POSIX path.
+
+    Each line is ``"<sha256-of-file-bytes>  <relative/POSIX/path>"`` (two spaces
+    between digest and path, exactly like ``sha256sum`` output).  Only files
+    matched by :data:`FINGERPRINT_GLOBS` are included; bytecode caches are
+    excluded.  The function is deterministic and filesystem-relative.
+    """
+
+    root = Path(root)
+    covered: dict[str, str] = {}
+    for pattern in FINGERPRINT_GLOBS:
+        for path in root.glob(pattern):
+            if not path.is_file():
+                continue
+            parts = set(path.relative_to(root).parts)
+            if "__pycache__" in parts or path.suffix == ".pyc":
+                continue
+            relative = path.relative_to(root).as_posix()
+            covered[relative] = hashlib.sha256(path.read_bytes()).hexdigest()
+    return [f"{covered[relative]}  {relative}" for relative in sorted(covered)]
+
+
+def dependency_fingerprint(root: Path | str = DEFAULT_REPO_ROOT) -> str:
+    """SHA-256 over the reproducible dependency manifest.
+
+    Algorithm (documented for reviewers; one-line command in
+    ``docs/m1/EXPERIMENT_BASELINE.md``):
+
+    1. collect files from :data:`FINGERPRINT_GLOBS` (``m1_offline/**/*.py``,
+       ``fixtures/m1/**/*``), excluding ``__pycache__``/``*.pyc``;
+    2. for each file compute ``sha256(file_bytes)``;
+    3. sort lines ``"<file_sha256>  <relative/POSIX/path>"`` by path;
+    4. fingerprint = ``sha256("\n".join(lines) + "\n")`` (UTF-8).
+
+    The old ad-hoc digest ``b4bb2931...`` was produced by an undocumented
+    script and is **superseded** by this algorithm.
+    """
+
+    manifest = dependency_manifest(root)
+    payload = "\n".join(manifest) + "\n"
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
 def environment_snapshot(root: Path | str = DEFAULT_REPO_ROOT) -> dict[str, Any]:
-    """Local provenance: date, worktree SHA, python version, platform."""
+    """Local provenance: dates, base/reviewed commits, dirty state, fingerprint.
+
+    ``base_sha`` is always the worktree baseline commit; ``implementation_commit``
+    is the commit the measured artifact was generated from (reports never imply
+    that the base SHA is HEAD).
+    """
+
     root = Path(root)
     return {
         "utc_date": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
         "utc_timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "git_sha": _git(root, "rev-parse", "HEAD"),
+        "base_sha": BASE_COMMIT_SHA,
+        "implementation_commit": _git(root, "rev-parse", "HEAD"),
+        "implementation_commit_note": IMPLEMENTATION_COMMIT_NOTE,
+        "working_tree_dirty": _git_is_dirty(root),
         "git_branch": _git(root, "branch", "--show-current"),
+        "dependency_fingerprint": dependency_fingerprint(root),
+        "dependency_fingerprint_algorithm": (
+            "sorted '<sha256(file bytes)>  <relative/POSIX path>' lines over "
+            "m1_offline/**/*.py + fixtures/m1/**/* (no __pycache__/.pyc), "
+            "joined with '\n' + trailing '\n', then sha256 of UTF-8 bytes"
+        ),
         "python_version": platform.python_version(),
         "python_executable": sys.executable,
         "platform": platform.platform(),
@@ -119,6 +214,7 @@ class RunReport:
     not_run: list[str] = field(default_factory=list)
     unverified: list[str] = field(default_factory=list)
     environment: dict[str, Any] = field(default_factory=dict)
+    sections: dict[str, Any] = field(default_factory=dict)
     disclaimer: str = DISCLAIMER
 
     def add_metric(
@@ -144,11 +240,20 @@ class RunReport:
             }
         )
 
+    def add_section(self, name: str, payload: Any) -> None:
+        """Attach a structured top-level section (e.g. full comparison details)."""
+
+        if not isinstance(name, str) or not name.strip():
+            raise ValueError("section name must be a non-empty str")
+        if name in {"schema", "title", "command", "environment", "metrics", "checks"}:
+            raise ValueError(f"section name collides with a reserved report key: {name}")
+        self.sections[name] = payload
+
     def measured_count(self) -> int:
         return sum(1 for m in self.metrics if m.evidence == MEASURED)
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        data: dict[str, Any] = {
             "schema": "m1.eval_report.v0",
             "title": self.title,
             "command": self.command,
@@ -162,6 +267,9 @@ class RunReport:
             "measured_metric_count": self.measured_count(),
             "disclaimer": self.disclaimer,
         }
+        for name, payload in self.sections.items():
+            data[name] = payload
+        return data
 
     def to_json(self) -> str:
         return json.dumps(self.to_dict(), ensure_ascii=False, indent=2, sort_keys=True)
@@ -179,11 +287,24 @@ def render_markdown(report: RunReport) -> str:
     lines.append("| field | value |")
     lines.append("| --- | --- |")
     lines.append(f"| UTC date | `{env.get('utc_date', 'UNKNOWN')}` |")
-    lines.append(f"| worktree SHA | `{env.get('git_sha', 'UNAVAILABLE')}` |")
+    lines.append(f"| base commit (worktree baseline) | `{env.get('base_sha', BASE_COMMIT_SHA)}` |")
+    lines.append(
+        f"| implementation commit (reviewed, artifact generated on top) | "
+        f"`{env.get('implementation_commit', 'UNAVAILABLE')}` |"
+    )
+    lines.append(
+        f"| working tree dirty at generation | `{env.get('working_tree_dirty', 'UNKNOWN')}` |"
+    )
     lines.append(f"| branch | `{env.get('git_branch', 'UNAVAILABLE')}` |")
+    lines.append(
+        f"| dependency fingerprint | `{env.get('dependency_fingerprint', 'UNAVAILABLE')}` |"
+    )
     lines.append(f"| python | `{env.get('python_version', platform.python_version())}` |")
     lines.append(f"| pytest | `{pytest_version()}` |")
     lines.append(f"| command | `{report.command}` |")
+    if env.get("implementation_commit_note"):
+        lines.append("")
+        lines.append(f"> Note: {env['implementation_commit_note']}")
     lines.append("")
     lines.append("## Metrics (planned vs measured)")
     lines.append("")
@@ -206,6 +327,16 @@ def render_markdown(report: RunReport) -> str:
         for check in report.checks:
             lines.append(f"| {check['check_id']} | {check['description']} | {check['status']} |")
         lines.append("")
+    if report.sections:
+        lines.append("## Structured sections")
+        lines.append("")
+        for name, payload in report.sections.items():
+            lines.append(f"### {name}")
+            lines.append("")
+            lines.append("```json")
+            lines.append(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True))
+            lines.append("```")
+            lines.append("")
     if report.artifacts:
         lines.append("## Artifacts")
         lines.append("")

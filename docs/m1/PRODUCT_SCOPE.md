@@ -5,7 +5,7 @@
 | 文档状态 | `DRAFT` / `NOT_FROZEN` |
 | 版本 | v0（2026-11-19） |
 | 负责范围 | B 线（M1 Offline Teacher）产品边界与验收矩阵；本文件由 b-core 起草，B-Lead 验收 |
-| 证据状态 | 本文件中的验收矩阵初始状态一律 `NOT_RUN`；只有 B-Lead 依据真实命令输出才能改为 `PASS`/`PARTIAL` |
+| 证据状态 | 本文件为撰写时（authoring-time）**初始快照**；§6/§7/§8 的数值与状态不构成最终验收结论。最终 MEASURED 数值见 `docs/m1/EXPERIMENT_BASELINE.md`；`PASS`/`PARTIAL`/`UNVERIFIED` 裁定权归 independent reviewer，以 `docs/m1/REVIEW_M1_OFFLINE.md` 为准。本文件不自行宣称 `PASS` |
 | 能力声明 | M0 Runtime 能力状态一律 UNVERIFIED；本文件不声明任何 Live Provider / M0 API 已实现或已验收 |
 | 数据 | 全部使用 Synthetic 或自编 CC0-1.0 数据；禁止真实个人数据、真实简历、真实 API Key |
 
@@ -115,27 +115,34 @@ JD、知识来源、题目均为自编 synthetic 数据。
 
 ## 6. 成功指标（全部为**计划值**；真实结果以命令输出为准）
 
-> 规则：本节数值均为**计划目标（plan values）**，不是已经达成的 PASS；只有 B-Lead 复核真实
-> 命令输出后，才能在验收矩阵中标记 VERIFIED/PARTIAL。任何"真实教学效果"不在此列。
+> 规则：本节数值均为**计划目标（plan values）**，不是已经达成的 PASS。本节数字是撰写时
+> **初始快照**，仅供作者自检，不作为验收证据；最终 MEASURED 数值以
+> `docs/m1/EXPERIMENT_BASELINE.md` 为准，验收裁定（`PASS`/`PARTIAL`/`UNVERIFIED`）归
+> independent reviewer，以 `docs/m1/REVIEW_M1_OFFLINE.md` 为准。本文件不自行宣称 PASS。
+> 任何"真实教学效果"不在此列。
 
 | 指标 | 计划值（plan value） | 当前证据 / 状态 |
 | --- | --- | --- |
-| b-core 8 个测试文件真实通过 | 100% 通过，0 skip（计划值） | 真实运行 161 passed（见 §8 命令；非最终验收） |
+| b-core 8 个测试文件真实通过 | 100% 通过，0 skip（计划值） | 初始快照：撰写时真实运行 **165 passed**；最终 MEASURED 见 `docs/m1/EXPERIMENT_BASELINE.md`（完整 `tests/m1_offline`）与 `docs/m1/REVIEW_M1_OFFLINE.md` |
 | M1 包网络类 import 数 | 0（计划值） | 静态 AST + fresh subprocess 检查通过（b-core 测试） |
 | M1 包 `autoteacher_m0` import 数 | 0（计划值） | 同上 |
-| Hint Ladder 安全违规（无证据/默认 FULL_SOLUTION） | 0 次（计划值） | b-core 单元级覆盖通过；端到端 NOT_RUN |
+| Hint Ladder 安全违规（无证据/默认 FULL_SOLUTION） | 0 次（计划值） | b-core 单元级覆盖通过（初始快照）；端到端判定归 independent reviewer（见评审矩阵） |
 | 无证据提升 mastery 的次数 | 0（计划值） | b-core 单元级覆盖通过 |
 | 失败证据（带 error_codes）上调 mastery 的次数 | 0（计划值） | b-core 单元级覆盖通过 |
 | 同题重复 → 跨技能迁移次数 | 0（计划值） | b-core 单元级覆盖通过 |
 | 核心模块测试覆盖率 | ≥ 80%（计划值，B-Lead 决定是否测量） | NOT_RUN（未测量） |
-| CF Teacher fixtures 数量 | ≥ 12 道题 + 隐藏用例（计划值） | b-cf 负责；验收 NOT_RUN |
-| Interview 题库数量 | ≥ 20 题 + ≥ 6 版本 JD + ≥ 6 知识更新（计划值） | b-interview 负责；验收 NOT_RUN |
-| 闭环轮次 | ≥ 3 轮且可回放（计划值） | b-eval 负责；验收 NOT_RUN |
-| v0/v1 对比 | 固定 seed、可复现、明确 synthetic-only 结论（计划值） | b-eval 负责；验收 NOT_RUN |
-| demo 确定性 | 连续 2 次 `python -m m1_offline.demo` 输出一致（计划值） | b-eval 负责；验收 NOT_RUN |
+| CF Teacher fixtures 数量 | ≥ 12 道题 + 隐藏用例（计划值） | 已交付（b-cf；`fixtures/m1/cf/**`）；实测数量与验收裁定见 `docs/m1/REVIEW_M1_OFFLINE.md` |
+| Interview 题库数量 | ≥ 20 题 + ≥ 6 版本 JD + ≥ 6 知识更新（计划值） | 已交付（b-interview；`fixtures/m1/interview/**`）；实测数量与验收裁定见评审矩阵 |
+| 闭环轮次 | ≥ 3 轮且可回放（计划值） | 已交付（b-eval；`m1_offline/evaluation/**`）；实测轮次与验收裁定见评审矩阵 |
+| v0/v1 对比 | 固定 seed、可复现、明确 synthetic-only 结论（计划值） | 已交付（b-eval）；实测结论与验收裁定见评审矩阵 |
+| demo 确定性 | 连续 2 次 `python -m m1_offline.demo` 输出一致（计划值） | 已交付（b-eval；`m1_offline/demo.py`）；确定性实测见 `docs/m1/EXPERIMENT_BASELINE.md` |
 | 真实教学效果 | 不承诺（非目标） | 永远不声明 |
 
 ## 7. 交付物清单（B 线）
+
+> 说明：下表"已交付"仅表示对应文件已进入冻结提交（基线 `0bb13d2`），**不表示验收通过**；
+> `PASS`/`PARTIAL`/`UNVERIFIED` 裁定归 independent reviewer，以 `docs/m1/REVIEW_M1_OFFLINE.md`
+> 为准。本表状态为撰写时**初始快照**。
 
 | 交付物 | 路径 | 所有者 | 状态 |
 | --- | --- | --- | --- |
@@ -147,20 +154,25 @@ JD、知识来源、题目均为自编 synthetic 数据。
 | 课程规划器 | `m1_offline/curriculum_planner.py` | b-core | 已落地，测试通过 |
 | 事件记忆 | `m1_offline/memory.py` | b-core | 已落地，测试通过 |
 | 规则诊断引擎 | `m1_offline/diagnostics.py` | b-core | 已落地，测试通过 |
-| CF Teacher（fixtures/judge/teacher） | `m1_offline/cf/`, `fixtures/m1/cf/` | b-cf | 开发中；验收 NOT_RUN |
-| Interview Coach / Freshness | `m1_offline/interview/`, `m1_offline/freshness.py`, `fixtures/m1/interview/` | b-interview | 开发中；验收 NOT_RUN |
-| 评测/闭环/demo | `m1_offline/evaluation/`, `m1_offline/demo.py` | b-eval | 开发中；验收 NOT_RUN |
+| CF Teacher（fixtures/judge/teacher） | `m1_offline/cf/`, `fixtures/m1/cf/` | b-cf | 已交付（见冻结提交 `0bb13d2`）；验收裁定归 independent reviewer（见评审矩阵） |
+| Interview Coach / Freshness | `m1_offline/interview/`, `m1_offline/freshness.py`, `fixtures/m1/interview/` | b-interview | 已交付（见冻结提交 `0bb13d2`）；验收裁定归 independent reviewer（见评审矩阵） |
+| 评测/闭环/demo | `m1_offline/evaluation/`, `m1_offline/demo.py` | b-eval | 已交付（见冻结提交 `0bb13d2`）；验收裁定归 independent reviewer（见评审矩阵） |
 | 本文件（产品范围） | `docs/m1/PRODUCT_SCOPE.md` | b-core | 已落地（v0 draft） |
 | Teacher Core 架构 | `docs/m1/TEACHER_CORE_ARCHITECTURE.md` | b-core | 已落地（v0 draft） |
 | 决策记录（ADR） | `docs/m1/ADR-TEACHER-CORE.md` | b-core | 已落地（Proposed） |
 | Runtime 边界（只读抽象） | `docs/interfaces/teacher_runtime_boundary_v0.md` | b-core | 已落地（v0 draft, NOT_FROZEN） |
 
-## 8. 验收矩阵映射（B-01..B-08，初始 NOT_RUN）
+## 8. 验收矩阵映射（B-01..B-08；工作假设，权威矩阵见任务书 §8 + 评审报告）
 
-> 说明：B-01..B-08 的**行归属**为本文件的工作假设（b-core 起草），最终以 B-Lead 验收矩阵为准。
-> 列 "本地证据" 仅记录已完成真实命令的运行结果，**不等于**验收结论；"验收状态"列在 B-Lead
-> 复核前一律为 `NOT_RUN`。命令：`cd /root/at-m1-offline && "/root/Autonomous Teacher/.venv/bin/python"
-> -m pytest <files> -q`。
+> **权威性声明（P2-4）**：本表是 b-core 在撰写时给出的**行归属工作假设**，**不是权威验收矩阵**。
+> B-01..B-08 的权威定义以 **B 线任务书 §8** 为准，逐项验收结论以
+> **`docs/m1/REVIEW_M1_OFFLINE.md`**（independent reviewer）为准；若本表与二者冲突，一律以
+> 任务书 §8 + 评审报告为准。
+>
+> **不预填 PASS**：下表"验收状态"列固定为 `NOT_RUN`，其含义仅为"本文件未做验收结论"，**不代表**
+> reviewer 的最终裁定；本文件不自行宣称任何 `PASS`/`PARTIAL`。"本地证据"列仅记录撰写时真实
+> 命令输出（**初始快照**），不等于验收结论。命令：
+> `cd /root/at-m1-offline && "/root/Autonomous Teacher/.venv/bin/python" -m pytest tests/m1_offline -q`。
 
 | ID | 验收项 | 交付物/证据文件 | 本地证据（真实运行，非验收） | 验收状态（初始） |
 | --- | --- | --- | --- | --- |
@@ -169,9 +181,9 @@ JD、知识来源、题目均为自编 synthetic 数据。
 | B-03 | Mock Runtime Port：确定性、`simulated=True`、错误注入、零网络 | `m1_offline/runtime_port.py`, `tests/m1_offline/test_runtime_port.py` | `test_runtime_port.py` 通过 | NOT_RUN |
 | B-04 | 证据驱动 Learner Model + 规则诊断：无证据不涨、失败不涨、重复不迁移、UNKNOWN/NEEDS_REVIEW | `m1_offline/learner_model.py`, `m1_offline/diagnostics.py`, `test_learner_model.py`, `test_diagnostics.py` | 2 个 test 文件通过 | NOT_RUN |
 | B-05 | 教学策略/Hint Ladder + 课程规划/记忆：默认 LIGHT、升级需证据、rationale/balance/policy_version、jsonl/delete | `m1_offline/teaching_policy.py`, `curriculum_planner.py`, `memory.py`, 对应 3 个测试 | 3 个 test 文件通过 | NOT_RUN |
-| B-06 | CF Teacher 端到端：≥12 synthetic 题 + 隐藏用例、独立 judge、多轮教学动作、spec | `m1_offline/cf/**`, `fixtures/m1/cf/**`, `docs/m1/CF_TEACHER_SPEC.md`, b-cf 测试 | 未运行（b-cf 交付后由 B-Lead 复跑） | NOT_RUN |
-| B-07 | Interview Coach + Freshness：≥20 题、多轮追问、独立 rubric、项目事实边界、新鲜度、注入负例 | `m1_offline/interview/**`, `m1_offline/freshness.py`, `fixtures/m1/interview/**`, b-interview 文档/测试 | 未运行（b-interview 交付后复跑） | NOT_RUN |
-| B-08 | 离线评测闭环：≥3 轮闭环、按 event_id 回放、独立评测器、public/hidden 分离、污染/负例、v0/v1 对比、demo、诚实结论 | `m1_offline/evaluation/**`, `m1_offline/demo.py`, `docs/m1/EVALUATION_PROTOCOL.md`, b-eval 测试 | 未运行（b-eval 交付后复跑） | NOT_RUN |
+| B-06 | CF Teacher 端到端：≥12 synthetic 题 + 隐藏用例、独立 judge、多轮教学动作、spec | `m1_offline/cf/**`, `fixtures/m1/cf/**`, `docs/m1/CF_TEACHER_SPEC.md`, b-cf 测试 | 已交付（b-cf）；本文件未单独复跑，最终结论见任务书 §8 + 评审矩阵 | NOT_RUN |
+| B-07 | Interview Coach + Freshness：≥20 题、多轮追问、独立 rubric、项目事实边界、新鲜度、注入负例 | `m1_offline/interview/**`, `m1_offline/freshness.py`, `fixtures/m1/interview/**`, b-interview 文档/测试 | 已交付（b-interview）；本文件未单独复跑，最终结论见任务书 §8 + 评审矩阵 | NOT_RUN |
+| B-08 | 离线评测闭环：≥3 轮闭环、按 event_id 回放、独立评测器、public/hidden 分离、污染/负例、v0/v1 对比、demo、诚实结论 | `m1_offline/evaluation/**`, `m1_offline/demo.py`, `docs/m1/EVALUATION_PROTOCOL.md`, b-eval 测试 | 已交付（b-eval）；本文件未单独复跑，最终结论见任务书 §8 + 评审矩阵 | NOT_RUN |
 
 ## 9. 风险与依赖
 

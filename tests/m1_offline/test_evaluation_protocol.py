@@ -12,6 +12,8 @@ Rules under test:
 from __future__ import annotations
 
 import inspect
+import json
+import re
 from pathlib import Path
 
 import pytest
@@ -304,3 +306,66 @@ def test_baseline_document_exists_and_is_bounded() -> None:
     text = baseline.read_text(encoding="utf-8")
     for term in ("NOT_RUN", "MEASURED", "not real teaching effect", "SHA"):
         assert term in text, f"baseline document missing {term!r}"
+
+
+# ---------------------------------------------------------------------------
+# Post-review fixes: reproducible dependency fingerprint / precise provenance
+# ---------------------------------------------------------------------------
+def test_dependency_fingerprint_is_reproducible_and_documented() -> None:
+    """P2-2: the fingerprint must be reproducible with the documented algorithm."""
+
+    from m1_offline.evaluation.report import (
+        BASE_COMMIT_SHA,
+        dependency_fingerprint,
+        dependency_manifest,
+    )
+
+    first = dependency_fingerprint(REPO_ROOT)
+    second = dependency_fingerprint(REPO_ROOT)
+    assert first == second
+    assert re.fullmatch(r"[0-9a-f]{64}", first), first
+
+    manifest = dependency_manifest(REPO_ROOT)
+    assert manifest, "dependency manifest must not be empty"
+    paths = [line.split("  ", 1)[1] for line in manifest]
+    assert paths == sorted(paths)
+    assert any(path.startswith("m1_offline/") for path in paths)
+    assert any(path.startswith("fixtures/m1/") for path in paths)
+    assert not any("__pycache__" in path for path in paths)
+
+    baseline = (REPO_ROOT / "docs/m1/EXPERIMENT_BASELINE.md").read_text(encoding="utf-8")
+    assert first in baseline, "EXPERIMENT_BASELINE.md must record the reproducible fingerprint"
+    assert "dependency_fingerprint" in baseline, "doc must expose the one-line command"
+    assert BASE_COMMIT_SHA in baseline
+
+
+def test_report_artifacts_record_precise_commit_provenance() -> None:
+    """P2-1: artifacts record base_sha + implementation_commit, never a fake HEAD."""
+
+    from m1_offline.evaluation.report import BASE_COMMIT_SHA, dependency_fingerprint
+
+    for name in ("eval_baseline_v1.json", "contamination_v1.json"):
+        path = REPO_ROOT / "docs/m1/reports" / name
+        assert path.is_file(), f"missing artifact: {name}"
+        data = json.loads(path.read_text(encoding="utf-8"))
+        env = data["environment"]
+        assert "git_sha" not in env, f"{name} must not imply HEAD==base SHA"
+        assert env["base_sha"] == BASE_COMMIT_SHA
+        assert isinstance(env["implementation_commit"], str) and env["implementation_commit"]
+        assert env["implementation_commit_note"]
+        assert env["working_tree_dirty"] in (True, False, None)
+        assert env["dependency_fingerprint"] == dependency_fingerprint(REPO_ROOT)
+        assert "docs/parallel/STATUS.md" in env["implementation_commit_note"]
+
+
+def test_baseline_document_references_persisted_failure_cases() -> None:
+    """P1-1: the baseline doc must point at the exact persisted artifact key."""
+
+    baseline = (REPO_ROOT / "docs/m1/EXPERIMENT_BASELINE.md").read_text(encoding="utf-8")
+    assert "comparison.failure_cases" in baseline
+    assert "eval_baseline_v1.json" in baseline
+    artifact = json.loads(
+        (REPO_ROOT / "docs/m1/reports/eval_baseline_v1.json").read_text(encoding="utf-8")
+    )
+    assert artifact["comparison"]["failure_cases"]
+    assert str(len(artifact["comparison"]["failure_cases"])) in baseline

@@ -4,7 +4,7 @@
       "check_id": "C1_hidden_public_separation",
       "counts": {
         "hidden_file_count": 21,
-        "public_file_count": 103
+        "public_file_count": 105
       },
       "description": "hidden fixtures exist and are not part of the public surface",
       "status": "PASS"
@@ -14,7 +14,7 @@
       "counts": {
         "hash_window_hits": 0,
         "needles_checked": 34,
-        "scanned_public_files": 103,
+        "scanned_public_files": 105,
         "substring_hits": 0
       },
       "description": "hidden-only fixture text does not appear in public docs/traces/fixtures/teacher sources",
@@ -34,23 +34,28 @@
       "check_id": "C4_no_network_or_real_data",
       "counts": {
         "findings": 0,
-        "scanned_files": 138
+        "scanned_files": 139
       },
       "description": "scoped code/fixtures/docs contain no network imports, API keys or real-data shapes",
       "status": "PASS"
     }
   ],
-  "command": "cd /root/at-m1-offline && \"/root/Autonomous Teacher/.venv/bin/python\" -c \"run_contamination_suite(...)\"",
+  "command": "cd /root/at-m1-offline && \"/root/Autonomous Teacher/.venv/bin/python\" - <<'PY' ... run_contamination_suite(REPO_ROOT, injection_texts=load_injection_texts(REPO_ROOT), system_instructions=[json.dumps(InterviewCoach(MockRuntimePort(), InterviewRubric()).system_instructions(), ensure_ascii=False, sort_keys=True)]) ... PY",
   "disclaimer": "Offline synthetic leakage scan on local files only; not a security audit and not real teaching evidence.",
   "environment": {
+    "base_sha": "3e7afee077845a071cd364e93ab209cac20b2d5f",
     "cwd": "/root/at-m1-offline",
+    "dependency_fingerprint": "ad30fbdae1d7318d346b0625a1157df20f9139ef2ece00f7f118a1c9ced6abd0",
+    "dependency_fingerprint_algorithm": "sorted '<sha256(file bytes)>  <relative/POSIX path>' lines over m1_offline/**/*.py + fixtures/m1/**/* (no __pycache__/.pyc), joined with '\n' + trailing '\n', then sha256 of UTF-8 bytes",
     "git_branch": "work/m1-offline-design",
-    "git_sha": "3e7afee077845a071cd364e93ab209cac20b2d5f",
+    "implementation_commit": "0bb13d27b069dfb71b31ce7e02f9cde41f9bb071",
+    "implementation_commit_note": "frozen reviewed implementation commit; post-review report/doc fixes were generated on top of it -- the final commit SHA is recorded in docs/parallel/STATUS.md (Lead-owned), never implied to be this base SHA",
     "platform": "Linux-6.17.13-2-pve-x86_64-with-glibc2.39",
     "python_executable": "/root/Autonomous Teacher/.venv/bin/python",
     "python_version": "3.11.15",
     "utc_date": "2026-11-19",
-    "utc_timestamp": "2026-11-19T18:20:45Z"
+    "utc_timestamp": "2026-11-19T18:48:17Z",
+    "working_tree_dirty": true
   },
   "hidden_text_echoed": false,
   "overall_ok": true,

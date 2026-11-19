@@ -157,6 +157,12 @@ to_jsonl/from_jsonl` 做顺序回放与持久化；`delete(learner_id)` 同时�
 | 错误注入 | script `{"error": ...}` / `{"raise": ...}` | 对应 2.5 TRANSPORT/PROVIDER 负例 |
 | trace | `TraceEvent` + `LearningMemory` | 对应 2.7；JSONL 持久化 |
 
+> **补充（B 线内部契约，非 A 线能力）**：`m1_offline.types.TeacherAction.kind` 的取值包含
+> `LIGHT_HINT`、`INVARIANT_HINT`、`STRUCTURE_HINT`、`FULL_SOLUTION`、`SOCRATIC_QUESTION`、
+> `EXPLAIN`、`PRACTICE`、`REVIEW`、`ASK_CLARIFICATION`；其中 **`PRACTICE` 为 reserved/保留值**
+> （类型契约保留，当前策略不发出）。该枚举属于 B 线内部教学动作契约，不影响本文的运行时字段
+> 语义，也不构成 A 线能力声明（A 线未冻结、M0 能力一律 `UNVERIFIED`）。
+
 ## 5. 版本与冻结规则
 
 1. **版本**：本文为 `v0 draft`（`NOT_FROZEN`）。抽象类型名/语义在冻结前可变；B 线内部契约
