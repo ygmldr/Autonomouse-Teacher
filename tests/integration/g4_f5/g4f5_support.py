@@ -166,7 +166,7 @@ def admission_document(*, scenario: str = "ok_usage", deadline_ms: int = 30000,
 def start_controller(tmp_path: Path, *, gate: TrustedSendGate,
                      scenario: str = "ok_usage", deadline_ms: int = 30000,
                      max_calls: int = 8, attempts: AttemptJournal | None = None,
-                     broker=None, fake=None):
+                     broker=None, fake=None, dispatch_journal=None):
     admission_path = tmp_path / "admission.json"
     admission_path.write_text(json.dumps(admission_document(
         scenario=scenario, deadline_ms=deadline_ms, max_calls=max_calls)),
@@ -183,7 +183,8 @@ def start_controller(tmp_path: Path, *, gate: TrustedSendGate,
     controller = TrustedController(admission, broker=broker, fake=fake,
                                    attempts=attempts, expected_uid=65534,
                                    register_admission=False,
-                                   dispatch_gate=gate)
+                                   dispatch_gate=gate,
+                                   dispatch_journal=dispatch_journal)
     return controller, broker, fake, attempts, gate
 
 
