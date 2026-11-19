@@ -212,3 +212,44 @@
 | 版本 | UTC | 内容 |
 |---|---|---|
 | v1 | 2026-11-19T18:39Z | 初始勘误：E-01（F-03 口径）、E-02（F-02）、E-03（F-04/F-05）、E-04（RISK_DISPOSITION 快照）、E-05（packet-v2 身份/P2-02/P2-07）、E-06（F-01 test-only delta 87aa52f/待 addendum） |
+
+---
+
+## 12. E-07 — Reviewer addendum 合并与 F-01 状态更新（append-only）
+
+- **追加时间（UTC）**：`2026-11-19T18:44Z`。本节**只在文件末尾追加**；上文 §0–§11（含 v1 版本记录表）字节未改。
+- **更新对象**：E-06（原 `F-01`）在写入时点（`2026-11-19T18:39Z`）记录的“addendum 待合并 / F-01
+  `UNVERIFIED/NOT_RUN`”属**时点快照**；现由本条在事实层面更新，E-06 正文不改。
+- **addendum 身份**：`docs/g4h0/INDEPENDENT_REVIEW_ADDENDUM.md`，ID
+  `G4H0-INDEPENDENT-REVIEW-ADDENDUM-v1`；review 分支提交
+  `4bd42d5755d47fb73a851caa41e7678d6daeaeb0`（Lead 已合并；Reviewer `a-reviewer`，未参与实现/证据生成/
+  文档撰写）。同提交含 `docs/g4h0/review-evidence/delta_*.log`。
+- **delta 复审对象**：`87aa52f34eab0185d3512a6e62e5b075748b5bbb`（test-only，2 文件）→ 集成 HEAD
+  `b57494a5eecb2406d5a20605b04e2a54cda0dae8`；`git diff 813e6a6..b57494a` = 6 files（+560/−20），其中
+  `src/` 与受保护实现文件**零 diff**（实现对象与冻结 `813e6a6` 等价）。
+- **独立复验数字**（Reviewer 自跑；引自 addendum §2/§3 与 `review-evidence/delta_*.log`）：
+
+  | 项 | 结果 | 证据日志 |
+  |---|---|---|
+  | `F-01` 单测 `test_retry_bound_stays_fail_closed_for_a_late_publisher` 单独 ×10 | **10/10 passed**（对照：冻结 `813e6a6` 上 0 passed / 10 failed） | `delta_f01_single_10x.log` |
+  | `pytest tests/integration/g4_h0 -q` 连续 ×10（每次全新进程） | **10/10 次均 `14 passed`** | `delta_g4h0_dir_10x.log` |
+  | `pytest tests/integration/g4_f5 -q` | **17 passed** | `delta_g4_f5.log` |
+  | `ruff check tests/integration/g4_h0/` | **All checks passed!**（exit 0） | `delta_ruff.log` |
+  | delta 的 `src/` 与受保护文件 | **零 diff**（仅 test-only + docs/evidence） | `delta_scope.log` |
+
+- **状态更新**：`F-01` = **`CLOSED`（独立确认）**；Reviewer 维持主审裁定
+  `PASS_FOR_G4H0_READINESS_NO_KEY_SCOPE`。**范围限制不变**：仅覆盖“G4-H0 无 Key 准入准备/证据就绪”，
+  **不表示且禁止宣称** `E5_PRELIVE_FULL/E5-P04 PASS`、G4-H1/H2、G5、G6、M0 GO、部署或 Live 授权。
+- **与 E-06 的关系**：E-06 的事实（`87aa52f` test-only、已合并 `b57494a`、纯测试无 `src/` 变更）与处置建议
+  保持不变且已被独立确认；仅“待合并/UNVERIFIED”状态更新为上述 `CLOSED`。§7 E-06 原文字节不改。
+- **仍 OPEN（不因本条关闭）**：
+  - `E-02`（原 `F-02`）：目录项未 fsync 的掉电持久性残余 → **G4-H1 前** `FIX`（fsync 目录 + 测试）或明示接受；
+  - `E-03`（原 `F-04`/`F-05`）：`O_NONBLOCK` / 256 截断 nit → 下个加固窗口；
+  - `E-01`/`E-04`/`E-05`：文档口径、时点快照、packet-v2 披露 → 按 `HUMAN_DECISIONS.md`
+    （`HD-01..HD-08`、`HD-11..HD-13`）由维护者处置。以上均**未修/未签收**，不得写成 PASS。
+- **维护者决策（本项，留空不代签）**：`[ ] ACCEPT（记录 F-01 CLOSED）  [ ] DEFER`
+  签核人：`__________`　UTC：`__________`　条件：`__________`。
+  为保持 append-only，本节不修改 §9 既有决策汇总表。
+- **状态常量（未变）**：`LiveGate=BLOCKED`、`G4-H=NOT_AUTHORIZED`、`G5=BLOCKED`、`G6=NOT_RUN`、
+  `M0=DECISION_PENDING`、`E5_PRELIVE_FULL=BLOCKED_PENDING_HUMAN_DEPLOYMENT`。
+- **append-only 记录**：v1.1 — 2026-11-19T18:44Z 追加本节（E-07）；上文 v1 字节未改。
