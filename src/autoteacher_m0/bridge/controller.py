@@ -158,6 +158,26 @@ def _hex32(value: object) -> bool:
             and all(char in "0123456789abcdef" for char in value))
 
 
+def _preserved_uncertain_reason(row: Mapping[str, object], fallback: str) -> str:
+    """Keep the original failure-window reason when recovery re-confirms uncertainty.
+
+    A ``SETTLEMENT_UNCERTAIN`` row already carries the classification of the
+    window that made it uncertain (for example
+    ``REVOKED_PRE_SEND:RUN_AUTHORIZATION_REVOKED`` or
+    ``DEADLINE_BEFORE_FAKE_RESULT``). Startup recovery may only add evidence; it
+    must never rewrite that classification into a downstream receipt-document
+    defect (G4-F P2-06). Both facts stay visible in the bounded reason field and
+    the conservative state/held semantics are unchanged.
+    """
+    previous = row.get("reason")
+    if (row.get("state") == "SETTLEMENT_UNCERTAIN"
+            and isinstance(previous, str) and previous):
+        if previous == fallback:
+            return previous
+        return f"{previous}|RECOVERY_EVIDENCE:{fallback}"[:256]
+    return fallback
+
+
 class BridgeError(Exception):
     def __init__(self, code: str):
         super().__init__(code)
@@ -212,6 +232,13 @@ class _CancelState:
     reason: str | None
     terminal: bool
     touched: float
+    # G4-H0 P2-05: observation-only progress flags read by the envelope-level
+    # deadline observation. They never authorize, cancel or block anything;
+    # they only let a pre-send timeout be journaled even when the trusted
+    # launcher terminates the worker thread before its own per-dispatch record
+    # can be emitted.
+    reserved: bool = False
+    dispatched: bool = False
 
 
 @dataclass
@@ -379,6 +406,36 @@ class TrustedController:
     def _audit_protocol_rejection(self, env: Envelope, code: str) -> None:
         record = self._new_dispatch_record(env.payload, env.transport_id)
         self._emit_dispatch_record(record, error_code=code)
+
+    def _observe_envelope_deadline(self, env: Envelope, state: _CancelState | None,
+                                   code: str) -> None:
+        """Journal a deadline seen before the worker emitted any terminal frame.
+
+        G4-H0 P2-05: the per-dispatch record is emitted by the worker thread in
+        ``_handle_payload_serial``'s ``finally``. When the trusted launcher stops
+        the process while that thread is still blocked (for example in the
+        pre-Reserve test delay), the record is lost. This observation is written
+        from the client-facing stream at the moment the deadline is observed,
+        so the dispatch window exists even then.
+
+        It is observation-only: no ``dispatch_seq`` is consumed, no allow/deny
+        decision uses it, and ``reserved``/``dispatched`` are recorded as the
+        worker's progress flags observed at that instant (``null`` when the
+        transport has no state). It never claims a send that did not happen.
+        """
+        record = describe_request(
+            env.payload, approved=dict(self.admission.tool_schemas),
+            origin=self._origin_for(env.transport_id), transport_id=env.transport_id)
+        record["instance_id"] = self.instance_id
+        record["dispatch_seq"] = None
+        record["observation_only"] = True
+        record["observation_phase"] = "envelope_deadline_no_terminal_frame"
+        record["reserved"] = None if state is None else bool(state.reserved)
+        record["dispatched"] = None if state is None else bool(state.dispatched)
+        record["settled"] = False
+        record["error_code"] = code
+        record["outcome"] = "deadline_observed"
+        self.dispatch_audit.append(record)
 
     def cancel(self, *, transport_id: str, reason: str) -> None:
         """Cancel exactly one transport's stream; repeated/unknown ids are safe.
@@ -584,6 +641,14 @@ class TrustedController:
                         if not worker.is_alive():
                             break
                         if time.monotonic() > deadline:
+                            try:
+                                # G4-H0 P2-05: journal the deadline from the
+                                # client-facing stream so a killed worker cannot
+                                # erase the dispatch-window observation.
+                                self._observe_envelope_deadline(
+                                    env, state, deadline_protocol_code())
+                            except Exception:  # noqa: BLE001 - never mask the abort
+                                pass
                             yield self._error_envelope(
                                 env, deadline_protocol_code(), seq=seq)
                             return
@@ -928,6 +993,9 @@ class TrustedController:
                                             call_id=prepared.call_id, deadline=deadline)
             reservation_id = reserved["reservation_id"]
             audit["reserved"] = True
+            if state is not None:
+                # Observation-only progress for the P2-05 envelope observation.
+                state.reserved = True
             audit["reservation_id"] = reservation_id
             # Read-only copy of the Broker's authoritative upper bound; the gate
             # uses it only to size its conservative held view.
@@ -1028,6 +1096,9 @@ class TrustedController:
                 # G4-F2: the Fake send boundary is exactly here; record it for
                 # the dispatch journal before any bytes can reach the child.
                 audit["dispatched"] = True
+                if state is not None:
+                    # Observation-only progress for the P2-05 envelope observation.
+                    state.dispatched = True
                 try:
                     receipt, frames = self._invoke_fake(payload_bytes, nonce,
                                                         deadline, state,
@@ -1666,12 +1737,14 @@ class TrustedController:
                     self.attempts.mark_worst_case(
                         attempt_id, reason=f"BROKER_ALREADY_FAILED:{reason}")
                     continue
-                self.attempts.mark_settlement_uncertain(attempt_id, reason=reason)
+                self.attempts.mark_settlement_uncertain(
+                    attempt_id, reason=_preserved_uncertain_reason(row, reason))
                 continue
             status_reply = self._broker_status(row["reservation_id"], deadline)
             if not status_reply.get("ok"):
                 self.attempts.mark_settlement_uncertain(
-                    attempt_id, reason="BROKER_STATUS_UNAVAILABLE")
+                    attempt_id,
+                    reason=_preserved_uncertain_reason(row, "BROKER_STATUS_UNAVAILABLE"))
                 continue
             status = status_reply.get("status")
             if status == "OK":
@@ -1685,7 +1758,8 @@ class TrustedController:
                 continue
             if status != "PENDING":
                 self.attempts.mark_settlement_uncertain(
-                    attempt_id, reason="BROKER_STATUS_UNKNOWN")
+                    attempt_id,
+                    reason=_preserved_uncertain_reason(row, "BROKER_STATUS_UNKNOWN"))
                 continue
             document = verified
             authoritative = document.get("completeness") == "AUTHORITATIVE"
@@ -1700,7 +1774,8 @@ class TrustedController:
                                               usage=camel, deadline=deadline)
             except (BridgeError, BrokerClientError):
                 self.attempts.mark_settlement_uncertain(
-                    attempt_id, reason="RECONCILE_SETTLE_FAILED")
+                    attempt_id,
+                    reason=_preserved_uncertain_reason(row, "RECONCILE_SETTLE_FAILED"))
                 continue
             try:
                 self._apply_completion_reply(
@@ -1708,7 +1783,8 @@ class TrustedController:
                     authoritative=authoritative, deadline=deadline)
             except BridgeError:
                 self.attempts.mark_settlement_uncertain(
-                    attempt_id, reason="RECONCILE_SETTLE_REJECTED")
+                    attempt_id,
+                    reason=_preserved_uncertain_reason(row, "RECONCILE_SETTLE_REJECTED"))
         return self.attempts.attempts()
 
     def _upgrade_from_receipt_file(self, row: dict, receipt_root: Path) -> bool:

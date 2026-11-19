@@ -20,12 +20,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
+import errno
 import hashlib
 import json
 import os
 from pathlib import Path, PurePosixPath
 import re
 from stat import S_ISDIR, S_ISREG, S_IWGRP, S_IWOTH
+import time
 from typing import Any, Mapping
 
 from autoteacher_m0.contracts import ErrorCode, RuntimeFailure
@@ -86,6 +88,18 @@ BINDING_COMPONENTS = tuple(
 # pre-start check is explicitly not enough.
 TOCTOU_CHECKPOINTS = ("pre_start", "pre_reserve", "pre_dispatch")
 _USE_LOG_SCHEMA = "at-m0/authorization-use/v1"
+# Use records are published atomically: a same-directory temporary file holds the
+# not-yet-visible body and ``os.link`` makes it visible in one step. The prefix
+# can never collide with a final record name (``<sha256-hex>.json``) and these
+# transient entries are excluded from the MAX_AUTHORIZATION_USES count.
+_USE_RECORD_TEMP_PREFIX = ".use-record-tmp-"
+_USE_RECORD_TEMP_SUFFIX = ".tmp"
+# A use record is never a grant, so reading one that is still being written can
+# only affect replay classification. Keep a small bounded retry window for
+# records produced by a pre-fix/legacy half-written publisher; after the bound
+# the reader still fails closed with AUTHORIZATION_USE_RECORD_INVALID.
+_USE_RECORD_READ_ATTEMPTS = 20
+_USE_RECORD_READ_DELAY_SECONDS = 0.01
 _DIGEST = re.compile(r"[a-f0-9]{64}\Z")
 _IDENTIFIER = re.compile(r"[A-Za-z0-9._:-]{1,128}\Z")
 _USD = re.compile(r"(?:0|[1-9][0-9]{0,5})(?:\.[0-9]{1,6})?\Z")
@@ -784,18 +798,40 @@ class AuthorizationUse:
 
 
 def _read_use_record(path: Path) -> str:
+    """Read and strictly validate one published use record.
+
+    The record is only ever used to classify a repeated consumption as a
+    replay; it never grants anything. It is read through one descriptor opened
+    with ``O_NOFOLLOW`` and all metadata comes from ``fstat`` on that same
+    descriptor, so a last-moment symlink or type swap cannot redirect the read.
+    """
     if path.is_symlink():
         raise AuthorizationRejected(("AUTHORIZATION_USE_RECORD_INVALID",))
     try:
-        info = path.stat()
-    except OSError:
+        descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
+    except OSError as error:
+        if error.errno == errno.ELOOP:
+            raise AuthorizationRejected(("AUTHORIZATION_USE_RECORD_INVALID",)) from None
         raise AuthorizationRejected(("AUTHORIZATION_USE_RECORD_UNREADABLE",)) from None
-    if not S_ISREG(info.st_mode) or not 0 < info.st_size <= MAX_USE_RECORD_BYTES:
-        raise AuthorizationRejected(("AUTHORIZATION_USE_RECORD_INVALID",))
     try:
-        raw = path.read_bytes()
+        info = os.fstat(descriptor)
+        if not S_ISREG(info.st_mode) or not 0 < info.st_size <= MAX_USE_RECORD_BYTES:
+            raise AuthorizationRejected(("AUTHORIZATION_USE_RECORD_INVALID",))
+        chunks: list[bytes] = []
+        remaining = MAX_USE_RECORD_BYTES + 1
+        while remaining > 0:
+            chunk = os.read(descriptor, min(remaining, 65536))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        raw = b"".join(chunks)
     except OSError:
         raise AuthorizationRejected(("AUTHORIZATION_USE_RECORD_UNREADABLE",)) from None
+    finally:
+        os.close(descriptor)
+    if len(raw) != info.st_size or len(raw) > MAX_USE_RECORD_BYTES:
+        raise AuthorizationRejected(("AUTHORIZATION_USE_RECORD_INVALID",))
     try:
         parsed = _parse_json_object(raw, label="authorization use record")
     except ValueError:
@@ -806,6 +842,75 @@ def _read_use_record(path: Path) -> str:
             or not isinstance(epoch, str) or not _IDENTIFIER.fullmatch(epoch)):
         raise AuthorizationRejected(("AUTHORIZATION_USE_RECORD_INVALID",))
     return epoch
+
+
+def _read_use_record_settled(path: Path) -> str:
+    """Read a use record, tolerating a transiently partial one.
+
+    New records are published atomically, so an existing record is already
+    complete. The bounded retry keeps the replay classification stable if a
+    record produced by an older half-writing publisher is still settling, and
+    it can never weaken a decision: a persistent malformed/replaced record
+    still fails closed with ``AUTHORIZATION_USE_RECORD_INVALID``.
+    """
+    attempts = max(1, _USE_RECORD_READ_ATTEMPTS)
+    for attempt in range(attempts):
+        try:
+            return _read_use_record(path)
+        except AuthorizationRejected as error:
+            if (attempt + 1 >= attempts
+                    or error.reasons != ("AUTHORIZATION_USE_RECORD_INVALID",)
+                    or path.is_symlink()):
+                raise
+            time.sleep(_USE_RECORD_READ_DELAY_SECONDS)
+    raise AuthorizationRejected(("AUTHORIZATION_USE_RECORD_INVALID",))  # pragma: no cover
+
+
+def _publish_use_record(record_path: Path, body: bytes) -> bool:
+    """Atomically publish one use record; return ``True`` only for its creator.
+
+    The record must never be observable half-written: the body is written to a
+    same-directory temporary file (0600, ``O_CREAT|O_EXCL|O_NOFOLLOW|O_CLOEXEC``),
+    fsynced, and only then linked to ``record_path``. ``link(2)`` can never
+    replace an existing name, so at most one concurrent consumer publishes and
+    every loser receives ``FileExistsError`` while the record it can then read
+    is already complete. The temporary name can never match a final record and
+    is removed on every controlled path. A publisher crash may leave a
+    temporary file behind, but it is excluded from the MAX_AUTHORIZATION_USES
+    count and can never be mistaken for the record.
+    """
+    temporary = record_path.with_name(
+        _USE_RECORD_TEMP_PREFIX + os.urandom(16).hex() + _USE_RECORD_TEMP_SUFFIX)
+    descriptor: int | None = None
+    try:
+        descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL
+                             | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600)
+        written = 0
+        while written < len(body):
+            written += os.write(descriptor, body[written:])
+        os.fsync(descriptor)
+        os.close(descriptor)
+        descriptor = None
+        try:
+            os.link(temporary, record_path)
+        except FileExistsError:
+            return False
+        return True
+    finally:
+        if descriptor is not None:
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
+        try:
+            os.unlink(temporary)
+        except FileNotFoundError:
+            pass
+        except OSError:
+            # A leftover temporary file is not a use record and is excluded from
+            # the capacity count; cleanup failure must not turn a successful
+            # consumption into a caller-visible I/O failure.
+            pass
 
 
 def _replay_reason(previous_epoch: str, run_epoch: str) -> str:
@@ -820,10 +925,14 @@ def consume_execution_authorization(*, use_log_dir: Path, run_epoch: str,
     """Consume the single use of an authorization at the pre-Reserve checkpoint.
 
     The full offline verification is repeated here (files, pinned keys,
-    revocation, bindings, time window) and only an accepted decision may create
-    one immutable use record. The record is created with ``O_CREAT|O_EXCL`` so
-    two concurrent admissions cannot both consume the same authorization; a
-    later run must present a newly signed authorization id, never reuse this one.
+    revocation, bindings, time window) and only an accepted decision may publish
+    one immutable use record. The record is written to a same-directory
+    temporary file, fsynced and atomically linked into place (``O_NOFOLLOW``,
+    0600), so two concurrent admissions can never both consume the same
+    authorization and a loser can never observe a half-written record: it sees
+    either the complete record (replay/epoch mismatch) or an ``O_EXCL``/``link``
+    collision after the winner published. A later run must present a newly
+    signed authorization id, never reuse this one.
     """
     moment = now or datetime.now(timezone.utc)
     if moment.tzinfo is None:
@@ -846,10 +955,11 @@ def consume_execution_authorization(*, use_log_dir: Path, run_epoch: str,
     record_path = directory / (hashlib.sha256(
         authorization.authorization_id.encode("ascii")).hexdigest() + ".json")
     if record_path.exists() or record_path.is_symlink():
-        raise AuthorizationRejected((_replay_reason(_read_use_record(record_path),
-                                                    run_epoch),))
+        raise AuthorizationRejected((_replay_reason(
+            _read_use_record_settled(record_path), run_epoch),))
     try:
-        entries = sum(1 for _ in directory.iterdir())
+        entries = sum(1 for entry in directory.iterdir()
+                      if not entry.name.startswith(_USE_RECORD_TEMP_PREFIX))
     except OSError:
         raise AuthorizationRejected(("AUTHORIZATION_USE_LOG_UNREADABLE",)) from None
     if entries >= MAX_AUTHORIZATION_USES:
@@ -862,21 +972,10 @@ def consume_execution_authorization(*, use_log_dir: Path, run_epoch: str,
         "consumed_utc": consumed,
     })
     try:
-        descriptor = os.open(record_path,
-                             os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW
-                             | os.O_CLOEXEC, 0o600)
-    except FileExistsError:
-        raise AuthorizationRejected((_replay_reason(_read_use_record(record_path),
-                                                    run_epoch),)) from None
+        published = _publish_use_record(record_path, body)
     except OSError:
         raise AuthorizationRejected(("AUTHORIZATION_USE_LOG_WRITE_FAILED",)) from None
-    try:
-        written = 0
-        while written < len(body):
-            written += os.write(descriptor, body[written:])
-        os.fsync(descriptor)
-    except OSError:
-        raise AuthorizationRejected(("AUTHORIZATION_USE_LOG_WRITE_FAILED",)) from None
-    finally:
-        os.close(descriptor)
+    if not published:
+        raise AuthorizationRejected((_replay_reason(
+            _read_use_record_settled(record_path), run_epoch),))
     return AuthorizationUse(authorization.authorization_id, run_epoch, consumed, record_path)

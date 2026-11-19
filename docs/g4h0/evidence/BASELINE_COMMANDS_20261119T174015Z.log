@@ -1,0 +1,304 @@
+### 1. GIT IDENTITY
+$ git rev-parse HEAD
+3e7afee077845a071cd364e93ab209cac20b2d5f
+$ git branch --show-current
+work/m0-g4h0-core
+$ git status --porcelain -uall
+(empty above = clean)
+$ git rev-parse HEAD^{tree}
+feccda00a78f10a8ee89b49b130838e464d98c46
+$ git rev-parse HEAD:src
+66edfac399c0af8e15f28f6064cb85be8e1dd11d
+$ git -C main rev-parse HEAD
+3e7afee077845a071cd364e93ab209cac20b2d5f
+$ git -C main status --porcelain -uall
+(empty above = clean)
+$ git worktree list
+/root/Autonomous Teacher                             3e7afee [main]
+/root/Autonomous Teacher/worktrees/m0-g4h0           3e7afee [work/m0-g4h0]
+/root/Autonomous Teacher/worktrees/m0-g4h0-base      3e7afee (detached HEAD)
+/root/Autonomous Teacher/worktrees/m0-g4h0-core      3e7afee [work/m0-g4h0-core]
+/root/Autonomous Teacher/worktrees/m0-g4h0-docs      3e7afee [work/m0-g4h0-docs]
+/root/Autonomous Teacher/worktrees/m0-g4h0-fix       3e7afee [work/m0-g4h0-fix]
+/root/Autonomous Teacher/worktrees/m0-g4h0-research  3e7afee [work/m0-g4h0-research]
+/root/at-f4-clean                                    7000f72 (detached HEAD)
+/root/at-g4f-impl                                    e7d9296 (detached HEAD)
+/root/at-m1-offline                                  3e7afee [work/m1-offline-design]
+/root/g4b-baseline                                   2f1e41f (detached HEAD)
+
+### 2. SRC TREE MANIFEST (blob identities from HEAD)
+7a7470e9eb5b5716a84b8b63aefa778d33e8e9ea  src/autoteacher_m0/__init__.py
+4dae68c72cc1c1f543396e71a5a5ad2e11082bd2  src/autoteacher_m0/accounting/__init__.py
+6b3813c0c3edac5f43be5fe09ae5bed3e09190ea  src/autoteacher_m0/accounting/broker.py
+a194a819b6b38cf1695b74610d92e9ec17ca96f7  src/autoteacher_m0/accounting/broker_usage.py
+6033adf852d212f3b9089364b5802432f4c2ebb1  src/autoteacher_m0/accounting/budget.py
+816b1c71c290b322738263cfac47718672ef3c3d  src/autoteacher_m0/accounting/call_identity.py
+aa5e7c11688597d64179b46bd2ad6cf64ac927dc  src/autoteacher_m0/accounting/ledger.py
+1e7056939ddf9de227fe8fdfb5d19b63d3da3a2a  src/autoteacher_m0/accounting/observation.py
+9d4f09b9c1338b61a6da4dca89856c83b1f2f9ac  src/autoteacher_m0/accounting/pricing.py
+4d68693754bd046e19f89206d426f5f3ac3fb4dd  src/autoteacher_m0/accounting/usage.py
+7dbaeb6602b21068a28fc39753c0f849598fe36c  src/autoteacher_m0/bridge/__init__.py
+feb749d24ca33db9ea9fdb15e15b613271e04653  src/autoteacher_m0/bridge/admission.py
+d54ce4a9b93836934b8a9a788f41b46993f1c6cb  src/autoteacher_m0/bridge/attempts.py
+83b3a6da3899bdc05bb78a9cb1c7c398761f8e47  src/autoteacher_m0/bridge/broker_client.py
+594514d5d60bce103993e6576bb4d3e1bdbb9ae6  src/autoteacher_m0/bridge/controller.py
+982833a5d9c03a991053cf11f2ad1e1e23655f63  src/autoteacher_m0/bridge/dispatch_audit.py
+d80b8a30cbd3914c894756cc8455d008b4116b3f  src/autoteacher_m0/bridge/fake_backend.py
+cc0042482a53ea4436060f700caae9ee0cd6e1ee  src/autoteacher_m0/bridge/ipc_server.py
+fde8a3892a3be6afdfc0e4b5796ac4e98cac4316  src/autoteacher_m0/bridge/protocol.py
+b68822fdd376ab816e0179e0482dd1a4266de8d1  src/autoteacher_m0/cli.py
+337e96e92dd49b5ee759f0cf684eca2032a93d3f  src/autoteacher_m0/contracts.py
+9e188d46bcd947c394380371bee1f03beddf065b  src/autoteacher_m0/evaluation/__init__.py
+6d2270da336abf41a3c868aef7d443af0c55d59f  src/autoteacher_m0/evaluation/contracts.py
+6a2e6f22aa3a63c61919bd32f4c69f343daaac6b  src/autoteacher_m0/evaluation/graders.py
+b37e0dd147ccc0ec8799df4885df0257ebd1fde5  src/autoteacher_m0/evaluation/leakage_checks.py
+baacf570abcb01d43d7fa711eef961f2b662e409  src/autoteacher_m0/experiments/__init__.py
+36ae4c3ee7de462946a3d1b95161b7f1d9c0e9dd  src/autoteacher_m0/experiments/cli.py
+0ed1b311b6c295c72eb951892ae05664e6d5a30e  src/autoteacher_m0/experiments/fixtures.py
+49eb005d463267c5f0f3f5fe5328dcb1afe01feb  src/autoteacher_m0/experiments/mock.py
+c69d05eb723359239dbc0ab9d09d60f3404fd48e  src/autoteacher_m0/experiments/paired.py
+2a32b9f059c6f4d2a0915cbac9d50eecf084313e  src/autoteacher_m0/experiments/report.py
+3101e10a3013acf2fc3ac969de541e29017233d8  src/autoteacher_m0/experiments/runner.py
+972894ccacd6b0c0dd3bd120f08d32c9a68198d3  src/autoteacher_m0/runtime/__init__.py
+348a61912dc2bb53a53656cad9ac159da5d319b0  src/autoteacher_m0/runtime/base.py
+86ae5d6e6f8bf50f68972e28744530af4f109dcf  src/autoteacher_m0/runtime/dsh_adapter.py
+7d4027cd568d17ade9cb915d6745b64bb74150b2  src/autoteacher_m0/runtime/mock_adapter.py
+0b1e24eb97db018b2f527870fe6840f668cd0c47  src/autoteacher_m0/runtime/structured_output.py
+9232f340a5f760672e14e5d0629446a614236fde  src/autoteacher_m0/security/__init__.py
+6899b740964c570d02ec75a5e812d4a5290eb159  src/autoteacher_m0/security/authorization.py
+c9d252e6c15b43dbecb8796d007558002561f46d  src/autoteacher_m0/security/credential_boundary.py
+af1edc3e59e2d691e53310140c51414c36f8e014  src/autoteacher_m0/security/docker_runner.py
+a939aaceff7cff467d450462751aabe868cced94  src/autoteacher_m0/security/ed25519.py
+4d0c82025872a9aa7109762e900eb751f8479ee5  src/autoteacher_m0/security/egress.py
+edf7f45fdbd058f89177a8e8f8d918274516b9d4  src/autoteacher_m0/security/gates.py
+0551dade978ded32500b53caa097ca98153d74f8  src/autoteacher_m0/security/live_controller.py
+96dfc56772bf33b8b1ab71d589472db23137b1fd  src/autoteacher_m0/security/watchdog.py
+1aa9cf3600e1468b7f07f663cb57364c44540e5f  src/autoteacher_m0/settings.py
+381fb822332db346120b6580e931efa790962de4  src/autoteacher_m0/storage/__init__.py
+ccfebb3247e574f1d8cca3ce2019f6ce22bd61be  src/autoteacher_m0/storage/artifacts.py
+1fdf6fc34925a41496cc6447cd06fa11de2b3aae  src/autoteacher_m0/storage/schema.py
+
+### 3. SRC WORKING-TREE SHA256
+1b0c188538b2f9b51c64068008a9a5c39726156a5da4f6cc875f760ab5cd2a2c  src/autoteacher_m0/__init__.py
+d87b9268ccca533917485d9c08cc21a180ff7a04cc013fd6657638c12f0d58f0  src/autoteacher_m0/accounting/__init__.py
+0016304a1181677beae76072e639ddfc7988042c46a6400f1ca3dfe4b8157fa6  src/autoteacher_m0/accounting/broker.py
+74ccb0f69dbfa6887eaa8dff8cd04c23340e514076abcb9b7f511b454927e6a7  src/autoteacher_m0/accounting/broker_usage.py
+50e2ae7106ecf9584e9f4081a1fafa594b4b220bad9ef195c61142cac1c90e7e  src/autoteacher_m0/accounting/budget.py
+03d45a2fe13350466e04fae1a0210a8b6ae247fb3a1b4e38ddd12f7b1d6f8e3e  src/autoteacher_m0/accounting/call_identity.py
+15b3cf9d42eebf2c5758d180c8303dacaac1d4e9d3bbf0776f9219642e9ead97  src/autoteacher_m0/accounting/ledger.py
+90a355618d1e85f03b0dd7bc7ff23c84cc66dd93995157c824eee6cc400b7187  src/autoteacher_m0/accounting/observation.py
+19f8a89300601294a829a2edb2d445699d0b0f1e1b76e03a05c462abeac22b2d  src/autoteacher_m0/accounting/pricing.py
+923ebca97309c41ddcc2175d94887d844f565057a70a9d417b32fb15773957c2  src/autoteacher_m0/accounting/usage.py
+f3cf01ecc3970cffd8a411fd387090c5ac7b3ea5aff17b51261cb8b86a08dbdb  src/autoteacher_m0/bridge/__init__.py
+ad979ac3aa2d5e3db2a102b0c4b49b05be165d1a0ed5e486463aa5df889436d2  src/autoteacher_m0/bridge/admission.py
+ccd008bd55bda8d344152856912dbde9dfe1e29d5accb53973a938e1e4b59795  src/autoteacher_m0/bridge/attempts.py
+1fb8f8ca85b04244a4b013000513db33fdb643f089315c5224c8602064977c15  src/autoteacher_m0/bridge/broker_client.py
+0152fcde6bba7c7989740b1bfde8f72744e6c709da22ebbe4940cb443eb35ca3  src/autoteacher_m0/bridge/controller.py
+8be106339cd529864019971c415571f5c8232281b39fdbd998bbd915045717c2  src/autoteacher_m0/bridge/dispatch_audit.py
+29645bce7cd46d65451feca0498764b279baf947ecf1010d58a4aeb9aafbfb35  src/autoteacher_m0/bridge/fake_backend.py
+ff7b4016582ee3f436a9464721a38085fb6d803c207f524dddbbe48b02014774  src/autoteacher_m0/bridge/ipc_server.py
+49cc1e832ffc500cc821c9652f52923cc457c7952550eab621743f9a7d740a6a  src/autoteacher_m0/bridge/protocol.py
+31555386ec3cbeb6ed4584a861b1da3313fa1e00b026cd8f43cd05227ba2c940  src/autoteacher_m0/cli.py
+8b101d2f6c921e0c244156a6439bd7341ee2d6781d3fd4c34a62ca900e9adb4c  src/autoteacher_m0/contracts.py
+f1b1336a964cbff0560813ea8de6fa30beae1126beda8b4bb38e6aa1eaaa7763  src/autoteacher_m0/evaluation/__init__.py
+5c69255cec6df35e36bb931a18597362cf229528d9396a42a0fb983cffd5806f  src/autoteacher_m0/evaluation/contracts.py
+1b2f5333db932406feebf18bf72b74bc5144c5a6015512a759cc8f4bcbd1a41c  src/autoteacher_m0/evaluation/graders.py
+e4d47727c34e74d56197fd6bd4020b7f872fb9648a801e60a55af4d08887c2ec  src/autoteacher_m0/evaluation/leakage_checks.py
+c7d74d52db99550ff1d0b75db5075164e94e049ba1886680c7e08b263e3ed656  src/autoteacher_m0/experiments/__init__.py
+ab45c1cdd69b1cde440cb85b0d829cb12fb8bb1cc02fb09807856660b24054ee  src/autoteacher_m0/experiments/cli.py
+85a360e48a3b4fa5a8a66d89689c2f88862414076e3136ba885571eb047c9126  src/autoteacher_m0/experiments/fixtures.py
+afd0358a68cd8229ea404645611eec2fbdeeb5d0102782620aa2e4cae1fad666  src/autoteacher_m0/experiments/mock.py
+2926c328c66f261edeea11729e643b23f2de56cb2d8f4ad37aaa494500908669  src/autoteacher_m0/experiments/paired.py
+144a01ba1129ddda59caba9b9faa0365cee821fb76b9778f5fe9c473b749a6b3  src/autoteacher_m0/experiments/report.py
+b2a9ed45689c7bb9ab72fe3d2258439d28c3bf32009c539be96e72151eddd762  src/autoteacher_m0/experiments/runner.py
+85286fb2231e1b4d0c4dc1fe16ed8bf34b56c63e6051176c9ca7710d4e1d6c0a  src/autoteacher_m0/runtime/__init__.py
+29d63b6041668b8f8fb783ebc3bc18cac38b14969cd82cdbfbb5b0a734e24381  src/autoteacher_m0/runtime/base.py
+888911490c936dff286af5ad823aae1007d88ab50213986c4b809d34b44cc68a  src/autoteacher_m0/runtime/dsh_adapter.py
+8f3198cc12fe7598717ab480c57c10062576893b1d0ad1936e9a997ef695547a  src/autoteacher_m0/runtime/mock_adapter.py
+79b30c9d8683e4b6e38bed9c52ec1649d8bd80202deae0df19baa347ed268182  src/autoteacher_m0/runtime/structured_output.py
+3795c512371534549b6db909ddc18952aa7d0a1f74b9703ef8c1d58aee302423  src/autoteacher_m0/security/__init__.py
+5696b2c812c21194b82e56a17344c81c631e56becec660b47abcc851a8a7b5b2  src/autoteacher_m0/security/authorization.py
+f7424e7e19777702c1a109223b4d10d66c7bf2d31330c786be9b2c61d91c3abb  src/autoteacher_m0/security/credential_boundary.py
+8b4c3d86be5b855f653025254a3379b3dfae24142945780d1e4b6daa18d030d1  src/autoteacher_m0/security/docker_runner.py
+64f412a861db5128955fe739d1649b5faa06f6aae7c6350b564ecf9fa011bc19  src/autoteacher_m0/security/ed25519.py
+cb4961db034c9d5ad62192841c1beb8d965a8392fa3f3226181135ec7073602e  src/autoteacher_m0/security/egress.py
+3ed0863440d26105f30f84579f07105c298ed586cbd8e4616c15fad495afb23a  src/autoteacher_m0/security/gates.py
+d50a55a18b45044f0cc65b266491a42469d8b452f63bbe348a47e1df8e0bdba0  src/autoteacher_m0/security/live_controller.py
+42e1d061ed1e54264d120e4ae7dbffc0b7534abdcac4d9280a636bef58edb965  src/autoteacher_m0/security/watchdog.py
+eb9d6b202ccb4c99bfade12b38b5fd03e583ddaee67aca58becf4b56aeb758e8  src/autoteacher_m0/settings.py
+f970c89eaf7b1a9d16861411cee837a00ad20a85676ac6e9d3a36c86eb8b0298  src/autoteacher_m0/storage/__init__.py
+70ce4a7a48a7e47e88911a208a27aca50b74aefbdcde08fa3d6e79c251ed3dab  src/autoteacher_m0/storage/artifacts.py
+12e49506b993861333617b674136626e6febc5d8c9759079f7fba305f4f54ebd  src/autoteacher_m0/storage/schema.py
+
+### 4. DOCS FROZEN PACKET SHA256 (working tree == HEAD?)
+b17977d1ff8506de440996f7bd411149ae968cef6564391b74b28980468ddc4b  docs/REVIEW_G4F_INDEPENDENT.md
+7b8209db9c15897e6b4d271361703e4425a9a3a361cb3818d53e5fd92eb9b42b  docs/M0_G4F_REVIEW_ERRATA.md
+cd26d1e158258ebf457636ba9fd19f6e500271d3232a551fd4197155a49624b0  docs/M0_G4F_HUMAN_HANDOFF.md
+f7a2101bcc2ed5073ac7bda452703d98df5534574a534e565bb6b77c0132b16f  docs/M0_G4_HUMAN_HANDOFF.md
+bdeefd378b8feb4af153d6e791b26afe231cdb5e4df01ff1817c7b6bca0caa80  docs/LIVE_CONTROLLER_SECURITY_DESIGN.md
+a42719784394534cb566622e7f3859419b308ab93a56b969f2f0e66af9522ee3  docs/SECURITY_APPROVALS.md
+f6408d57bb80f7c740d83405e3d6218a0de1450e386055df6e01773c5aa2b049  docs/M0_G4F_F1_REPORT.md
+7af6518ec7372fb4db991aa9e49ce8fb2021300e1c5a438ee2552b83fc11cd4f  docs/M0_G4F_IMPLEMENTATION_REPORT.md
+a3d7c099ee1d3f116886d92d8aff19b943bb16f972db47356e4b3e9fe21e8018  docs/M0_G4F_REVIEW_REQUEST.md
+0f4e25ae76632ff60e0c644d34a19bf6c602cf49e347112a1fb3be87a091dba3  docs/Autonomous_Teacher_M0_G4F_Closeout_Test_Evidence_Matrix_v1.0.csv
+bd062fe5e605e78a6dcca7ae3d17e18eb533b6f1d246bdafec3b1606b15a5be4  docs/M0_G4F_FINDINGS_AND_DISPOSITION.md
+
+### 5. DOCS FROZEN PACKET GIT BLOB IDENTITY
+100644 blob 4490907ae8cf132f750a5f11b9b940b825f50c61	docs/Autonomous_Teacher_M0_G4F_Closeout_Test_Evidence_Matrix_v1.0.csv
+100644 blob 1c51639ae4224da1440b6a0bf1b3ddecc63a7316	docs/LIVE_CONTROLLER_SECURITY_DESIGN.md
+100644 blob c94b8a1bf55e7c11c56e6885ac336342e0bfc55b	docs/M0_G4F_F1_REPORT.md
+100644 blob c204c12c165834c884102371aa8b9c649ed12c04	docs/M0_G4F_HUMAN_HANDOFF.md
+100644 blob 00bd61f111672ac9b0f810ad28bbfe22c14f0a8d	docs/M0_G4F_REVIEW_ERRATA.md
+100644 blob 43df1cff7135bcf9013a361ca527eafd81fde5ff	docs/M0_G4_HUMAN_HANDOFF.md
+100644 blob 83f08de257d607c616918870d07eb0a19c816b1f	docs/REVIEW_G4F_INDEPENDENT.md
+100644 blob fe742c4bdf648a91069652da37356190bd230e42	docs/SECURITY_APPROVALS.md
+
+### 6. STATUS CONSTANTS - CODE EVIDENCE
+20:        super().__init__(ErrorCode.SECURITY_BLOCKED, message)
+70:        reasons = ["EXTERNAL_HUMAN_AUTHORIZATION_BOUNDARY_NOT_DEPLOYED"]
+82:        return GateDecision("BLOCKED", tuple(reasons))
+--- live_controller.py ---
+M0_APPROVED_BUDGET_SOFT_TOTAL_CAP_USD = Decimal("3.00")
+M0_APPROVED_BUDGET_TOTAL_CAP_USD = Decimal("10.00")
+M0_APPROVED_BUDGET_MAX_CALLS = 50
+BUDGET_POLICY_RELATIVE_PATH = Path("config") / "budgets.yaml"
+BUDGET_POLICY_FIELDS = ("scope", "per_call_cap_usd", "total_cap_usd", "max_calls")
+
+EGRESS_POLICY_FIELDS = (
+    "host_ports", "methods", "path_prefix", "approved_routes", "max_tokens",
+    "max_attempts", "require_reservation", "allow_files", "allow_images", "allow_store",
+)
+
+ALWAYS_BLOCKED_REASONS = (
+    "EXTERNAL_HUMAN_AUTHORIZATION_BOUNDARY_NOT_DEPLOYED",
+    "EXTERNAL_CREDENTIAL_BROKER_NOT_DEPLOYED",
+    "EXTERNAL_EGRESS_PROXY_NOT_DEPLOYED",
+    "EXTERNAL_WATCHDOG_NOT_DEPLOYED_REHEARSAL_ONLY",
+    "LIVE_GATE_CLOSED",
+)
+
+
+@dataclass(frozen=True)
+class ControllerDecision:
+    status: str
+    reasons: tuple[str, ...]
+    authorization_approved: bool
+    gate_status: str
+    candidate_command_checked: bool
+    candidate_credentials_checked: bool
+    boundary_deployed: bool = False
+    signature_valid: bool = False
+    billable_send_authorized: bool = False
+
+    def __post_init__(self) -> None:
+        if self.billable_send_authorized:
+            raise ValueError("the inspect-only controller can never authorize a billable send")
+
+
+### 7. STATUS CONSTANTS - DOC EVIDENCE
+docs/REVIEW_G4F_INDEPENDENT.md:35:G4-H             = NOT_AUTHORIZED
+docs/REVIEW_G4F_INDEPENDENT.md:36:G5               = BLOCKED
+docs/REVIEW_G4F_INDEPENDENT.md:37:G6               = NOT_RUN
+docs/REVIEW_G4F_INDEPENDENT.md:38:LiveGate         = BLOCKED
+docs/REVIEW_G4F_INDEPENDENT.md:39:M0               = DECISION_PENDING
+docs/REVIEW_G4F_INDEPENDENT.md:40:E5_PRELIVE_FULL  = BLOCKED_PENDING_HUMAN_DEPLOYMENT
+docs/REVIEW_G4F_INDEPENDENT.md:372:G4-H = NOT_AUTHORIZED
+docs/REVIEW_G4F_INDEPENDENT.md:373:G5 = BLOCKED
+docs/REVIEW_G4F_INDEPENDENT.md:374:G6 = NOT_RUN
+docs/REVIEW_G4F_INDEPENDENT.md:375:LiveGate = BLOCKED
+docs/REVIEW_G4F_INDEPENDENT.md:376:M0 = DECISION_PENDING
+docs/REVIEW_G4F_INDEPENDENT.md:377:E5_PRELIVE_FULL = BLOCKED_PENDING_HUMAN_DEPLOYMENT
+docs/M0_G4F_REVIEW_ERRATA.md:92:G4-H            = NOT_AUTHORIZED
+docs/M0_G4F_REVIEW_ERRATA.md:93:G5              = BLOCKED
+docs/M0_G4F_REVIEW_ERRATA.md:94:G6              = NOT_RUN
+docs/M0_G4F_REVIEW_ERRATA.md:95:LiveGate        = BLOCKED
+docs/M0_G4F_REVIEW_ERRATA.md:96:M0              = DECISION_PENDING
+docs/M0_G4F_REVIEW_ERRATA.md:97:E5_PRELIVE_FULL = BLOCKED_PENDING_HUMAN_DEPLOYMENT
+docs/M0_G4F_REVIEW_ERRATA.md:247:G4-H            = NOT_AUTHORIZED
+docs/M0_G4F_REVIEW_ERRATA.md:248:G5              = BLOCKED
+docs/M0_G4F_REVIEW_ERRATA.md:249:G6              = NOT_RUN
+docs/M0_G4F_REVIEW_ERRATA.md:250:LiveGate        = BLOCKED
+docs/M0_G4F_REVIEW_ERRATA.md:251:M0              = DECISION_PENDING
+docs/M0_G4F_REVIEW_ERRATA.md:252:E5_PRELIVE_FULL = BLOCKED_PENDING_HUMAN_DEPLOYMENT
+docs/M0_G4F_REVIEW_ERRATA.md:269:| 3 | **E5 Full 独立安全 Review 与签收** | 当前 `E5_PRELIVE_FULL=BLOCKED_PENDING_HUMAN_DEPLOYMENT`；P01/P02/P03/P05 仅 subset PASS，P04 UNVERIFIED；需人类部署信任根、真实 Key/Provider/TLS/账单/额度后逐项执行 |
+docs/M0_G4F_REVIEW_ERRATA.md:271:| 5 | **是否授权 G5 单次 bounded run** | 当前 `G5=BLOCKED`；需 G4-H-01..05 完成并由人类显式授权 G4-H-06；本裁定不授权 |
+docs/M0_G4F_HUMAN_HANDOFF.md:6:- **当前门状态**：`LiveGate=BLOCKED`、`G4-H=NOT_AUTHORIZED`、`G5=BLOCKED`、
+docs/M0_G4F_HUMAN_HANDOFF.md:7:  `G6=NOT_RUN`、`M0=DECISION_PENDING`、`E5_PRELIVE_FULL=BLOCKED_PENDING_HUMAN_DEPLOYMENT`。
+docs/M0_G4_HUMAN_HANDOFF.md:4:- **当前状态**：`G4-H-01..06 = BLOCKED / NOT_AUTHORIZED`；`G5 = BLOCKED`；`G6 = NOT_RUN`；`LiveGate = BLOCKED`；`M0 = DECISION_PENDING`；`E5_PRELIVE_FULL = BLOCKED_PENDING_HUMAN_DEPLOYMENT`。
+docs/M0_G4_HUMAN_HANDOFF.md:124:**当前状态**：`E5_PRELIVE_FULL=BLOCKED_PENDING_HUMAN_DEPLOYMENT`；五项 `FULL_STATUS` 全部 Blocked。
+docs/M0_G4_HUMAN_HANDOFF.md:142:**当前状态**：`PENDING_HUMAN_ACTION`；`G5=BLOCKED`、`G6=NOT_RUN`。
+
+### 8. MATRIX ROWS (key status)
+14:F2-08,F2,P1,L1-STATIC,authoritative merged tool registry export (B03 / E5-P04),authoritative registry or explicit UNVERIFIED,UNVERIFIED,DSH 0.2.2-rc.2 has no authoritative merged registry export; only observed per-dispatch surface + admission guard are proven,python3 -B tests/integration/g4_f2/run_f2_evidence.py --stage artifacts/g4/c/stages/stage-20261119T142828Z --out-dir artifacts/g4f/f6/int
+23:F4-01,F4,P0,L2-REAL-DSH,real DSH start_session then resume_session (two Candidate containers),session grows; reason=resume; both exits 0,PASS,session.v4.jsonl 14->24 lines (3597->6005 bytes); resume_marker_count=1; DSH resume.used=true sdk_call=resume_session; exit 0/0,python3 -B scripts/g4/run_g4_f4.py --stage artifacts/g4/c/stages/stage-20261119T142828Z --out-dir artifacts/g4f/f6/integration/
+28:F4-06,F4,P2,L2-REAL-DSH,byte-level context replay proof and Candidate-crash/live-Controller retry semantics,byte containment of turn1 answer in turn2 payload; auto-retry proof,UNVERIFIED,"turn2 payload length 1875 vs turn1 1509 and different digest, plus session replay marker; Fake stores only sha256/length so bytes are not retained; no candidate-crash/live-controller run",python3 -B scripts/g4
+45:REV-04,REV,P0,L1-STATIC+L1-PACKET,R6+R7 LiveGate/Key/network negatives and independent SQLite/JSONL parsing,independent reviewer executes own probes,PASS,"independent R6+R7 PASS: LiveGate BLOCKED even with all evidence, reason EXTERNAL_HUMAN_AUTHORIZATION_BOUNDARY_NOT_DEPLOYED; require_live SECURITY_BLOCKED; run_live and CLI --live exit 3; adapter 4/4 SECURITY_BLOCKED; strace 0 network syscalls
+47:E5-FULL,E5,P0,HUMAN-REQUIRED,"E5-PreLive Full: real human authorization, keys, provider, billing, deployment",human-deployed external authority; not an engineering-scope item,BLOCKED,BLOCKED_PENDING_HUMAN_DEPLOYMENT; no key/model/external network used; E5-P04 stays UNVERIFIED,-,,,,e7d92967ec0ece80de4a1a3705f637e8eb9bde99,82e10c6ffe37e401a58730e9abcaa691f19d6702a7276c03df625d5b4636e501,18/18 mod
+
+### 9. MANIFEST STATE CONSTANTS IN PACKET V1
+state_constants: {"E5_PRELIVE_FULL": "BLOCKED_PENDING_HUMAN_DEPLOYMENT", "G4-H": "NOT_AUTHORIZED", "G5": "BLOCKED", "G6": "NOT_RUN", "LiveGate": "BLOCKED", "M0": "DECISION_PENDING"}
+docs_sha: d12df4165108d59a2a4f08ba3ba93a35935df846 impl_sha: e7d92967ec0ece80de4a1a3705f637e8eb9bde99 build_sha: 0d5e5e09cd607aef6ba39608b8a3b33a0d2c7705
+files: {"count": 172, "hashes_file": "hashes.sha256", "integrity_report": "packet-integrity-report.txt", "payload_tree_sha256": "e464b9b1d6ab0bf4406ccc7868863d207f594fa898ee4affaa3e901d9f1caaa0"}
+live_gate: BLOCKED cli: {}
+
+### 10. TOOLS
+python3                          /usr/bin/python3
+/root/.local/bin/python3.11      /root/.local/bin/python3.11
+uv                               /root/.local/bin/uv
+podman                           /usr/bin/podman
+node                             /usr/bin/node
+npm                              /usr/bin/npm
+git                              /usr/bin/git
+jq                               /usr/bin/jq
+bug                              ABSENT
+dsh                              /usr/bin/dsh
+python3.11                       /root/.local/bin/python3.11
+ruff                             ABSENT
+pytest                           ABSENT
+sqlite3                          ABSENT
+sha256sum                        /usr/bin/sha256sum
+Python 3.11.15
+podman version 4.9.3
+v22.23.2
+uv 0.11.6 (x86_64-unknown-linux-gnu)
+git version 2.43.0
+/root/.local/bin/python3.11: No module named pytest
+sqlite 3.50.4
+
+### 11. EXTERNAL WORKTREE OBSERVATION (not touched)
+/root/at-m1-offline EXISTS head=3e7afee077845a071cd364e93ab209cac20b2d5f branch=work/m1-offline-design
+/root/at-f4-clean EXISTS head=7000f727d0e5926b0bd95574f3c587a2707da6d8 branch=
+/root/at-g4f-impl EXISTS head=e7d92967ec0ece80de4a1a3705f637e8eb9bde99 branch=
+/root/g4b-baseline EXISTS head=2f1e41f4476bd137e03a551ab5e6654a249f71ad branch=
+
+### 12. PACKET V1 DIRECT DIR CHECK
+files=177 symlinks=0
+total 288
+drwxr-xr-x 2 root root  4096 Nov 19 15:11 .
+drwxr-xr-x 3 root root  4096 Nov 19 15:09 ..
+-r--r--r-- 1 root root 57344 Nov 19 15:09 crash-resume-attempts.sqlite3
+-r--r--r-- 1 root root 65536 Nov 19 15:09 crash-resume-broker.sqlite3
+-r--r--r-- 1 root root 65536 Nov 19 15:09 resume-attempts.sqlite3
+-r--r--r-- 1 root root 32768 Nov 19 15:11 resume-attempts.sqlite3-shm
+-r--r--r-- 1 root root     0 Nov 19 15:11 resume-attempts.sqlite3-wal
+-r--r--r-- 1 root root 65536 Nov 19 15:09 resume-broker.sqlite3
+--- hashes summary ---
+exit=0
+173
+--- payload tree recompute ---
+payload_files_excl_manifest_and_sidecars: 173
+tree_sha256: 652431a4b37634ee568922c632e6b33ac94b6e02232ff358ef3f09050fa7c8f3
+tree_sha256_all(payload incl sidecars): 929b8ca9d2adbd0cd0244f191ae46e0e31ae8596c892c89e7c43abb25176466e
+manifest files: {'count': 172, 'hashes_file': 'hashes.sha256', 'integrity_report': 'packet-integrity-report.txt', 'payload_tree_sha256': 'e464b9b1d6ab0bf4406ccc7868863d207f594fa898ee4affaa3e901d9f1caaa0'}
+
+### 13. V1 PACKET FILE MTIME EVIDENCE
+2026-11-19 15:09:08.401906609 +0000 /root/Autonomous Teacher/artifacts/review-packet-g4f-e7d92967ec0ece80de4a1a3705f637e8eb9bde99/f4/sqlite-readonly/crash-resume-attempts.sqlite3
+2026-11-19 15:09:08.401782838 +0000 /root/Autonomous Teacher/artifacts/review-packet-g4f-e7d92967ec0ece80de4a1a3705f637e8eb9bde99/f4/sqlite-readonly/crash-resume-broker.sqlite3
+2026-11-19 15:09:08.401117752 +0000 /root/Autonomous Teacher/artifacts/review-packet-g4f-e7d92967ec0ece80de4a1a3705f637e8eb9bde99/f4/sqlite-readonly/resume-attempts.sqlite3
+2026-11-19 15:11:07.722755144 +0000 /root/Autonomous Teacher/artifacts/review-packet-g4f-e7d92967ec0ece80de4a1a3705f637e8eb9bde99/f4/sqlite-readonly/resume-attempts.sqlite3-shm
+2026-11-19 15:11:07.721763357 +0000 /root/Autonomous Teacher/artifacts/review-packet-g4f-e7d92967ec0ece80de4a1a3705f637e8eb9bde99/f4/sqlite-readonly/resume-attempts.sqlite3-wal
+2026-11-19 15:09:08.400983511 +0000 /root/Autonomous Teacher/artifacts/review-packet-g4f-e7d92967ec0ece80de4a1a3705f637e8eb9bde99/f4/sqlite-readonly/resume-broker.sqlite3
+
+### 14. SIDECAR CONTENT PROBE (read-only, no sqlite open)
+resume-attempts.sqlite3-wal size= 0 sha256= e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855 nonzero_bytes= 0
+resume-attempts.sqlite3-shm size= 32768 sha256= fd4c9fda9cd3f9ae7c962b0ddf37232294d55580e1aa165aa06129b8549389eb nonzero_bytes= 40
