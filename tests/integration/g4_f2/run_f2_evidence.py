@@ -337,7 +337,12 @@ def analyze_dsh_run(case: str, evidence: Path) -> dict:
                                      for row in journal),
         "every_completed_has_reservation":
             all(row.get("reservation_id") for row in completed),
-        "dsh_request_header_matches_dispatch": header_tools == journal_tools,
+        # DSH emits one request/header per *surface change*: a two-step tool
+        # turn reuses the same header for both provider requests. Compare each
+        # observed header and each Controller dispatch against that one shape.
+        "dsh_request_header_tools_match_dispatch": bool(header_tools)
+        and all(entry == header_tools[0]
+                for entry in header_tools + journal_tools),
     }
     return summary
 
@@ -654,6 +659,46 @@ def main(argv: list[str] | None = None) -> int:
             summary["raw_uds"] = run_raw_uds(stage=stage, stamp=stamp)
         if "adapter" in only:
             summary["adapter"] = run_adapter_probe(stage)
+        title_sources = []
+        completed_total = 0
+        assistant_total = 0
+        purposes = []
+        for run in summary["runs"]:
+            title_sources.extend(run["dsh"]["title_sources"])
+            completed_total += run["dispatch"]["completed"]
+            assistant_total += run["dsh"]["assistant_messages"]
+            purposes.extend(run["dispatch"]["purposes"])
+        entry_ids = (summary["merged_entry_list"].get("ids") or [])
+        summary["auxiliary"] = {
+            "session_title_events": sum(run["dsh"]["title_events"]
+                                        for run in summary["runs"]),
+            "session_title_sources": title_sources,
+            "session_title_provider_entries": [
+                entry for entry in entry_ids if entry.startswith("session-title-")],
+            "compaction_entries": [
+                entry for entry in entry_ids if entry.startswith("compaction")],
+            "retry_entries": [entry for entry in entry_ids
+                              if entry.startswith("llm-retry")],
+            "judge_entries": [entry for entry in entry_ids
+                              if "judge" in entry],
+            "subagent_entries": [entry for entry in entry_ids
+                                 if "subagent" in entry],
+            "mcp_entries": [entry for entry in entry_ids if "mcp" in entry],
+            "dispatch_purposes": sorted({str(item) for item in purposes}),
+            "completed_dispatches": completed_total,
+            "assistant_messages": assistant_total,
+            "extra_provider_requests_observed": completed_total - assistant_total,
+            "adapter_auxiliary_guard": {
+                "title_message": (summary.get("adapter") or {}).get(
+                    "title", {}).get("message"),
+                "conversation_message": (summary.get("adapter") or {}).get(
+                    "conversation", {}).get("message"),
+            },
+            "verdict": ("NO_EXTRA_PROVIDER_REQUEST_OBSERVED"
+                        if completed_total == assistant_total
+                        and summary.get("adapter", {}).get("ok") else
+                        "REVIEW_REQUIRED"),
+        }
     finally:
         summary["utc_end"] = utc()
         summary["containers_after"] = containers_all()
