@@ -18,6 +18,7 @@ import hashlib
 import json
 import os
 import re
+import threading
 from typing import Callable, Iterable, Mapping, Protocol, Sequence
 
 from autoteacher_m0.accounting.call_identity import (
@@ -46,6 +47,8 @@ RESERVATION_REQUEST_MISMATCH = "RESERVATION_REQUEST_MISMATCH"
 TOOL_SCHEMA_NOT_APPROVED = "TOOL_SCHEMA_NOT_APPROVED"
 PREPARED_SCHEMA_INVALID = "PREPARED_SCHEMA_INVALID"
 PREPARED_SCHEMA_VERSION_MISMATCH = "PREPARED_SCHEMA_VERSION_MISMATCH"
+COST_BOUND_INVALID = "COST_BOUND_INVALID"
+RESERVATION_ALREADY_SETTLED = "RESERVATION_ALREADY_SETTLED"
 
 
 class EgressViolation(RuntimeFailure):
@@ -297,6 +300,9 @@ class LogicalStreamEgress:
     known_cost_usd: Decimal = Decimal("0")
     state: AttemptState = AttemptState.NOT_DISPATCHED
     attempts_detail: list[dict[str, object]] = field(default_factory=list)
+    # One attempt's outcome may be observed once; a replayed observation must
+    # never double-count the conservative hold/known evidence counters.
+    recorded_outcome_keys: set[str] = field(default_factory=set)
 
 
 def _legacy_egress_event_id(request: EgressRequest, route_model: tuple[str, str]) -> str:
@@ -624,12 +630,22 @@ class EgressBoundary:
         stream = self._streams[decision.logical_stream_id]
         if not decision.allowed:
             return stream.state
+        # Transport evidence is recorded at most once per attempt. A replayed
+        # observation (retry of the same attempt identity) must not add a second
+        # conservative hold, and unknown remains unknown until the Broker says
+        # otherwise.
+        outcome_key = "|".join((str(decision.call_id), str(decision.reservation_id),
+                                str(decision.attempt_ordinal)))
+        if outcome_key in stream.recorded_outcome_keys:
+            return stream.state
+        stream.recorded_outcome_keys.add(outcome_key)
         for detail in reversed(stream.attempts_detail):
             if (detail["call_id"] == decision.call_id
                     and detail["reservation_id"] == decision.reservation_id
                     and detail["attempt_ordinal"] == decision.attempt_ordinal):
                 detail["provider_dispatched"] = True
                 detail["provider_invoked"] = True
+                detail["cost_recorded"] = True
                 break
         stream.provider_invocations += 1
         stream.provider_dispatched += 1
@@ -654,6 +670,12 @@ class EgressBoundary:
             state = AttemptState.SETTLED_USAGE
             stream.known_cost_usd += Decimal(worst_case_usd)
         stream.state = state
+        for detail in reversed(stream.attempts_detail):
+            if (detail["call_id"] == decision.call_id
+                    and detail["reservation_id"] == decision.reservation_id
+                    and detail["attempt_ordinal"] == decision.attempt_ordinal):
+                detail["cost_state"] = state.value
+                break
         return state
 
     def stream(self, logical_stream_id: str) -> LogicalStreamEgress:
@@ -1280,6 +1302,78 @@ class SyntheticSendBudget:
         return tuple(problems)
 
 
+# ---------------------------------------------------------------------------
+# G4-F3 cost authority semantics.
+#
+# The Broker Reservation/Settlement is the ONLY cost authority. The gate keeps a
+# process-local, read-only, conservative view so that an unresolved (PENDING /
+# uncertain) send is never reported as free. The view never prices usage, never
+# writes back to the Broker and never substitutes for ``reserved_cost`` or the
+# settlement ``cost_usd``.
+# ---------------------------------------------------------------------------
+COST_VIEW_SCHEMA = "m0.g4c.cost-view.v1"
+COST_AUTHORITY_BROKER = "broker_reservation_settlement"
+COST_VIEW_ROLE = "conservative_read_only_view"
+COST_VIEW_SCOPE = "process_local"
+COST_VIEW_HELD = "HELD"
+COST_VIEW_SETTLED_KNOWN = "SETTLED_KNOWN"
+COST_VIEW_SETTLED_CONSERVATIVE = "SETTLED_CONSERVATIVE"
+BROKER_STATUS_PENDING = "PENDING"
+BROKER_STATUS_OK = "OK"
+BROKER_STATUS_FAILED = "FAILED"
+COST_VIEW_EVENT_LIMIT = 512
+
+
+def _usd_amount(value: object) -> Decimal | None:
+    """Strict non-negative finite Decimal; bool/NaN/Infinity/negative are invalid."""
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        amount = Decimal(str(value))
+    except (InvalidOperation, ValueError):
+        return None
+    if not amount.is_finite() or amount < 0:
+        return None
+    return amount
+
+
+@dataclass
+class SendCostView:
+    """One reservation's conservative cost view copied from the Broker.
+
+    ``held_usd`` is the upper bound of what the Broker may still commit for a
+    PENDING reservation; ``known_usd`` is the Broker's final cost once (and
+    only once) a terminal status with a valid cost has been observed.
+    """
+
+    reservation_id: str
+    call_id: str = ""
+    attempt_ordinal: int = 1
+    state: str = COST_VIEW_HELD
+    broker_status: str = BROKER_STATUS_PENDING
+    held_usd: Decimal = Decimal("0")
+    known_usd: Decimal = Decimal("0")
+    held_source: str = ""
+    known_source: str = ""
+    updated_utc: str = ""
+    transitions: int = 0
+
+    def to_mapping(self) -> dict[str, object]:
+        return {
+            "reservation_id": self.reservation_id,
+            "call_id": self.call_id or None,
+            "attempt_ordinal": self.attempt_ordinal,
+            "state": self.state,
+            "broker_status": self.broker_status,
+            "held_usd": format(self.held_usd, "f"),
+            "known_usd": format(self.known_usd, "f"),
+            "held_source": self.held_source or None,
+            "known_source": self.known_source or None,
+            "updated_utc": self.updated_utc,
+            "transitions": self.transitions,
+        }
+
+
 @dataclass(frozen=True)
 class TrustedSendAuthorization:
     """Trusted-domain single-use send capability; no JSON constructor exists.
@@ -1421,6 +1515,14 @@ class TrustedSendGate:
         self._consumed: set[str] = set()
         self._known_usd = Decimal("0")
         self._held_usd = Decimal("0")
+        # G4-F3: per-reservation conservative cost view + one transition log.
+        # The lock makes the admission check and the hold atomic so concurrent
+        # authorizes can never double-hold or oversell the hard total.
+        self._cost_lock = threading.RLock()
+        self._cost_views: dict[str, SendCostView] = {}
+        self._cost_events: list[dict[str, object]] = []
+        self._broker_view_source = "not_observed"
+        self._broker_view_observed = False
         self._soft_events: list[dict[str, object]] = []
         self._denials: list[dict[str, object]] = []
         self._sends = 0
@@ -1459,6 +1561,255 @@ class TrustedSendGate:
             pass
         return EgressViolation(codes)
 
+    # -- G4-F3 conservative cost view (Broker is the only authority) ----
+    def _cost_event(self, kind: str, *, reservation_id: str = "",
+                    **detail: object) -> None:
+        if len(self._cost_events) >= COST_VIEW_EVENT_LIMIT:
+            del self._cost_events[: len(self._cost_events) - COST_VIEW_EVENT_LIMIT + 1]
+        self._cost_events.append({
+            "kind": kind, "utc": _utc_text(self._now()),
+            "reservation_id": reservation_id or None,
+            "detail": dict(detail),
+        })
+
+    def _refresh_cost_totals(self) -> None:
+        self._known_usd = sum((view.known_usd for view in self._cost_views.values()),
+                              Decimal("0"))
+        self._held_usd = sum((view.held_usd for view in self._cost_views.values()),
+                             Decimal("0"))
+
+    def _hold_bound(self, cost: Decimal, supplied: object) -> Decimal | None:
+        """Conservative per-attempt bound; never zero and never below ``cost``.
+
+        A supplied bound is a trusted caller's conservative upper bound (the
+        Broker Reserve ``reserved_cost`` when wired); it must be a positive
+        finite Decimal or the authorization fails closed.
+        """
+        if supplied is not None:
+            amount = _usd_amount(supplied)
+            if amount is None or amount <= 0:
+                return None
+            return max(cost, amount)
+        return max(cost, self.budget.hard_call_usd)
+
+    def _hold_reservation_locked(self, *, reservation_id: str, call_id: str,
+                                 attempt_ordinal: int, hold_usd: Decimal,
+                                 source: str, refine: bool = False) -> str:
+        view = self._cost_views.get(reservation_id)
+        if view is not None and view.state != COST_VIEW_HELD:
+            # A settled reservation must never be re-held: that would be a
+            # second charge for the same Broker row.
+            self._cost_event("RESERVATION_ALREADY_SETTLED_REUSED",
+                             reservation_id=reservation_id,
+                             state=view.state, broker_status=view.broker_status,
+                             source=source)
+            return "RESERVATION_ALREADY_SETTLED"
+        if view is None:
+            view = SendCostView(reservation_id=reservation_id,
+                                call_id=str(call_id or ""),
+                                attempt_ordinal=int(attempt_ordinal))
+            self._cost_views[reservation_id] = view
+        elif call_id and view.call_id and str(call_id) != view.call_id:
+            # One reservation receives at most one Broker charge; two call ids
+            # for it is a protocol anomaly, so keep one view and audit it.
+            self._cost_event("RESERVATION_REUSED_BEFORE_SETTLEMENT",
+                             reservation_id=reservation_id,
+                             prior_call_id=view.call_id, call_id=str(call_id),
+                             source=source)
+        if refine and hold_usd > 0:
+            # The Broker's reserved_cost is the authoritative upper bound, so it
+            # may replace a coarser local estimate downward (never to zero).
+            view.held_usd = hold_usd
+        elif hold_usd > view.held_usd or view.held_usd <= 0:
+            view.held_usd = hold_usd
+        view.state = COST_VIEW_HELD
+        view.broker_status = BROKER_STATUS_PENDING
+        view.held_source = source
+        view.updated_utc = _utc_text(self._now())
+        view.transitions += 1
+        self._refresh_cost_totals()
+        self._cost_event("HOLD", reservation_id=reservation_id,
+                         held_usd=format(view.held_usd, "f"),
+                         held_source=source, call_id=str(call_id or ""),
+                         refined=bool(refine))
+        return "HELD"
+
+    def _settle_reservation_locked(self, *, reservation_id: str, broker_status: str,
+                                   cost_usd: Decimal, call_id: str,
+                                   attempt_ordinal: int, source: str) -> str:
+        view = self._cost_views.get(reservation_id)
+        if view is None:
+            # Crash/reconcile: the new process never authorized this send, but
+            # the Broker's terminal state is authoritative evidence that it is
+            # committed.
+            view = SendCostView(reservation_id=reservation_id,
+                                call_id=str(call_id or ""),
+                                attempt_ordinal=int(attempt_ordinal))
+            self._cost_views[reservation_id] = view
+        if view.state != COST_VIEW_HELD:
+            if view.broker_status == broker_status and view.known_usd == cost_usd:
+                self._cost_event("SETTLEMENT_ALREADY_RECORDED",
+                                 reservation_id=reservation_id,
+                                 broker_status=broker_status,
+                                 cost_usd=format(cost_usd, "f"), source=source)
+                return "ALREADY_RECORDED"
+            self._cost_event("BROKER_SETTLEMENT_CONFLICT",
+                             reservation_id=reservation_id,
+                             recorded_status=view.broker_status,
+                             recorded_cost_usd=format(view.known_usd, "f"),
+                             observed_status=broker_status,
+                             observed_cost_usd=format(cost_usd, "f"),
+                             source=source)
+            return "BROKER_SETTLEMENT_CONFLICT"
+        view.held_usd = Decimal("0")
+        view.known_usd = cost_usd
+        view.state = (COST_VIEW_SETTLED_KNOWN
+                      if broker_status == BROKER_STATUS_OK
+                      else COST_VIEW_SETTLED_CONSERVATIVE)
+        view.broker_status = broker_status
+        view.known_source = source
+        view.updated_utc = _utc_text(self._now())
+        view.transitions += 1
+        self._refresh_cost_totals()
+        self._cost_event("SETTLEMENT_OK" if broker_status == BROKER_STATUS_OK
+                         else "SETTLEMENT_FAILED",
+                         reservation_id=reservation_id,
+                         known_usd=format(cost_usd, "f"),
+                         broker_status=broker_status, source=source)
+        return "SETTLED"
+
+    def record_broker_status(self, status: Mapping[str, object], *,
+                             source: str = "broker_status") -> str:
+        """Copy one read-only Broker ``reservation_status`` reply into the view.
+
+        The Broker answer is authoritative. An unavailable/unknown answer never
+        releases a hold; a terminal answer without a valid cost also keeps the
+        hold (no false FREE).
+        """
+        if not isinstance(status, Mapping):
+            self._cost_event("BROKER_STATUS_INVALID", source=source)
+            return "BROKER_STATUS_INVALID"
+        reservation_id = status.get("reservation_id")
+        if not isinstance(reservation_id, str) or not reservation_id:
+            self._cost_event("BROKER_STATUS_INVALID", source=source)
+            return "BROKER_STATUS_INVALID"
+        if status.get("ok") is not True or status.get("found") is not True:
+            self._cost_event("BROKER_STATUS_UNAVAILABLE",
+                             reservation_id=reservation_id, source=source,
+                             code=str(status.get("code") or "") or None,
+                             found=status.get("found"))
+            return "BROKER_STATUS_UNAVAILABLE"
+        broker_status = status.get("status")
+        call_id = status.get("call_id") if isinstance(status.get("call_id"), str) else ""
+        with self._cost_lock:
+            self._broker_view_observed = True
+            self._broker_view_source = source
+            if broker_status == BROKER_STATUS_PENDING:
+                reserved = _usd_amount(status.get("reserved_cost"))
+                if reserved is None or reserved <= 0:
+                    self._cost_event("BROKER_RESERVED_COST_UNKNOWN",
+                                     reservation_id=reservation_id, source=source,
+                                     reserved_cost=str(status.get("reserved_cost")))
+                    return "BROKER_RESERVED_COST_UNKNOWN"
+                return self._hold_reservation_locked(
+                    reservation_id=reservation_id, call_id=call_id,
+                    attempt_ordinal=1, hold_usd=reserved, source=source,
+                    refine=True)
+            if broker_status in {BROKER_STATUS_OK, BROKER_STATUS_FAILED}:
+                cost = _usd_amount(status.get("cost"))
+                if cost is None:
+                    self._cost_event("BROKER_COST_UNKNOWN",
+                                     reservation_id=reservation_id,
+                                     broker_status=str(broker_status), source=source,
+                                     cost=str(status.get("cost")))
+                    return "BROKER_COST_UNKNOWN"
+                return self._settle_reservation_locked(
+                    reservation_id=reservation_id, broker_status=str(broker_status),
+                    cost_usd=cost, call_id=call_id, attempt_ordinal=1, source=source)
+            self._cost_event("BROKER_STATUS_UNKNOWN", reservation_id=reservation_id,
+                             broker_status=str(broker_status), source=source)
+            return "BROKER_STATUS_UNKNOWN"
+
+    def record_broker_settlement(self, *, reservation_id: str,
+                                 broker_status: str, cost_usd: object = None,
+                                 settlement: Mapping[str, object] | None = None,
+                                 call_id: str = "", attempt_ordinal: int = 1,
+                                 source: str = "broker_completion") -> str:
+        """Archive one Broker terminal settlement exactly once.
+
+        ``broker_status`` is the Broker state (``OK`` for settle, ``FAILED`` for
+        fail); ``cost_usd``/``settlement.cost_usd`` is the Broker's final cost.
+        Missing or invalid costs keep the hold instead of inventing a number.
+        """
+        if not isinstance(reservation_id, str) or not reservation_id:
+            self._cost_event("BROKER_SETTLEMENT_INVALID", source=source)
+            return "BROKER_SETTLEMENT_INVALID"
+        if broker_status not in {BROKER_STATUS_OK, BROKER_STATUS_FAILED}:
+            self._cost_event("BROKER_SETTLEMENT_INVALID",
+                             reservation_id=reservation_id,
+                             broker_status=str(broker_status), source=source)
+            return "BROKER_SETTLEMENT_INVALID"
+        raw_cost = cost_usd
+        if raw_cost is None and isinstance(settlement, Mapping):
+            raw_cost = settlement.get("cost_usd")
+        cost = _usd_amount(raw_cost)
+        if cost is None:
+            self._cost_event("BROKER_COST_UNKNOWN", reservation_id=reservation_id,
+                             broker_status=broker_status, source=source,
+                             cost=str(raw_cost))
+            return "BROKER_COST_UNKNOWN"
+        with self._cost_lock:
+            self._broker_view_observed = True
+            self._broker_view_source = source
+            return self._settle_reservation_locked(
+                reservation_id=reservation_id, broker_status=broker_status,
+                cost_usd=cost, call_id=call_id, attempt_ordinal=attempt_ordinal,
+                source=source)
+
+    def cost_view(self, reservation_id: str) -> dict[str, object] | None:
+        """Read-only copy of one reservation's conservative view (or None)."""
+        with self._cost_lock:
+            view = self._cost_views.get(reservation_id)
+            return None if view is None else view.to_mapping()
+
+    def _cost_mapping_locked(self) -> dict[str, object]:
+        views = [self._cost_views[key].to_mapping()
+                 for key in sorted(self._cost_views)]
+        unresolved = sum(1 for view in self._cost_views.values()
+                         if view.state == COST_VIEW_HELD)
+        return {
+            "schema": COST_VIEW_SCHEMA,
+            "authority": COST_AUTHORITY_BROKER,
+            "role": COST_VIEW_ROLE,
+            "billing_authority": False,
+            "scope": COST_VIEW_SCOPE,
+            "reconciled_with_broker": self._broker_view_observed,
+            "broker_view_source": self._broker_view_source,
+            "known_cost_usd": format(self._known_usd, "f"),
+            "worst_case_held_usd": format(self._held_usd, "f"),
+            "committed_usd": format(self._known_usd + self._held_usd, "f"),
+            "held_reservations": unresolved,
+            "settled_reservations": len(self._cost_views) - unresolved,
+            "unresolved_reservations": unresolved,
+            "reservations": views,
+            "events": [dict(event) for event in self._cost_events],
+            "invariants": {
+                "known_nonnegative": self._known_usd >= 0,
+                "held_nonnegative": self._held_usd >= 0,
+                "no_free_unresolved": all(
+                    view.held_usd > 0 for view in self._cost_views.values()
+                    if view.state == COST_VIEW_HELD),
+                "one_view_per_reservation": len(views) == len(self._cost_views),
+                "totals_equal_view_sum": (
+                    self._known_usd == sum(
+                        (view.known_usd for view in self._cost_views.values()),
+                        Decimal("0"))
+                    and self._held_usd == sum(
+                        (view.held_usd for view in self._cost_views.values()),
+                        Decimal("0"))),
+            },
+        }
+
     # -- pre-dispatch binding check (G4-A wiring) ----------------------
     def pre_dispatch_binding_reasons(self) -> tuple[str, ...]:
         if self.binding_approved is None or self.binding_observer is None:
@@ -1482,8 +1833,15 @@ class TrustedSendGate:
                   payload_bytes: bytes, payload_digest: str,
                   reservation_id: str, broker_claim_id: str,
                   broker_claim_digest: str, payload_length: int,
-                  estimated_cost_usd: str | None = None) -> TrustedSendAuthorization:
-        """Mint one capability or raise EgressViolation with stable reasons."""
+                  estimated_cost_usd: str | None = None,
+                  worst_case_usd: str | None = None) -> TrustedSendAuthorization:
+        """Mint one capability or raise EgressViolation with stable reasons.
+
+        ``worst_case_usd`` is an optional trusted conservative upper bound for
+        this send (the Broker Reserve ``reserved_cost`` when wired). It only
+        sizes the gate's conservative view; it is never a second price
+        authority and never alters the Broker's eventual settlement.
+        """
         reasons: list[str] = []
         if self.send_problems:
             raise self._deny(self.send_problems)
@@ -1607,6 +1965,7 @@ class TrustedSendGate:
                 if document.get("model") != self.contract.model_id:
                     reasons.append("PAYLOAD_MODEL_MISMATCH")
         # Budget: unknown/absent cost is never zero.
+        hold: Decimal | None = None
         try:
             cost = Decimal(str(estimated_cost_usd if estimated_cost_usd is not None
                                else request.estimated_cost_usd))
@@ -1615,62 +1974,81 @@ class TrustedSendGate:
             reasons.append("COST_UNKNOWN")
         if cost is not None:
             if not cost.is_finite() or cost <= 0:
+                cost = None
                 reasons.append("COST_UNKNOWN")
             else:
                 if cost > self.budget.hard_call_usd:
                     reasons.append("PER_CALL_BUDGET_EXCEEDED")
-                if self._known_usd + self._held_usd + cost > self.budget.hard_total_usd:
-                    reasons.append("HARD_BUDGET_CEILING_EXCEEDED")
-        if len(self._issued) >= self.limit:
-            reasons.append("SEND_AUTHORIZATION_LIMIT_REACHED")
-        reasons.extend(self.pre_dispatch_binding_reasons())
-        if reasons:
-            raise self._deny(reasons, call_id=computed_call_id,
-                             reservation_id=reservation_id)
-        moment = self._now()
-        issued = _utc_text(moment)
-        expires = _utc_text(moment + timedelta(seconds=self.ttl_seconds))
-        material = {
-            "nonce": os.urandom(8).hex(),
-            "schema": G4C_SEND_AUTHORIZATION_SCHEMA,
-            "scope_id": prepared.scope_id, "run_id": prepared.run_id,
-            "call_id": computed_call_id, "prepared_digest": computed_prepared,
-            "payload_digest": payload_digest, "payload_length": len(payload_bytes),
-            "attempt_ordinal": request.attempt_ordinal,
-            "reservation_id": reservation_id,
-            "broker_claim_id": broker_claim_id,
-            "broker_claim_digest": broker_claim_digest,
-            "auth_epoch": self.auth_epoch, "issued_utc": issued,
-        }
-        authorization = TrustedSendAuthorization(
-            authorization_id="send-" + hashlib.sha256(
-                canonical_json(material).encode("utf-8")).hexdigest()[:32],
-            scope_id=prepared.scope_id, run_id=prepared.run_id,
-            call_id=computed_call_id, prepared_digest=computed_prepared,
-            payload_digest=payload_digest, payload_length=len(payload_bytes),
-            attempt_ordinal=request.attempt_ordinal,
-            reservation_id=reservation_id, broker_claim_id=broker_claim_id,
-            broker_claim_digest=broker_claim_digest,
-            route_id=self.contract.route_id, model_id=self.contract.model_id,
-            auth_epoch=self.auth_epoch, issued_utc=issued, expires_utc=expires,
-            route_kind=self.contract.route_kind, synthetic=True)
-        # Journal first: a configured audit journal that cannot be written is a
-        # hard failure, never a silent unlogged send authorization.
-        self._journal({"decision": "AUTHORIZED",
-                       "utc": issued,
-                       **authorization.to_audit_dict()})
-        self._issued[id(authorization)] = authorization
-        self._sends += 1
-        if cost is not None:
-            if cost > self.budget.soft_call_usd:
-                self._soft_events.append({"kind": "soft_call", "cost_usd": str(cost),
-                                          "call_id": computed_call_id})
-            if self._known_usd + self._held_usd + cost > self.budget.soft_total_usd:
-                self._soft_events.append({"kind": "soft_total",
-                                          "cost_usd": str(cost),
-                                          "call_id": computed_call_id})
-            self._known_usd += cost
-        return authorization
+                # The conservative hold is the worst case this send may commit,
+                # never just the declared estimate (P2-5).
+                hold = self._hold_bound(cost, worst_case_usd)
+                if hold is None:
+                    reasons.append(COST_BOUND_INVALID)
+        with self._cost_lock:
+            # The check and the hold are one atomic step: concurrent authorizes
+            # can neither double-hold nor oversell the hard total.
+            if (hold is not None
+                    and self._known_usd + self._held_usd + hold
+                    > self.budget.hard_total_usd):
+                reasons.append("HARD_BUDGET_CEILING_EXCEEDED")
+            if len(self._issued) >= self.limit:
+                reasons.append("SEND_AUTHORIZATION_LIMIT_REACHED")
+            existing_view = self._cost_views.get(reservation_id)
+            if existing_view is not None and existing_view.state != COST_VIEW_HELD:
+                reasons.append(RESERVATION_ALREADY_SETTLED)
+            reasons.extend(self.pre_dispatch_binding_reasons())
+            if reasons:
+                raise self._deny(reasons, call_id=computed_call_id,
+                                 reservation_id=reservation_id)
+            moment = self._now()
+            issued = _utc_text(moment)
+            expires = _utc_text(moment + timedelta(seconds=self.ttl_seconds))
+            material = {
+                "nonce": os.urandom(8).hex(),
+                "schema": G4C_SEND_AUTHORIZATION_SCHEMA,
+                "scope_id": prepared.scope_id, "run_id": prepared.run_id,
+                "call_id": computed_call_id, "prepared_digest": computed_prepared,
+                "payload_digest": payload_digest, "payload_length": len(payload_bytes),
+                "attempt_ordinal": request.attempt_ordinal,
+                "reservation_id": reservation_id,
+                "broker_claim_id": broker_claim_id,
+                "broker_claim_digest": broker_claim_digest,
+                "auth_epoch": self.auth_epoch, "issued_utc": issued,
+            }
+            authorization = TrustedSendAuthorization(
+                authorization_id="send-" + hashlib.sha256(
+                    canonical_json(material).encode("utf-8")).hexdigest()[:32],
+                scope_id=prepared.scope_id, run_id=prepared.run_id,
+                call_id=computed_call_id, prepared_digest=computed_prepared,
+                payload_digest=payload_digest, payload_length=len(payload_bytes),
+                attempt_ordinal=request.attempt_ordinal,
+                reservation_id=reservation_id, broker_claim_id=broker_claim_id,
+                broker_claim_digest=broker_claim_digest,
+                route_id=self.contract.route_id, model_id=self.contract.model_id,
+                auth_epoch=self.auth_epoch, issued_utc=issued, expires_utc=expires,
+                route_kind=self.contract.route_kind, synthetic=True)
+            # Journal first: a configured audit journal that cannot be written is
+            # a hard failure, never a silent unlogged send authorization.
+            self._journal({"decision": "AUTHORIZED",
+                           "utc": issued,
+                           **authorization.to_audit_dict()})
+            self._issued[id(authorization)] = authorization
+            self._sends += 1
+            if hold is not None:
+                self._hold_reservation_locked(
+                    reservation_id=reservation_id, call_id=computed_call_id,
+                    attempt_ordinal=request.attempt_ordinal, hold_usd=hold,
+                    source=("broker_reserved_cost" if worst_case_usd is not None
+                            else "gate_budget_bound"))
+            if cost is not None:
+                if cost > self.budget.soft_call_usd:
+                    self._soft_events.append({"kind": "soft_call", "cost_usd": str(cost),
+                                              "call_id": computed_call_id})
+                if self._known_usd + self._held_usd > self.budget.soft_total_usd:
+                    self._soft_events.append({"kind": "soft_total",
+                                              "cost_usd": str(cost),
+                                              "call_id": computed_call_id})
+            return authorization
 
     def consume(self, authorization: object, *,
                 payload_bytes: object = None,
@@ -1725,12 +2103,30 @@ class TrustedSendGate:
         }
         if decision != "CONSUMED":
             self._denials.append(record)
+        if authorization is not None:
+            with self._cost_lock:
+                view = self._cost_views.get(authorization.reservation_id)
+                if view is not None and view.state == COST_VIEW_HELD:
+                    if decision == "CONSUMED":
+                        view.held_source = "consume"
+                        view.transitions += 1
+                    self._cost_event(
+                        "CONSUME" if decision == "CONSUMED"
+                        else f"CONSUME_{decision}",
+                        reservation_id=authorization.reservation_id,
+                        authorization_id=authorization.authorization_id,
+                        decision=decision,
+                        held_usd=format(view.held_usd, "f"))
         try:
             self._journal(record)
         except EgressViolation:
             pass
 
     def snapshot(self) -> dict[str, object]:
+        with self._cost_lock:
+            cost_view = self._cost_mapping_locked()
+            known = format(self._known_usd, "f")
+            held = format(self._held_usd, "f")
         return {
             "schema": "m0.g4c.send-gate.v1",
             "route_contract": self.contract.to_mapping(),
@@ -1742,8 +2138,13 @@ class TrustedSendGate:
             "issued": len(self._issued),
             "consumed": len(self._consumed),
             "sends_authorized": self._sends,
-            "known_cost_usd": format(self._known_usd, "f"),
-            "worst_case_held_usd": format(self._held_usd, "f"),
+            # G4-F3 semantics: known = Broker-confirmed terminal cost only;
+            # held = conservative view of reservations the Broker has not
+            # terminally confirmed. This is a view, not the billing authority.
+            "known_cost_usd": known,
+            "worst_case_held_usd": held,
+            "cost_authority": COST_AUTHORITY_BROKER,
+            "cost_view": cost_view,
             "soft_events": list(self._soft_events),
             "denials": list(self._denials),
         }

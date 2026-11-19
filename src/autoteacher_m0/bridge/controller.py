@@ -496,13 +496,22 @@ class TrustedController:
 
     def _authorize_send(self, *, prepared, request, decision,
                         payload_bytes: bytes, payload_digest: str,
-                        reservation_id: str, attempt_id: str) -> object:
-        """Mint the G4-C send authorization or fail closed before the Fake."""
+                        reservation_id: str, attempt_id: str,
+                        reserved_cost_usd: str | None = None) -> object:
+        """Mint the G4-C send authorization or fail closed before the Fake.
+
+        ``reserved_cost_usd`` is the Broker Reserve ``reserved_cost`` (a
+        read-only copy of the authoritative upper bound). It only sizes the
+        gate's conservative cost view; final billing stays with the Broker.
+        """
         claim_map = decision.claim.claim if decision.claim is not None else None
         if not isinstance(claim_map, Mapping):
             self.attempts.mark_settlement_uncertain(
                 attempt_id, reason="EGRESS_DENIED:BROKER_CLAIM_INVALID")
             raise BridgeError("EGRESS_DENIED")
+        gate_kwargs = {}
+        if reserved_cost_usd is not None:
+            gate_kwargs["worst_case_usd"] = reserved_cost_usd
         try:
             authorization = self.dispatch_gate.authorize(
                 prepared=prepared, request=request, permission=decision.permission,
@@ -511,13 +520,50 @@ class TrustedController:
                 reservation_id=reservation_id,
                 broker_claim_id=str(claim_map.get("call_id") or ""),
                 broker_claim_digest=_sha256(dict(claim_map)),
-                estimated_cost_usd=request.estimated_cost_usd)
+                estimated_cost_usd=request.estimated_cost_usd, **gate_kwargs)
         except EgressViolation as exc:
             self.attempts.mark_settlement_uncertain(
                 attempt_id, reason=("EGRESS_DENIED:" + ",".join(exc.reasons))[:200])
             raise BridgeError("EGRESS_DENIED") from exc
         self.send_authorizations.append(authorization.to_audit_dict())
         return authorization
+
+    def _record_gate_broker_status(self, reply: object, *,
+                                   source: str) -> None:
+        """Relay a read-only Broker answer into the gate's conservative view.
+
+        This can never change the request outcome: the accounting view is
+        audit-only and the Broker remains the sole cost authority.
+        """
+        gate = getattr(self, "dispatch_gate", None)
+        if gate is None or not isinstance(reply, Mapping):
+            return
+        recorder = getattr(gate, "record_broker_status", None)
+        if not callable(recorder):
+            return
+        try:
+            recorder(dict(reply), source=source)
+        except Exception:  # noqa: BLE001 - view bookkeeping must not fail a send
+            pass
+
+    def _record_gate_settlement(self, reply: Mapping, *,
+                                reservation_id: str, source: str) -> None:
+        """Relay one Broker terminal settlement (final status + cost) once."""
+        gate = getattr(self, "dispatch_gate", None)
+        if gate is None:
+            return
+        recorder = getattr(gate, "record_broker_settlement", None)
+        if not callable(recorder):
+            return
+        settlement = reply.get("settlement")
+        try:
+            recorder(
+                reservation_id=reservation_id,
+                broker_status="OK" if reply.get("code") == "SETTLED" else "FAILED",
+                settlement=settlement if isinstance(settlement, Mapping) else None,
+                source=source)
+        except Exception:  # noqa: BLE001 - view bookkeeping must not fail a send
+            pass
 
     def _handle_payload_stream(self, payload: Mapping[str, object],
                                transport_id: str, deadline: float,
@@ -690,6 +736,13 @@ class TrustedController:
                                             output_tokens=prepared.max_output_tokens,
                                             call_id=prepared.call_id, deadline=deadline)
             reservation_id = reserved["reservation_id"]
+            # Read-only copy of the Broker's authoritative upper bound; the gate
+            # uses it only to size its conservative held view.
+            reservation_doc = reserved.get("reservation")
+            reserved_cost_usd = None
+            if isinstance(reservation_doc, Mapping):
+                reserved_cost_usd = reservation_doc.get("cost_usd",
+                                                        reservation_doc.get("reserved_cost"))
             intent_id = self.attempts.record_intent(
                 scope_id=self.admission.scope_id, call_id=prepared.call_id,
                 reservation_id=reservation_id, prepared_digest=prepared.request_digest,
@@ -736,7 +789,8 @@ class TrustedController:
                 send_authorization = self._authorize_send(
                     prepared=prepared, request=request, decision=decision,
                     payload_bytes=payload_bytes, payload_digest=payload_digest,
-                    reservation_id=reservation_id, attempt_id=attempt_id)
+                    reservation_id=reservation_id, attempt_id=attempt_id,
+                    reserved_cost_usd=reserved_cost_usd)
             holder: dict[str, object] = {}
 
             def on_fake_frame(frame: object) -> None:
@@ -1264,20 +1318,27 @@ class TrustedController:
             request = getattr(self.broker, "request", None)
             status_helper = getattr(self.broker, "reservation_status", None)
             if callable(status_helper):
-                return status_helper(reservation_id, deadline_monotonic=deadline)
-            if callable(request):
-                return request("reservation_status",
-                               {"reservation_id": reservation_id},
-                               deadline_monotonic=deadline)
-            legacy = getattr(self.broker, "_request", None)
-            if callable(legacy):
-                # Transitional compatibility for the pre-G3-C trusted client.
-                return legacy("reservation_status", reservation_id=reservation_id)
-            return {"ok": False, "code": "BROKER_ERROR"}
+                reply = status_helper(reservation_id, deadline_monotonic=deadline)
+            elif callable(request):
+                reply = request("reservation_status",
+                                {"reservation_id": reservation_id},
+                                deadline_monotonic=deadline)
+            else:
+                legacy = getattr(self.broker, "_request", None)
+                if callable(legacy):
+                    # Transitional compatibility for the pre-G3-C trusted client.
+                    reply = legacy("reservation_status", reservation_id=reservation_id)
+                else:
+                    reply = {"ok": False, "code": "BROKER_ERROR"}
         except BrokerClientError as exc:
-            return {"ok": False, "code": broker_protocol_code(str(exc))}
+            reply = {"ok": False, "code": broker_protocol_code(str(exc))}
         except Exception:
-            return {"ok": False, "code": "BROKER_ERROR"}
+            reply = {"ok": False, "code": "BROKER_ERROR"}
+        # G4-F3: relay the authoritative read-only answer into the gate's
+        # conservative view (PENDING -> held, OK/FAILED -> known). This never
+        # changes the recovery decision below.
+        self._record_gate_broker_status(reply, source="broker_status")
+        return reply
 
     @staticmethod
     def _check_deadline(deadline: float) -> None:
@@ -1289,6 +1350,10 @@ class TrustedController:
                                 deadline: float) -> bool:
         code = reply.get("code")
         if reply.get("ok") and code in {"SETTLED", "FAILED"}:
+            # G4-F3: archive the Broker terminal cost exactly once. The gate
+            # releases its conservative hold only from this authoritative copy.
+            self._record_gate_settlement(reply, reservation_id=reservation_id,
+                                         source="broker_completion")
             if authoritative:
                 self.attempts.mark_settled(
                     attempt_id, settlement_json=json.dumps(reply, sort_keys=True))
@@ -1314,6 +1379,16 @@ class TrustedController:
         raise BridgeError(broker_protocol_code(code or "SETTLEMENT_UNCERTAIN"))
 
     # -- startup reconciliation ---------------------------------------
+    def _observe_broker_view(self, reservation_id: str, deadline: float) -> None:
+        """Read-only Broker status query that only feeds the gate's cost view.
+
+        It never changes the local recovery decision: the reply is relayed by
+        ``_broker_status`` and discarded here.
+        """
+        if getattr(self, "dispatch_gate", None) is None:
+            return
+        self._broker_status(reservation_id, deadline)
+
     def reconcile_on_startup(self, receipt_dir: str | None = None) -> list[dict]:
         """Single authoritative recovery path; never sends a new Provider call."""
         deadline = time.monotonic() + max(self.deadline_seconds, 1.0)
@@ -1331,6 +1406,10 @@ class TrustedController:
                     intent["intent_id"], reason="CRASH_BEFORE_SEND_NO_EVIDENCE")
         for row in self.attempts.pending_attempts():
             attempt_id = row["attempt_id"]
+            # G4-F3 view-only observation: the gate must mirror Broker PENDING
+            # for a crashed/uncertain attempt even when the local state machine
+            # already has enough evidence and does not need a status query.
+            self._observe_broker_view(row["reservation_id"], deadline)
             if row["state"] != "SETTLED" and row["state"] != "WORST_CASE_HELD":
                 if row["state"] == "ATTEMPT_STARTED" and receipt_root is not None:
                     upgraded = self._upgrade_from_receipt_file(row, receipt_root)
