@@ -247,8 +247,9 @@ def build_changes(out: Path, docs_sha: str) -> None:
     dst = out / "changes"
     write_text(dst / "implementation.diff", sanitize_text(git(
         "diff", "--binary", BASE_SHA, IMPL_SHA, "--", "src", "scripts/g4",
-        "config/g4", "tests/integration/g4_f2", "tests/integration/g4_f3",
-        "tests/integration/g4_f5", "tests/security")))
+        "scripts/security", "config/g4", "tests/integration/g4_f2",
+        "tests/integration/g4_f3", "tests/integration/g4_f5",
+        "tests/security")))
     write_text(dst / "docs.diff", sanitize_text(git(
         "diff", "--binary", BASE_SHA, docs_sha, "--", "docs")))
     lines = ["# Protected-file audit (base -> impl)", ""]
