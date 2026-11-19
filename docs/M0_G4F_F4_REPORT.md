@@ -322,8 +322,10 @@ Ruff（deps 内 0.17.5）：`scripts/g4/run_g4_f4.py`、`scripts/g4/audit_g4_f4.
 4. **session-log-deepseek**：candidate overlay 仍 `config.enabled=false`；本 run 只依赖 DSH
    core 的 `session.v4.jsonl`。未证明任意未来会话不会产生辅助 LLM 调用（B07 余项）。
 5. **并发 workstream**：F4 证据在 HEAD 7000f72 的 clean worktree 产生；共享工作区的未提交
-   G4-F2 改动未进入 stage/证据。若后续 F2 合并修改 `scripts/g4/launch_c.py` 或
-   `scripts/g4/stage/trusted_entry_g4c.py`，F4 需在合并后 HEAD 重跑（stage base 会变）。
+   G4-F2 改动未进入 stage/证据。F2 已在 F4 证据之后以 `40af7b1` 进入 main，修改了
+   `scripts/g4/launch_c.py`、`scripts/g4/stage/trusted_entry_g4c.py` 与
+   `src/autoteacher_m0/bridge/*`；本报告的 F4 结论仍绑定 7000f72/F3 stage，**不声称覆盖
+   F2 code**。F4 需在 F2 合并后的 HEAD 重建 stage 并重跑，才能把 resume 证据绑定到新 HEAD。
 6. **Host residual 扫描口径**：G3-D 的清理扫描是全 host marker；本 run 已把不属于本 run 的
    1 个 host pytest 进程单独记录并排除，`residual-processes.json=[]`。这不是“host 无任何
    进程”，而是“本 run 无 residual”。
@@ -337,7 +339,9 @@ Ruff（deps 内 0.17.5）：`scripts/g4/run_g4_f4.py`、`scripts/g4/audit_g4_f4.
 - 主提交：`b963ad4e89ade40021e78007a3f8ec61c0b6d62d`
   （`feat: G4-F4 real dual-principal DSH session resume validation (no-key)`），
   父提交 `7000f727d0e5926b0bd95574f3c587a2707da6d8`；包含 runner、audit 与本报告。
-- 随后 docs-only 提交补记 G4-C 完整容器回归计数（9/9、106 checks），父为主提交。
+- 本报告另有 docs-only 补记（G4-C 完整容器回归 9/9、106 checks；本 §7 的 F2 说明），
+  见 `git log`。补记期间并行 G4-F2 `40af7b1` 已进入 main，因此补记提交的父不是主提交；
+  主提交本身只包含 F4 的 3 个文件。
 - 只新增/修改：`scripts/g4/run_g4_f4.py`、`scripts/g4/audit_g4_f4.py`、
   `docs/M0_G4F_F4_REPORT.md`；未 push、未 amend、未 stage 任何他人文件。
 - **范围结论：`RESUME_L2_VERIFIED`**。正向真实 resume + 双请求独立账本 + 旧 Attempt/
