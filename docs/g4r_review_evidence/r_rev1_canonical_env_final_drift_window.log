@@ -1,0 +1,8 @@
+== canonical env recheck on final baseline d33e0aa (inputs untouched by delta) ==
+Fri Nov 20 16:53:15 UTC 2026
+0340fb78c2aa0670af900aa8284a825f6673e76323b6d22e5127a471ef1181ad  -
+e07729d7997944417b1c25531749b3e6e5e34aa4248f01dc8f370282082ecb98  -
+1cc41d5a8745a5b9d47c8604e44f23eb8af2d8ca02b2afa0be101d5f71be6ea4  artifacts/foundation/deps/deepseek_harness_runtime/runtime/deepseek-harness-sdk-runtime-linux-x64
+82e10c6ffe37e401a58730e9abcaa691f19d6702a7276c03df625d5b4636e501  artifacts/g4/c/stages/stage-20261119T142828Z/manifest.json
+2cb424616b7380bff61f8ce760e229a0c1d2b32c4a5f2954cdf66c3937bf74ba  artifacts/g4/c/stages/stage-20261119T142828Z/candidate/runtime/bridge/lib/index.js
+7d32ec1d8b02726ba52ef8303e8677b46384e9954559e838b31bb8c58f222068  -

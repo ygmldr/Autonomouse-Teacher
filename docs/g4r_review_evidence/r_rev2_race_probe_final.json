@@ -1,0 +1,92 @@
+{
+  "corrupt_finals": {
+    "authorization_id_crosscheck": "NOT_CHECKED_BY_IMPLEMENTATION; classified REPLAYED",
+    "cases": {
+      "empty": {
+        "AUTHORIZATION_USE_RECORD_INVALID": 1
+      },
+      "empty-object": {
+        "AUTHORIZATION_USE_RECORD_INVALID": 1
+      },
+      "hardlink-nlink3": {
+        "AUTHORIZATION_USE_RECORD_INVALID": 1
+      },
+      "json-array": {
+        "AUTHORIZATION_USE_RECORD_INVALID": 1
+      },
+      "mode-0666": {
+        "AUTHORIZATION_USE_RECORD_INVALID": 1
+      },
+      "partial-json": {
+        "AUTHORIZATION_USE_RECORD_INVALID": 1
+      },
+      "symlink": {
+        "AUTHORIZATION_USE_RECORD_INVALID": 1
+      },
+      "wrong-authorization-id": {
+        "AUTHORIZATION_REPLAYED": 1
+      },
+      "wrong-schema": {
+        "AUTHORIZATION_USE_RECORD_INVALID": 1
+      }
+    },
+    "invalid_count": 8
+  },
+  "crash_injection": {
+    "child_exitcode": 23,
+    "reap_consume": "OK",
+    "restart_first": "OK",
+    "restart_second": "AUTHORIZATION_REPLAYED",
+    "temp_after_crash": 1,
+    "temps_after_reap": []
+  },
+  "cross_epoch": {
+    "loser_codes": {
+      "AUTHORIZATION_EPOCH_MISMATCH": 8
+    },
+    "rounds": 8,
+    "winner_count": 8
+  },
+  "elapsed_seconds": 32.99,
+  "failure_count": 0,
+  "failures": [],
+  "fsync_failure": {
+    "final_exists": true,
+    "first": "AUTHORIZATION_USE_LOG_DURABILITY_UNKNOWN",
+    "second": "AUTHORIZATION_REPLAYED",
+    "temps": []
+  },
+  "link_unsupported": {
+    "code": "AUTHORIZATION_USE_LOG_WRITE_FAILED",
+    "final_count": 43
+  },
+  "module_path": "/root/Autonomous Teacher/worktrees/g4r-review/src/autoteacher_m0/security/authorization.py",
+  "network_calls": 0,
+  "probe": "g4r-reviewer-r-rev2",
+  "process_race": {
+    "consumers": 3,
+    "distinct_pids": 10,
+    "double_success": 0,
+    "loser_codes": {
+      "AUTHORIZATION_REPLAYED": 20
+    },
+    "rounds": 10,
+    "winner_count": 10
+  },
+  "real_key": false,
+  "synthetic_only": true,
+  "temp_bounds": {
+    "after_aging": "OK",
+    "full_temps": "AUTHORIZATION_USE_LOG_WRITE_FAILED",
+    "temps_after_aging": []
+  },
+  "thread_race": {
+    "consumers": 4,
+    "double_success": 0,
+    "loser_codes": {
+      "AUTHORIZATION_REPLAYED": 30
+    },
+    "rounds": 10,
+    "winner_count": 10
+  }
+}

@@ -1,0 +1,8 @@
+package_file: /root/Autonomous Teacher/worktrees/g4r-review/src/autoteacher_m0/__init__.py
+OK  src/autoteacher_m0/security/authorization.py loaded=c22038a60e40a79a head_blob=c22038a60e40a79a
+OK  src/autoteacher_m0/bridge/controller.py loaded=e967ddeccfb6f141 head_blob=e967ddeccfb6f141
+OK  src/autoteacher_m0/bridge/request_lifecycle.py loaded=77f9244415fd5cd5 head_blob=77f9244415fd5cd5
+OK  src/autoteacher_m0/bridge/recovery_diagnostics.py loaded=fbe324ab6c47be0d head_blob=fbe324ab6c47be0d
+OK  src/autoteacher_m0/bridge/dispatch_audit.py loaded=8be106339cd52986 head_blob=8be106339cd52986
+OK  src/autoteacher_m0/security/gates.py loaded=3ed0863440d26105 head_blob=3ed0863440d26105
+loaded/6 == HEAD blobs, head=5bf9b8b14212a987fc97ca515a20d99b3a12920c

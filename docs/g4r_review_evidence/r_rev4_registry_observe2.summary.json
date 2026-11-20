@@ -1,0 +1,127 @@
+{
+  "analysis": {
+    "attack_count": 0,
+    "attacks": [],
+    "dispatch_count": 1,
+    "dispatch_face_approved": true,
+    "dispatch_registry_approved": true,
+    "face_equals_registry": true,
+    "final_snapshot": {
+      "attack": "none",
+      "definitions": [],
+      "epoch": 2,
+      "kind": "registry_snapshot",
+      "mode": "observe",
+      "pid": 1429485,
+      "schema": "g4r.registry.probe.v1",
+      "schemas": [],
+      "utc": "2026-11-20T16:48:52.455Z",
+      "why": "tools_change"
+    },
+    "last_dispatch": {
+      "approved_face": true,
+      "approved_registry": true,
+      "approved_registry_names": [
+        "skill_lookup"
+      ],
+      "attack": "none",
+      "epoch": 1,
+      "face_equals_registry": true,
+      "kind": "dispatch_tool_face",
+      "mode": "observe",
+      "model": "fixture-bridge-v1",
+      "pid": 1429485,
+      "provider": "offline-test-only-g3b",
+      "purpose": null,
+      "registry_digests": [
+        {
+          "name": "skill_lookup",
+          "sha256": "c984bef0ae31771da16a12ef2e7972b289cde6014b7f8ad12349f16c4f77b704"
+        }
+      ],
+      "registry_error": null,
+      "registry_names": [
+        "skill_lookup"
+      ],
+      "registry_unknown": [],
+      "schema": "g4r.registry.probe.v1",
+      "tool_digests": [
+        {
+          "name": "skill_lookup",
+          "sha256": "c984bef0ae31771da16a12ef2e7972b289cde6014b7f8ad12349f16c4f77b704"
+        }
+      ],
+      "tool_names": [
+        "skill_lookup"
+      ],
+      "unknown": [],
+      "utc": "2026-11-20T16:48:45.190Z"
+    },
+    "max_epoch": 2,
+    "registry_union_names": [
+      "skill_lookup"
+    ],
+    "snapshot_count": 3,
+    "unknown_registry_observed": [],
+    "unknown_tool_face_observed": []
+  },
+  "command": [
+    "unshare",
+    "-n",
+    "env",
+    "-i",
+    "HOME=/tmp/g4r-registry-probe-ax4kfp9g/home",
+    "DSH_HOME=/tmp/g4r-registry-probe-ax4kfp9g/dshhome",
+    "PATH=/usr/bin:/bin",
+    "TERM=dumb",
+    "G4R_PROBE_OUT=/tmp/g4r-registry-probe-ax4kfp9g/probe-events.jsonl",
+    "/root/Autonomous Teacher/artifacts/foundation/deps/deepseek_harness_runtime/runtime/deepseek-harness-sdk-runtime-linux-x64",
+    "--profile",
+    "sdk-minimal",
+    "--patch",
+    "/tmp/g4r-registry-probe-ax4kfp9g/frozen-effective.patch.yml",
+    "--patch",
+    "/tmp/g4r-registry-probe-ax4kfp9g/probe.patch.yml"
+  ],
+  "completed_utc": "2026-11-20T16:48:52Z",
+  "dsh_home_source": "fresh-materialised-by-runtime",
+  "frozen_patch_sha256": "0cf5d340830856450540a4d74b2ae0d555d1ba40150a6e7942c8d7222dbe7d7b",
+  "mode": "observe",
+  "network": "unshare -n (no network namespace)",
+  "patches": {
+    "frozen_effective_sha256": "316530b7e43d1d929e0764db27a6a20d5f061fec0b58a67348cea7a9fa17b751",
+    "frozen_patch_applied": true,
+    "probe_sha256": "fce85cac928e70e9b8e8524567be09643d11bad49c282400e4a48b1dad2d2f48"
+  },
+  "probe_events_sha256": "774c5485846323ff97b839dad61ae31d682da771ecd54cbd28113fb6f9d0d163",
+  "probe_observed": true,
+  "probe_plugin_sha256": "26d96b03643df1a2be640786d915d43d95f29c9f81fabf113f5f37b14b883f4c",
+  "probe_records": 4,
+  "real_key_present": false,
+  "real_provider_calls": 0,
+  "reply_drive": {
+    "sent": [
+      "initialize",
+      "session/prompt:1"
+    ],
+    "session_id": "session-5b4cf1314e974012a0844fee7489d0dd",
+    "sessions": [
+      "session-5b4cf1314e974012a0844fee7489d0dd"
+    ]
+  },
+  "run_id": "20261120T164843Z-observe",
+  "runtime_exit_code": 0,
+  "runtime_sha256": "1cc41d5a8745a5b9d47c8604e44f23eb8af2d8ca02b2afa0be101d5f71be6ea4",
+  "schema": "g4r.registry.probe.run.v1",
+  "stage_bridge_sha256": "2cb424616b7380bff61f8ce760e229a0c1d2b32c4a5f2954cdf66c3937bf74ba",
+  "stage_dir": "/root/Autonomous Teacher/artifacts/g4/c/stages/stage-20261119T142828Z/candidate",
+  "stage_skill_sha256": "521bc0f1126d895de84ebe61fd58c978a5bcae9b4c334f1fd417faee88483b0b",
+  "streams": {
+    "enforcement_denial_observed": false,
+    "stderr_bytes": 196,
+    "stderr_tail": "G3B_BRIDGE_REGISTRY {\"provider\":\"offline-test-only-g3b\",\"model\":\"fixture-bridge-v1\",\"transport\":\"af-unix-fixed\",\"socket\":\"/work/g3b/bridge.sock\",\"synthetic\":true,\"realModelCalls\":0,\"httpCalls\":0}\n",
+    "stdout_bytes": 4969,
+    "stdout_tail": "795193324457,\"data\":{\"target\":\"next-turn\",\"start\":0,\"removedCount\":1,\"inserted\":[]}}}}\n{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{\"messageId\":\"081e7802-4ca4-4ccb-90e8-3c3189f0a158\"}}\n{\"jsonrpc\":\"2.0\",\"method\":\"session.event\",\"params\":{\"sessionId\":\"session-5b4cf1314e974012a0844fee7489d0dd\",\"event\":{\"type\":\"step/start\",\"seq\":3,\"time\":1795193325183,\"data\":{\"turn\":1,\"step\":1}}}}\n{\"jsonrpc\":\"2.0\",\"method\":\"session.event\",\"params\":{\"sessionId\":\"session-5b4cf1314e974012a0844fee7489d0dd\",\"event\":{\"type\":\"system/message\",\"seq\":4,\"time\":1795193325187,\"data\":{\"turn\":1,\"step\":1,\"message\":{\"role\":\"system\",\"content\":[{\"type\":\"text\",\"text\":\"You are a helpful software engineer assistant.\"}],\"source\":{\"kind\":\"system-prompt\"},\"id\":\"974af975-c0a5-46a3-a916-6d6501558c2a\"}},\"surfaceOp\":\"append\"}}}\n{\"jsonrpc\":\"2.0\",\"method\":\"session.event\",\"params\":{\"sessionId\":\"session-5b4cf1314e974012a0844fee7489d0dd\",\"event\":{\"type\":\"user/message\",\"seq\":5,\"time\":1795193325187,\"data\":{\"content\":[{\"type\":\"text\",\"text\":\"G4-R registry probe: no-op turn 1\"}],\"source\":{\"kind\":\"user\"},\"role\":\"user\",\"id\":\"081e7802-4ca4-4ccb-90e8-3c3189f0a158\"},\"surfaceOp\":\"append\"}}}\n{\"jsonrpc\":\"2.0\",\"method\":\"session.event\",\"params\":{\"sessionId\":\"session-5b4cf1314e974012a0844fee7489d0dd\",\"event\":{\"type\":\"user/message\",\"seq\":6,\"time\":1795193325188,\"data\":{\"content\":[{\"type\":\"text\",\"text\":\"<system-reminder>\\nThe following information describes your current session:\\n\\nCurrent working directory: \\\"/root/Autonomous Teacher/worktrees/g4r-review\\\".\\n</system-reminder>\"}],\"source\":{\"kind\":\"runtime-context\",\"form\":\"snapshot\",\"sections\":[{\"name\":\"working-directory:current\",\"text\":\"Current working directory: \\\"/root/Autonomous Teacher/worktrees/g4r-review\\\".\"}]},\"role\":\"user\",\"id\":\"f2c1d62b-d4ca-4849-b7b6-79473284a4dd\"},\"surfaceOp\":\"append\"}}}\n{\"jsonrpc\":\"2.0\",\"method\":\"session.event\",\"params\":{\"sessionId\":\"session-5b4cf1314e974012a0844fee7489d0dd\",\"event\":{\"type\":\"request/header\",\"seq\":7,\"time\":1795193325188,\"data\":{\"header\":{\"config\":{\"provider\":\"offline-test-only-g3b\",\"model\":\"fixture-bridge-v1\",\"maxTokens\":256},\"adapterDefaults\":{\"maxTokens\":true},\"tools\":[{\"name\":\"skill_lookup\",\"description\":\"Look up fixed public skill metadata by a nonempty skill id. Unknown ids return SKILL_NOT_FOUND. No filesystem paths are accepted.\",\"parameters\":{\"type\":\"object\",\"properties\":{\"skill_id\":{\"type\":\"string\",\"description\":\"Nonempty stable skill id, e.g. binary_search; not a filesystem path.\"}},\"required\":[\"skill_id\"]}}]},\"reason\":\"initial\"}}}}\n{\"jsonrpc\":\"2.0\",\"method\":\"session.event\",\"params\":{\"sessionId\":\"session-5b4cf1314e974012a0844fee7489d0dd\",\"event\":{\"type\":\"request/context\",\"seq\":8,\"time\":1795193325188,\"data\":{\"provider\":\"offline-test-only-g3b\",\"model\":\"fixture-bridge-v1\",\"contextWindow\":16384}}}}\n{\"jsonrpc\":\"2.0\",\"method\":\"session.event\",\"params\":{\"sessionId\":\"session-5b4cf1314e974012a0844fee7489d0dd\",\"event\":{\"type\":\"session/title\",\"seq\":9,\"time\":1795193325191,\"data\":{\"title\":\"G4-R registry probe: no-op turn\",\"messageSeqs\":[5],\"source\":{\"kind\":\"fallback\"}}}}}\n{\"jsonrpc\":\"2.0\",\"method\":\"session.event\",\"params\":{\"sessionId\":\"session-5b4cf1314e974012a0844fee7489d0dd\",\"event\":{\"type\":\"assistant/attempt\",\"seq\":10,\"time\":1795193325204,\"data\":{\"turn\":1,\"step\":1,\"stream\":[{\"type\":\"chunk\",\"time\":1795193325204,\"chunk\":{\"type\":\"finish\",\"reason\":{\"kind\":\"error\",\"failure\":{\"message\":\"G3B_BRIDGE_CONNECT_FAILED\",\"code\":\"SERVER\"}}}}]}}}}\n{\"jsonrpc\":\"2.0\",\"method\":\"session.event\",\"params\":{\"sessionId\":\"session-5b4cf1314e974012a0844fee7489d0dd\",\"event\":{\"type\":\"step/end\",\"seq\":11,\"time\":1795193325205,\"data\":{\"turn\":1,\"step\":1}}}}\n{\"jsonrpc\":\"2.0\",\"method\":\"session.event\",\"params\":{\"sessionId\":\"session-5b4cf1314e974012a0844fee7489d0dd\",\"event\":{\"type\":\"turn/end\",\"seq\":12,\"time\":1795193325206,\"data\":{\"turn\":1,\"reason\":{\"kind\":\"error\",\"error\":{\"message\":\"G3B_BRIDGE_CONNECT_FAILED\",\"code\":\"SERVER\"}}}}}}\n{\"jsonrpc\":\"2.0\",\"method\":\"session.status\",\"params\":{\"sessionId\":\"session-5b4cf1314e974012a0844fee7489d0dd\",\"status\":\"idle\"}}\n"
+  },
+  "utc": "2026-11-20T16:48:43Z"
+}

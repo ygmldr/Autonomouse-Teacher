@@ -1,0 +1,18 @@
+== canonical environment independent recompute (reviewer) ==
+Fri Nov 20 16:43:53 UTC 2026
+-- rootfs tree --
+25491e45aa3dc54c526db9b9d46d18b31c7840150473e2fdb4d8b882f02fe9c0  -
+-- deps tree --
+e07729d7997944417b1c25531749b3e6e5e34aa4248f01dc8f370282082ecb98  -
+-- DSH runtime binary --
+1cc41d5a8745a5b9d47c8604e44f23eb8af2d8ca02b2afa0be101d5f71be6ea4  artifacts/foundation/deps/deepseek_harness_runtime/runtime/deepseek-harness-sdk-runtime-linux-x64
+-- stage manifest/adapter --
+82e10c6ffe37e401a58730e9abcaa691f19d6702a7276c03df625d5b4636e501  artifacts/g4/c/stages/stage-20261119T142828Z/manifest.json
+2cb424616b7380bff61f8ce760e229a0c1d2b32c4a5f2954cdf66c3937bf74ba  artifacts/g4/c/stages/stage-20261119T142828Z/candidate/runtime/bridge/lib/index.js
+-- stage full/trusted/candidate trees --
+7d32ec1d8b02726ba52ef8303e8677b46384e9954559e838b31bb8c58f222068  -
+6d887bbf4c83ee87145bd5e71d97475a2c61cdbe97b101302650eb84cc1b5aec  -
+2459db9df83b9dedfa68c6c0210f5904f0c11601e57744a3d357c4884a06907c  -
+-- base HEAD trees --
+feccda00a78f10a8ee89b49b130838e464d98c46
+66edfac399c0af8e15f28f6064cb85be8e1dd11d
