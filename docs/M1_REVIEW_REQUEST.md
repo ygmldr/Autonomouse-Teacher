@@ -2,11 +2,18 @@
 
 - **Request**: independent review of the M1-A Offline Adaptive Teacher MVP, final PR (B-PR5).
 - **Worktree**: `/root/at-m1a-mvp`, branch `work/m1a-mvp`.
-- **Base / last reviewed commit**: `933ccdeab2085ff30bbf0dcb65271373eea6ef09` (B-PR4 freeze —
-  PR1–PR4 were reviewed/closed for their own scopes). B-PR5 changes (demo/CLI/tests/evidence/docs
-  and next-phase stubs) are **uncommitted at request time**; the Lead records the PR5 commit SHA.
-  Reviewer: use `git rev-parse HEAD` in the frozen review copy and compare against the Lead's
-  recorded SHA; do not assume this document contains the post-commit SHA.
+- **Base / reviewed commit**: worktree baseline `3e7afee077845a071cd364e93ab209cac20b2d5f`;
+  B-PR5 reviewed commit **C5** `d4f10f3b32ee115759e2f9409c033b7ec8d76f6c`. The C6 minimal fix for
+  Reviewer finding P1-1 (deterministic evidence-summary provenance) is uncommitted at request
+  time; the Lead records the C6 review SHA. Reviewer: use the Lead-recorded SHA for the frozen
+  copy; do not assume this document contains the post-commit SHA.
+- **Evidence determinism (P1-1)**: all `docs/m1a_evidence/` artifacts are functions of the content
+  tree only. `e2e_summary.json` carries a **fixed** `artifact_manifest`
+  (`manifest_version`, fixed `generated_at`, fixed `base_sha="3e7afee…"`, fixed
+  `implementation_commit="d4f10f3…"`) and **no wall-clock timestamp / no `git rev-parse`**;
+  regenerating on a clean archive without `.git` or on another date yields byte-identical bytes.
+  Expected hashes are listed in §3 (and the command block in §2); tests now assert summary bytes
+  too, including a no-`.git` clean-copy probe.
 - **Contract version**: `m1a.v0` (frozen) + additive `m1a.extensions.v0` stubs.
 - **Evidence classes**: `MOCK` / `DETERMINISTIC` / `HUMAN_REVIEWED` / `NOT_VERIFIED`.
 - **Non-claimed scope**: no real teaching effect, no network/provider/LiveGate, no real learner
@@ -46,7 +53,7 @@ cd /root/at-m1a-mvp
 git rev-parse HEAD                                   # Lead-recorded PR5 SHA
 
 "/root/Autonomous Teacher/.venv/bin/python" -m pytest tests/m1_teacher -q
-# expected: exit 0, "533 passed" (PR1 268 + PR2 100 + PR3 50 + PR4 75 + PR5 40)
+# expected: exit 0, "536 passed" (PR1 268 + PR2 100 + PR3 50 + PR4 75 + PR5 43)
 
 "/root/Autonomous Teacher/.venv/bin/python" -m m1_teacher.demo > /tmp/a.txt 2>&1
 "/root/Autonomous Teacher/.venv/bin/python" -m m1_teacher.demo > /tmp/b.txt 2>&1
@@ -58,7 +65,7 @@ sha256sum docs/m1a_evidence/*
 # expected:
 #   e2e_student_a.jsonl 171cc654f65129af803dbcd97ebffd50a2da97e8c616d3868570a9b7cb9443f1
 #   e2e_student_b.jsonl 5e84229ec452b2abad5243fa731f58cde38f76baee5240b01d01a3759eeda46b
-#   e2e_summary.json    62f1ebd49b506a5e6f770bed1d1633f1c3993cb3d406636f0eed99d8110333ed
+#   e2e_summary.json    23b871a3743f6100d23130dc72f3796129cbb8bb0b97baa4492d54e3a96af8ce
 
 "/root/Autonomous Teacher/.venv/bin/python" -m m1_teacher.cli --help
 "/root/Autonomous Teacher/.venv/bin/python" -m m1_teacher.cli --student both --json >/tmp/both.json
@@ -74,13 +81,18 @@ sha256sum docs/m1a_evidence/*
 If a hash/count differs on the same frozen tree, treat it as a regression and report it; do not
 fall back to this document's PASS values.
 
+P1-1 regression coverage: the summary is content-tree deterministic — the suite compares
+`e2e_summary.json` bytes across two runs **and** regenerates it from a no-`.git` clean archive
+copy, asserting identical bytes (and asserts `demo.py` contains no `datetime.now`/`git rev-parse`
+provenance reads).
+
 ## 3. Evidence index
 
 | Item | Location | SHA-256 |
 |---|---|---|
 | Student A E2E trace (61 JSONL lines) | `docs/m1a_evidence/e2e_student_a.jsonl` | `171cc654f65129af803dbcd97ebffd50a2da97e8c616d3868570a9b7cb9443f1` |
 | Student B E2E trace (54 JSONL lines) | `docs/m1a_evidence/e2e_student_b.jsonl` | `5e84229ec452b2abad5243fa731f58cde38f76baee5240b01d01a3759eeda46b` |
-| Scenario summary (A/B path diffs, checks, hashes, NOT_RUN) | `docs/m1a_evidence/e2e_summary.json` | `62f1ebd49b506a5e6f770bed1d1633f1c3993cb3d406636f0eed99d8110333ed` |
+| Scenario summary (A/B path diffs, checks, hashes, NOT_RUN; content-tree deterministic) | `docs/m1a_evidence/e2e_summary.json` | `23b871a3743f6100d23130dc72f3796129cbb8bb0b97baa4492d54e3a96af8ce` |
 | Architecture (final) | `docs/M1_ARCHITECTURE.md` | (tracked doc) |
 | Implementation report | `docs/M1_IMPLEMENTATION_REPORT.md` | (tracked doc) |
 | Evaluation report | `docs/M1_EVALUATION_REPORT.md` | (tracked doc) |
@@ -101,8 +113,8 @@ material; the only timestamp value it may contain is the fixed `2026-11-20T00:00
       `verify_rebuild=True`.
 - [ ] R5 EVAL_ERROR isolation: raising scorer and missing/broken spec; mastery unchanged; no
       INCORRECT; retry/exhaustion/REVIEW path correct.
-- [ ] R6 Determinism: demo stdout byte-identical across processes; JSONL byte-identical; no
-      wall-clock/random behaviour.
+- [ ] R6 Determinism: demo stdout byte-identical across processes; **summary + A/B JSONL**
+      byte-identical across runs and from a no-`.git` clean copy; no wall-clock/random behaviour.
 - [ ] R7 Evidence honesty: docs numbers reproducible; `MOCK`/`DETERMINISTIC`/`NOT_VERIFIED` used
       correctly; boundary statement present; no real-learning claim.
 - [ ] R8 Boundaries: no M0 import/modification; no network/API key/LiveGate; `m1a.v0` unchanged.

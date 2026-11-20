@@ -2,8 +2,15 @@
 
 - **Status**: final implementation report for the M1-A Offline Adaptive Teacher MVP.
 - **Worktree / branch**: `/root/at-m1a-mvp` / `work/m1a-mvp`.
-- **Base commit at verification**: `933ccdeab2085ff30bbf0dcb65271373eea6ef09` (B-PR4 freeze; B-PR5
-  changes + docs/evidence are uncommitted at report time — Lead owns the PR5 commit).
+- **Base / reviewed commits**: worktree baseline `3e7afee077845a071cd364e93ab209cac20b2d5f`;
+  B-PR5 reviewed commit **C5** `d4f10f3b32ee115759e2f9409c033b7ec8d76f6c`. The C6 minimal fix
+  (deterministic ``e2e_summary.json`` provenance, P1-1) is uncommitted at report time — Lead
+  records the C6 SHA.
+- **Evidence provenance**: all three ``docs/m1a_evidence/`` artifacts are content-tree
+  deterministic. ``e2e_summary.json`` contains a **fixed** ``artifact_manifest``
+  (``manifest_version`` / fixed ``generated_at`` / fixed ``base_sha`` / fixed
+  ``implementation_commit``) and **no wall-clock timestamp and no dynamically read git SHA**, so
+  it is byte-identical with or without ``.git`` and on any date.
 - **Contract version**: `m1a.v0` (frozen) + additive next-phase `m1a.extensions.v0` (stubs).
 - **Date of measurements**: `2026-11-20` (UTC).
 - **Boundary**: offline synthetic only. Nothing in this report measures or claims real teaching
@@ -20,7 +27,7 @@
 | B-PR2 | B2/B7 | Evidence-driven learner model (heuristic mastery), append-only learning history, SQLite persistence/rebuild/idempotency | **100** | DETERMINISTIC |
 | B-PR3 | B3/B4 | Diagnostic engine (next item + hypothesis + `Reason`) and curriculum planner (prerequisite remediation, teach/practice/assess, review, reassess, goal completion) | **50** | DETERMINISTIC |
 | B-PR4 | B5/B6 | Teaching-session state machine (`DIAGNOSE→TEACH→PRACTICE→ASSESS→UPDATE→REVIEW`, pause/resume, EVAL_ERROR isolation) and independent assessment scorer (only hidden-scoring reader) | **75** | DETERMINISTIC |
-| B-PR5 (this PR) | B8 | Student A/B E2E paths, deterministic demo + CLI, reproducible evidence JSONL, next-phase interface stubs, this report + architecture/evaluation/review/next-phase docs | **40** | MOCK (synthetic students) + DETERMINISTIC (state machine/ids/replay) |
+| B-PR5 (this PR) | B8 | Student A/B E2E paths, deterministic demo + CLI, reproducible evidence JSONL, next-phase interface stubs, this report + architecture/evaluation/review/next-phase docs | **43** | MOCK (synthetic students) + DETERMINISTIC (state machine/ids/replay) |
 
 Test widths per file (collected, real):
 
@@ -38,22 +45,22 @@ tests/m1_teacher/test_planner_policy.py              15   # PR3 total 50
 tests/m1_teacher/test_assessment_scorer.py           34
 tests/m1_teacher/test_session_engine.py              22
 tests/m1_teacher/test_session_transitions.py         19   # PR4 total 75
-tests/m1_teacher/test_e2e_student_ab.py              16
+tests/m1_teacher/test_e2e_student_ab.py              18
 tests/m1_teacher/test_e2e_resume_idempotency.py      13
-tests/m1_teacher/test_cli_smoke.py                   11   # PR5 total 40
+tests/m1_teacher/test_cli_smoke.py                   12   # PR5 total 43
 ```
 
 ## 2. B-PR5 new files (real line counts)
 
 | File | Lines | Purpose |
 |---|---|---|
-| `m1_teacher/demo.py` | 1355 | deterministic Student A/B E2E runner, MOCK student scorer, evidence writer, text/JSON output |
+| `m1_teacher/demo.py` | 1376 | deterministic Student A/B E2E runner, MOCK student scorer, evidence writer, text/JSON output |
 | `m1_teacher/cli.py` | 177 | offline argparse CLI (`--demo`, `--student a|b|both`, `--db`, `--json`, `--write-evidence`) |
 | `m1_teacher/extensions/interfaces.py` | 251 | next-phase contract-only Protocols/value objects (fail closed) |
 | `m1_teacher/extensions/__init__.py` | 47 | extension exports |
-| `tests/m1_teacher/test_e2e_student_ab.py` | 491 | A/B path differences, policy rules, reproducibility, evidence checks |
+| `tests/m1_teacher/test_e2e_student_ab.py` | 560 | A/B path differences, policy rules, reproducibility, evidence checks |
 | `tests/m1_teacher/test_e2e_resume_idempotency.py` | 574 | pause/restart, idempotency, EVAL_ERROR isolation, hidden-label isolation |
-| `tests/m1_teacher/test_cli_smoke.py` | 197 | CLI surface + cross-process determinism + evidence reproducibility |
+| `tests/m1_teacher/test_cli_smoke.py` | 245 | CLI surface + cross-process determinism + evidence reproducibility |
 
 No PR1–PR4 implementation/fixture file was modified by B-PR5.
 
@@ -62,7 +69,7 @@ No PR1–PR4 implementation/fixture file was modified by B-PR5.
 ```bash
 cd /root/at-m1a-mvp
 "/root/Autonomous Teacher/.venv/bin/python" -m pytest tests/m1_teacher -q
-# exit 0 -> "533 passed in 12.20s"  (real run: real 0m12.415s)
+# exit 0 -> "536 passed in 13.61s"  (real run: real 0m13.805s)
 
 "/root/Autonomous Teacher/.venv/bin/python" -m m1_teacher.demo    # run twice
 # exit 0 both; stdout byte-identical; sha256=b08ceee915fb0363864e303ded71de4d547eae6d14f7aa693ba1537a810d491b
@@ -94,7 +101,7 @@ material; the E2E mock scorer is pinned to `2026-11-20T00:00:00Z`.
 |---|---|---|---|
 | `e2e_student_a.jsonl` | 61 | `171cc654f65129af803dbcd97ebffd50a2da97e8c616d3868570a9b7cb9443f1` | seeded prior evidence, diagnosis, plan, actions, assessments, mastery updates, pause/resume, mastery_after |
 | `e2e_student_b.jsonl` | 54 | `5e84229ec452b2abad5243fa731f58cde38f76baee5240b01d01a3759eeda46b` | same schema for Student B (prerequisite-remediation path) |
-| `e2e_summary.json` | — | `62f1ebd49b506a5e6f770bed1d1633f1c3993cb3d406636f0eed99d8110333ed` | command, date, base commit, fixed seed/timestamp, A/B summaries, path differences, policy checks, evidence hashes, classification, `NOT_RUN` items, disclaimer |
+| `e2e_summary.json` | — | `23b871a3743f6100d23130dc72f3796129cbb8bb0b97baa4492d54e3a96af8ce` | command, fixed `artifact_manifest` (manifest_version + fixed generated_at/base_sha/implementation_commit; **no wall-clock/git reads**), fixed seed/timestamp, A/B summaries, path differences, policy checks, evidence hashes, classification, `NOT_RUN` items, disclaimer |
 
 Evidence classes inside the JSONL: `["MOCK", "DETERMINISTIC"]` (synthetic student outcomes;
 deterministic state machine/model/ids). No `HUMAN_REVIEWED` outcome exists yet.
@@ -132,8 +139,8 @@ deterministic state machine/model/ids). No `HUMAN_REVIEWED` outcome exists yet.
 
 ```bash
 cd /root/at-m1a-mvp
-git rev-parse HEAD                     # 933ccde… at verification time (PR5 uncommitted)
-"/root/Autonomous Teacher/.venv/bin/python" -m pytest tests/m1_teacher -q      # 533 passed
+git rev-parse HEAD                     # reviewed commit C5=d4f10f3… (C6 evidence fix uncommitted)
+"/root/Autonomous Teacher/.venv/bin/python" -m pytest tests/m1_teacher -q      # 536 passed
 "/root/Autonomous Teacher/.venv/bin/python" -m m1_teacher.demo > a.txt; ... > b.txt; cmp a.txt b.txt
 "/root/Autonomous Teacher/.venv/bin/python" -m m1_teacher.demo --write-evidence
 sha256sum docs/m1a_evidence/*

@@ -13,6 +13,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -186,12 +187,59 @@ def test_cli_write_evidence_is_reproducible(tmp_path: Path) -> None:
             rendered = json.dumps(line, ensure_ascii=False)
             assert "scoring/" not in rendered
             assert WALL_CLOCK_RE.findall(rendered) in ([], ["2026-11-20T00:00:00Z"])
-    summary = json.loads((first_dir / "e2e_summary.json").read_text(encoding="utf-8"))
+    # P1-1: summary must be byte-identical across runs/directories too.
+    first_summary_bytes = (first_dir / "e2e_summary.json").read_bytes()
+    second_summary_bytes = (second_dir / "e2e_summary.json").read_bytes()
+    assert first_summary_bytes == second_summary_bytes
+    summary = json.loads(first_summary_bytes.decode("utf-8"))
     assert summary["schema"] == "m1a.e2e_scenario.v0"
     assert summary["students"]["a"]["student_fixture"] == "student_a"
+    assert "generated_at_utc_date" not in summary and "base_commit" not in summary
+    manifest = summary["artifact_manifest"]
+    assert manifest["generated_at"] == "2026-11-20T00:00:00Z"
+    assert manifest["base_sha"] == "3e7afee077845a071cd364e93ab209cac20b2d5f"
     for name, digest in summary["evidence_hashes"].items():
         actual = hashlib.sha256((first_dir / name).read_bytes()).hexdigest()
         assert actual == digest, name
     assert "[evidence] wrote" in first.stdout
     for name in ("e2e_student_a.jsonl", "e2e_student_b.jsonl"):
         assert name in first.stdout
+
+
+def test_cli_evidence_summary_is_identical_in_a_no_git_copy(tmp_path: Path) -> None:
+    """P1-1: CLI evidence regenerates identical summary bytes from a clean archive copy."""
+
+    repo_out = tmp_path / "repo_out"
+    repo_run = run_cli("--demo", "--write-evidence", str(repo_out))
+    assert repo_run.returncode == 0, repo_run.stderr
+
+    clean_tree = tmp_path / "clean_tree"
+    clean_tree.mkdir()
+    shutil.copytree(
+        REPO_ROOT / "m1_teacher",
+        clean_tree / "m1_teacher",
+        ignore=shutil.ignore_patterns("__pycache__"),
+    )
+    shutil.copytree(REPO_ROOT / "fixtures" / "m1_teacher", clean_tree / "fixtures" / "m1_teacher")
+    assert not (clean_tree / ".git").exists()
+    clean_out = tmp_path / "clean_out"
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "m1_teacher.cli",
+            "--demo",
+            "--write-evidence",
+            str(clean_out),
+        ],
+        cwd=str(clean_tree),
+        capture_output=True,
+        text=True,
+        timeout=180,
+    )
+    assert completed.returncode == 0, completed.stderr
+    assert (clean_out / "e2e_summary.json").read_bytes() == (
+        repo_out / "e2e_summary.json"
+    ).read_bytes()
+    for name in ("e2e_student_a.jsonl", "e2e_student_b.jsonl"):
+        assert (clean_out / name).read_bytes() == (repo_out / name).read_bytes()

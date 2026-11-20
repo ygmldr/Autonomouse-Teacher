@@ -27,7 +27,10 @@ All clocks that can influence decisions are fixed:
   wall-clock-derived is printed or persisted as evidence).
 
 Two consecutive runs therefore produce byte-identical stdout and byte-identical
-JSONL evidence files.
+JSONL evidence files.  ``e2e_summary.json`` additionally records only a fixed
+artifact manifest (``manifest_version`` / fixed ``generated_at`` / fixed
+``base_sha`` / fixed ``implementation_commit``) and no wall-clock or git state,
+so it is byte-identical for the same content tree with or without ``.git``.
 
 Evidence classification (fixed M1-A vocabulary)
 -----------------------------------------------
@@ -44,11 +47,9 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-import subprocess
 import sys
 import tempfile
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Sequence
 
@@ -79,9 +80,13 @@ __all__ = [
     "FIXED_TIMESTAMP",
     "EVIDENCE_DIR",
     "DISCLAIMER",
+    "ARTIFACT_MANIFEST_VERSION",
+    "BASE_COMMIT_SHA",
+    "REVIEWED_IMPLEMENTATION_COMMIT",
     "MockStudentScorer",
     "DeterministicStudentResponder",
     "build_components",
+    "artifact_manifest",
     "load_student_fixture",
     "seed_prior_evidence",
     "run_student_path",
@@ -97,6 +102,20 @@ CONTRACT_VERSION = "m1a.v0"
 
 FIXED_TIMESTAMP = "2026-11-20T00:00:00Z"
 """Deterministic clock value injected into the E2E mock scorer."""
+
+ARTIFACT_MANIFEST_VERSION = "m1a.evidence.manifest.v1"
+"""Fixed manifest schema version recorded in ``e2e_summary.json``."""
+
+BASE_COMMIT_SHA = "3e7afee077845a071cd364e93ab209cac20b2d5f"
+"""Fixed worktree baseline commit recorded in the artifact manifest (never read from git)."""
+
+REVIEWED_IMPLEMENTATION_COMMIT = "d4f10f3b32ee115759e2f9409c033b7ec8d76f6c"
+"""Fixed B-PR5 implementation commit recorded in the artifact manifest.
+
+This is a provenance *constant* for reproducibility (C5 reviewed commit).  It is never
+computed from the repository, so whether/when a ``.git`` directory exists cannot change
+the generated evidence bytes.
+"""
 
 EVIDENCE_DIR = Path("docs/m1a_evidence")
 DEFAULT_MAX_TURNS = 10
@@ -141,24 +160,28 @@ def _repo_relative(path: Path) -> str:
         return str(path)
 
 
-def _utc_date() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%d")
+def artifact_manifest() -> dict[str, str]:
+    """Fixed evidence-provenance manifest for ``e2e_summary.json``.
 
+    Reproducibility contract (P1-1 fix): the summary must be a pure function of the
+    content tree.  It therefore contains **no wall-clock timestamp and no git
+    state**: ``generated_at`` is the fixed deterministic timestamp, while
+    ``base_sha`` / ``implementation_commit`` are fixed provenance *constants*.
+    Regenerating on the same tree — with or without ``.git``, on any date —
+    produces byte-identical summary bytes.
+    """
 
-def _git_head() -> str:
-    try:
-        completed = subprocess.run(
-            ["git", "rev-parse", "HEAD"],
-            cwd=str(_REPO_ROOT),
-            capture_output=True,
-            text=True,
-            timeout=10,
-            check=False,
-        )
-    except (OSError, subprocess.SubprocessError):  # pragma: no cover - defensive
-        return "UNAVAILABLE"
-    value = completed.stdout.strip()
-    return value if completed.returncode == 0 and value else "UNAVAILABLE"
+    return {
+        "manifest_version": ARTIFACT_MANIFEST_VERSION,
+        "generated_at": FIXED_TIMESTAMP,
+        "base_sha": BASE_COMMIT_SHA,
+        "implementation_commit": REVIEWED_IMPLEMENTATION_COMMIT,
+        "provenance_note": (
+            "fixed artifact manifest: no wall-clock timestamp and no git state are read; "
+            "the same content tree regenerates byte-identical summary bytes (with or "
+            "without .git)"
+        ),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -850,8 +873,7 @@ def run_scenario(
         "command": (
             'cd /root/at-m1a-mvp && "/root/Autonomous Teacher/.venv/bin/python" -m m1_teacher.demo'
         ),
-        "generated_at_utc_date": _utc_date(),
-        "base_commit": _git_head(),
+        "artifact_manifest": artifact_manifest(),
         "fixed_timestamp": FIXED_TIMESTAMP,
         "max_turns": max_turns,
         "pause_after_turns": pause_after_turns,
@@ -1145,9 +1167,8 @@ def write_evidence(
         hashes[f"e2e_student_{student}.jsonl"] = _sha256_text(text)
     summary_payload = _public_scenario(scenario)
     summary_payload["evidence_hashes"] = hashes
-    summary_payload["evidence_files"] = [
-        _repo_relative(root / f"e2e_student_{student}.jsonl") for student in ("a", "b")
-    ]
+    # Fixed bare file names: the summary must not depend on where it is written.
+    summary_payload["evidence_files"] = [f"e2e_student_{student}.jsonl" for student in ("a", "b")]
     summary_text = json.dumps(summary_payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
     summary_path = root / "e2e_summary.json"
     summary_path.write_text(summary_text, encoding="utf-8")

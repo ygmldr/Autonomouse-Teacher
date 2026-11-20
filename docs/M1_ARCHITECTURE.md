@@ -3,9 +3,9 @@
 - **Status**: final architecture for the M1-A offline MVP (B-PR1…B-PR5); append-only from here,
   changes require an ADR note.
 - **Owner of this revision**: B-PR5 / m1a-e2e (PR1 draft by B-PR1a / m1a-contracts).
-- **Baseline**: worktree branch `work/m1a-mvp`, B-PR4 commit `933ccde`; B-PR5 changes are
-  uncommitted at the time of writing (Lead owns commits; the reviewed SHA is recorded in the
-  B-PR5 review request).
+- **Baseline**: worktree branch `work/m1a-mvp`; B-PR4 commit `933ccde`, B-PR5 reviewed commit
+  **C5** `d4f10f3`. The C6 minimal evidence-provenance fix (P1-1) is uncommitted at the time of
+  writing (Lead owns commits; the reviewed SHA is recorded in the review request).
 - **Contract version**: `m1a.v0` (`m1_teacher.CONTRACT_VERSION`); next-phase additive contracts
   `m1a.extensions.v0` (interface stubs only).
 - **Scope**: offline, deterministic, no-network teacher core + offline E2E demo/CLI for M1-A.
@@ -310,8 +310,8 @@ activity. PR4 owns the authoritative transition table and tests.
 | `HUMAN_REVIEWED` | Manually inspected outcome by an independent human/agent reviewer |
 | `NOT_VERIFIED` | Claimed/planned but not yet demonstrated; must not be reported as PASS |
 
-Final (B-PR5) evidence status: `DETERMINISTIC` for **533 passing tests**
-(PR1 268 + PR2 100 + PR3 50 + PR4 75 + PR5 40) and the reproducible E2E artifacts;
+Final (B-PR5) evidence status: `DETERMINISTIC` for **536 passing tests**
+(PR1 268 + PR2 100 + PR3 50 + PR4 75 + PR5 43) and the reproducible E2E artifacts;
 `MOCK` for the synthetic student fixtures and scripted outcomes used by the E2E demo;
 `HUMAN_REVIEWED` remains `NOT_RUN` until the independent review; all real
 learning/teaching-effectiveness claims remain `NOT_VERIFIED` for M1-A.
@@ -368,7 +368,7 @@ with defaults, new protocols/helpers), must be recorded in
 | 2026-11-20 | B-PR2 | Evidence-driven learner model, learning history, SQLite persistence (100 tests) |
 | 2026-11-20 | B-PR3 | Diagnostic engine + curriculum planner with structured `Reason`s (50 tests) |
 | 2026-11-20 | B-PR4 | Teaching-session state machine + independent assessment scorer (75 tests) |
-| 2026-11-20 | B-PR5 final | Student A/B E2E paths, deterministic demo/CLI, reproducible evidence JSONL, implementation/evaluation/review/next-phase docs, next-phase interface stubs (40 tests, 533 total) |
+| 2026-11-20 | B-PR5 final | Student A/B E2E paths, deterministic demo/CLI, reproducible evidence JSONL, implementation/evaluation/review/next-phase docs, next-phase interface stubs (43 tests, 536 total) |
 
 ---
 
@@ -386,7 +386,7 @@ with defaults, new protocols/helpers), must be recorded in
 | Session | `m1_teacher/session/engine.py` | persistent state machine (diagnose→teach→practice→assess→update→review→next, pause/resume) |
 | E2E demo | `m1_teacher/demo.py`, `m1_teacher/cli.py` | deterministic Student A/B demonstration, offline CLI, evidence writer |
 | Next-phase stubs | `m1_teacher/extensions/interfaces.py` | contract-only protocols for web/interview/freshness/research/improvement (fail closed) |
-| Tests | `tests/m1_teacher/` | 533 tests (268+100+50+75+40) |
+| Tests | `tests/m1_teacher/` | 536 tests (268+100+50+75+43) |
 | Evidence | `docs/m1a_evidence/*.jsonl`, `e2e_summary.json` | reproducible E2E traces (no wall clock, no hidden material) |
 
 ## 14. Persistence schema (SQLite, `schema_meta.version == 1`)
@@ -412,12 +412,16 @@ events and snapshot atomically so a crash cannot leave the snapshot ahead of/beh
 cd /root/at-m1a-mvp
 "/root/Autonomous Teacher/.venv/bin/python" -m m1_teacher.demo                 # deterministic transcript
 "/root/Autonomous Teacher/.venv/bin/python" -m m1_teacher.demo --write-evidence # + JSONL evidence
-"/root/Autonomous Teacher/.venv/bin/python" -m pytest tests/m1_teacher -q       # 533 passed
+"/root/Autonomous Teacher/.venv/bin/python" -m pytest tests/m1_teacher -q       # 536 passed
 ```
 
-Two consecutive runs of the demo produce byte-identical stdout; the two JSONL evidence files are
-byte-identical across runs. Wall-clock timestamps are excluded from the evidence projection and
-the E2E mock scorer uses a fixed timestamp, so the artifacts are reproducible on the frozen tree.
+Two consecutive runs of the demo produce byte-identical stdout; all three evidence artifacts
+(`e2e_student_a.jsonl`, `e2e_student_b.jsonl`, `e2e_summary.json`) are byte-identical across runs.
+Wall-clock timestamps are excluded from the evidence projection and the E2E mock scorer uses a
+fixed timestamp. `e2e_summary.json` records only a **fixed** `artifact_manifest`
+(`manifest_version` / fixed `generated_at` / fixed `base_sha` / fixed `implementation_commit`) and
+never reads the wall clock or `git`; the same content tree therefore regenerates byte-identical
+summary bytes with or without `.git` and on any date (test-enforced, including a no-`.git` copy).
 
 ## 16. Next phase
 

@@ -11,6 +11,9 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -295,10 +298,14 @@ def test_evidence_jsonl_is_reproducible_and_complete(scenario: dict, tmp_path: P
     second_dir = tmp_path / "ev2"
     demo.write_evidence(scenario, first_dir)
     demo.write_evidence(scenario, second_dir)
-    for name in ("e2e_student_a.jsonl", "e2e_student_b.jsonl"):
+    # P1-1: every artifact (including the summary) must be byte-identical.
+    for name in ("e2e_student_a.jsonl", "e2e_student_b.jsonl", "e2e_summary.json"):
         first_bytes = (first_dir / name).read_bytes()
         second_bytes = (second_dir / name).read_bytes()
-        assert first_bytes == second_bytes
+        assert first_bytes == second_bytes, f"{name} must be byte-identical across runs"
+
+    for name in ("e2e_student_a.jsonl", "e2e_student_b.jsonl"):
+        first_bytes = (first_dir / name).read_bytes()
         lines = [json.loads(line) for line in first_bytes.decode("utf-8").splitlines()]
         event_types = {line["event"] for line in lines}
         assert {
@@ -326,6 +333,68 @@ def test_evidence_jsonl_is_reproducible_and_complete(scenario: dict, tmp_path: P
         mastery_lines = [line for line in lines if line["event"] == "mastery_updated"]
         assert mastery_lines
         assert any(line.get("applied") is True for line in mastery_lines)
+
+    # P1-1: the summary is content-tree deterministic and carries only a fixed
+    # provenance manifest (no wall-clock timestamp, no dynamically read git SHA).
+    summary_payload = json.loads((first_dir / "e2e_summary.json").read_text(encoding="utf-8"))
+    assert "generated_at_utc_date" not in summary_payload
+    assert "base_commit" not in summary_payload
+    manifest = summary_payload["artifact_manifest"]
+    assert manifest["manifest_version"] == demo.ARTIFACT_MANIFEST_VERSION
+    assert manifest["generated_at"] == demo.FIXED_TIMESTAMP
+    assert manifest["base_sha"] == demo.BASE_COMMIT_SHA
+    assert manifest["implementation_commit"] == demo.REVIEWED_IMPLEMENTATION_COMMIT
+    assert summary_payload["fixed_timestamp"] == demo.FIXED_TIMESTAMP
+    assert summary_payload["evidence_files"] == [
+        "e2e_student_a.jsonl",
+        "e2e_student_b.jsonl",
+    ]
+
+
+def test_evidence_summary_is_identical_in_a_no_git_copy(scenario: dict, tmp_path: Path) -> None:
+    """P1-1: same content tree -> same summary bytes even without a .git directory."""
+
+    repo_summary = tmp_path / "repo_state"
+    demo.write_evidence(scenario, repo_summary)
+
+    clean_tree = tmp_path / "clean_tree"
+    clean_tree.mkdir()
+    shutil.copytree(
+        REPO_ROOT / "m1_teacher",
+        clean_tree / "m1_teacher",
+        ignore=shutil.ignore_patterns("__pycache__"),
+    )
+    shutil.copytree(FIXTURES, clean_tree / "fixtures" / "m1_teacher")
+    assert not (clean_tree / ".git").exists()
+    clean_out = tmp_path / "clean_out"
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "m1_teacher.demo",
+            "--write-evidence",
+            str(clean_out),
+        ],
+        cwd=str(clean_tree),
+        capture_output=True,
+        text=True,
+        timeout=180,
+    )
+    assert completed.returncode == 0, completed.stderr
+    for name in ("e2e_student_a.jsonl", "e2e_student_b.jsonl", "e2e_summary.json"):
+        assert (clean_out / name).read_bytes() == (repo_summary / name).read_bytes(), name
+
+
+def test_demo_has_no_wall_clock_or_dynamic_git_provenance() -> None:
+    """P1-1 regression guard: provenance must be fixed constants, not dynamic reads."""
+
+    source = Path(demo.__file__).read_text(encoding="utf-8")
+    for forbidden in ("datetime.now", "datetime.utcnow", "rev-parse", '"base_commit"'):
+        assert forbidden not in source, f"demo.py still contains dynamic provenance: {forbidden}"
+    manifest = demo.artifact_manifest()
+    assert manifest["generated_at"] == demo.FIXED_TIMESTAMP
+    assert manifest["base_sha"] == demo.BASE_COMMIT_SHA
+    assert manifest["implementation_commit"] == demo.REVIEWED_IMPLEMENTATION_COMMIT
 
 
 # ---------------------------------------------------------------------------

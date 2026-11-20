@@ -1,5 +1,11 @@
 {
-  "base_commit": "933ccdeab2085ff30bbf0dcb65271373eea6ef09",
+  "artifact_manifest": {
+    "base_sha": "3e7afee077845a071cd364e93ab209cac20b2d5f",
+    "generated_at": "2026-11-20T00:00:00Z",
+    "implementation_commit": "d4f10f3b32ee115759e2f9409c033b7ec8d76f6c",
+    "manifest_version": "m1a.evidence.manifest.v1",
+    "provenance_note": "fixed artifact manifest: no wall-clock timestamp and no git state are read; the same content tree regenerates byte-identical summary bytes (with or without .git)"
+  },
   "classification": {
     "DETERMINISTIC": "state machine, learner model arithmetic, ids, replay verification",
     "HUMAN_REVIEWED": "NOT_RUN in this PR (independent review follows)",
@@ -10,15 +16,14 @@
   "contract_version": "m1a.v0",
   "disclaimer": "offline synthetic only, not real teaching effect. M1-A is an offline deterministic teaching-loop prototype over synthetic CC0-1.0 fixtures; nothing here measures or claims real learning outcomes.",
   "evidence_files": [
-    "docs/m1a_evidence/e2e_student_a.jsonl",
-    "docs/m1a_evidence/e2e_student_b.jsonl"
+    "e2e_student_a.jsonl",
+    "e2e_student_b.jsonl"
   ],
   "evidence_hashes": {
     "e2e_student_a.jsonl": "171cc654f65129af803dbcd97ebffd50a2da97e8c616d3868570a9b7cb9443f1",
     "e2e_student_b.jsonl": "5e84229ec452b2abad5243fa731f58cde38f76baee5240b01d01a3759eeda46b"
   },
   "fixed_timestamp": "2026-11-20T00:00:00Z",
-  "generated_at_utc_date": "2026-11-20",
   "max_turns": 10,
   "not_run": [
     "real learner data or real teaching effect measurement (offline synthetic only)",

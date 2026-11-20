@@ -101,14 +101,14 @@ Policy checks (`e2e_summary.policy_checks`): `prerequisite_remediation_before_ta
 
 ## 5. Reproducibility / determinism evidence
 
-- Full suite: `pytest tests/m1_teacher -q` → **533 passed** (exit 0) on the frozen tree.
+- Full suite: `pytest tests/m1_teacher -q` → **536 passed** (exit 0) on the C6-fixed tree.
 - Demo (real subprocess runs, two independent processes):
   stdout byte-identical; `sha256=b08ceee915fb0363864e303ded71de4d547eae6d14f7aa693ba1537a810d491b`,
   `md5=f92be523b3a562f0826cae7ec8c74010`, 53 lines.
-- Evidence JSONL: byte-identical across consecutive runs (asserted in tests); hashes:
+- Evidence artifacts: byte-identical across consecutive runs and independent of `.git`/date (asserted in tests); hashes:
   - `e2e_student_a.jsonl` `171cc654f65129af803dbcd97ebffd50a2da97e8c616d3868570a9b7cb9443f1`
   - `e2e_student_b.jsonl` `5e84229ec452b2abad5243fa731f58cde38f76baee5240b01d01a3759eeda46b`
-  - `e2e_summary.json` `62f1ebd49b506a5e6f770bed1d1633f1c3993cb3d406636f0eed99d8110333ed`
+  - `e2e_summary.json` `23b871a3743f6100d23130dc72f3796129cbb8bb0b97baa4492d54e3a96af8ce` (fixed `artifact_manifest`: no wall-clock/git reads; content-tree deterministic)
 - Determinism mechanism: fixed E2E scorer timestamp, content-addressed ids
   (`plan:`/`step:`/`action:`/`diagnosis:` fingerprints), deterministic planner/diagnostic
   ordering, and an evidence projection that omits wall-clock timestamps (the demo output contains
