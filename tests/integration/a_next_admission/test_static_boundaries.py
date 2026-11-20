@@ -6,6 +6,8 @@ from pathlib import Path
 import subprocess
 import sys
 
+import pytest
+
 
 REPO = Path(__file__).resolve().parents[3]
 NEW_FILES = (
@@ -20,6 +22,11 @@ PROTECTED = (
     "src/autoteacher_m0/runtime/dsh_adapter.py",
     "src/autoteacher_m0/security/authorization.py",
 )
+# A1 (P2-01) legitimately owns authorization.py.  The A2 branch is rebased onto
+# it, so "A2 adds no protected change" is measured against the A1 commit when
+# it is reachable (the shared repository keeps the branch).  A1 is not required
+# at runtime; without it the test still proves A2 touched no protected file.
+A1_BASE_CANDIDATES = ("e6f3aa6", "fix/a-next-auth-record")
 FORBIDDEN_SOURCE_TOKENS = (
     "import socket", "import requests", "import urllib", "http.client",
     "deepseek_harness", "os.environ", "getenv(", "API_KEY", "api_key",
@@ -33,10 +40,34 @@ def _git(*args: str) -> str:
     return completed.stdout
 
 
+def _a1_base() -> str | None:
+    for candidate in A1_BASE_CANDIDATES:
+        completed = subprocess.run(
+            ["git", "-C", str(REPO), "rev-parse", "--verify", "-q",
+             candidate + "^{commit}"], capture_output=True, text=True)
+        if completed.returncode == 0 and completed.stdout.strip():
+            return candidate
+    return None
+
+
 def test_c7_protected_files_have_zero_diff() -> None:
-    changed = [line for line in _git("diff", "--name-only", "fd1d3a6", "--",
+    base = _a1_base() or "fd1d3a6"
+    changed = [line for line in _git("diff", "--name-only", base, "--",
                                      *PROTECTED).splitlines() if line.strip()]
     assert changed == []
+
+
+def test_c7_a1_owns_the_authorization_diff() -> None:
+    """A1 owns authorization.py; A2's rebase adds no change on top of it."""
+    base = _a1_base()
+    if base is None:
+        pytest.skip("A1 commit not reachable in this clone")
+    assert _git("diff", "--name-only", "fd1d3a6", base, "--",
+                "src/autoteacher_m0/security/authorization.py").strip()
+    head_content = _git("show", "HEAD:src/autoteacher_m0/security/authorization.py")
+    base_content = _git("show",
+                        f"{base}:src/autoteacher_m0/security/authorization.py")
+    assert head_content == base_content
 
 
 def test_c7_new_code_has_no_network_or_key_env() -> None:

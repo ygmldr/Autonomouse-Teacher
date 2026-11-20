@@ -848,3 +848,10 @@ grep -n "def consume(self, authorization" src/autoteacher_m0/security/egress.py
   `Admission` 46→47、`controller.main` 2237→2235；其余附录 B 行号已按 `fd1d3a6` 逐行核对。
 - **实现阶段新增引用**：`bridge/run_admission.py` 为实现新增文件（无基线行号）；Controller 最小接线
   的语义证据见 `docs/A_NEXT_AUTH_RUN_ADMISSION.md` 的 C2–C8 映射章节。
+
+- **Rebase 更新（A1 合入后）**：A2 实现已 rebase 到 A1 冻结分支 `fix/a-next-auth-record`
+  （`e6f3aa6`，`authorization.py` net +51/−18，A1 所有）。重放后的提交链为
+  `d7bbf3b`(ADR) → `07eccb9`(实现) → `6556967`(errata) → `ff44ef6`(R-25) → 报告 commit；
+  原先引用的 `960724b`/`1f25552`/`e80bc8b`/`050411a` 是 rebase 前 SHA，仅作历史记录。
+  A1 的 body-id 校验语义与本 ADR §8 契约 C-3/C-4 一致（INVALID 而非 REPLAYED），A2 未改
+  `authorization.py`（相对 A1 分支 diff=0）。

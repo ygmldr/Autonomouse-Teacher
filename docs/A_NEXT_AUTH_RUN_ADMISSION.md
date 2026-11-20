@@ -3,12 +3,13 @@
 - **文档 ID**：`A-NEXT-A-PR1-A2-REPORT-v1`
 - **状态**：`IMPLEMENTED_HOST_L1`（test-only / no-key）；**L2 未运行**（`A2-01..A2-03` L2 由 A-PR3 独占窗口执行）；`PENDING_INDEPENDENT_REVIEW`
 - **分支**：`feat/a-next-run-admission`
-- **设计 ADR**：`960724b`（`docs/A_NEXT_RUN_ADMISSION_DESIGN.md`，Reviewer 裁定 PASS 条件式 C2–C8）
-- **ADR errata**：`e80bc8b`（行号基准/历史字符串澄清，append-only）
-- **实现提交**：`1f25552`（`feat(a-next): wire run-level execution authorization admission`）
-- **测试补充提交**：`050411a`（R-25 admission replay 行）
-- **本报告提交**：见本 commit（`docs(a-next): A2 implementation report`）
-- **基线**：`fd1d3a6`（= 设计基线；`src/` 相对该基线只改 `bridge/controller.py` + 新增 `bridge/run_admission.py`）
+- **设计 ADR**：`d7bbf3b`（`docs/A_NEXT_RUN_ADMISSION_DESIGN.md`，Reviewer 裁定 PASS 条件式 C2–C8；rebase 前为 `960724b`）
+- **ADR errata**：`6556967`（行号基准/历史字符串澄清，append-only；rebase 前 `e80bc8b`）
+- **实现提交**：`07eccb9`（`feat(a-next): wire run-level execution authorization admission`；rebase 前 `1f25552`）
+- **A1 基座**：`e6f3aa6`（`fix/a-next-auth-record`；`authorization.py` net +51/−18，A1 所有）
+- **测试补充提交**：`ff44ef6`（R-25）+ 本 commit（R-07 真实文件用例与 A1 合体核对）
+- **本报告提交**：见本 commit（rebase 到 A1 之后）
+- **基线**：`fd1d3a6` + **rebase onto A1 `e6f3aa6`**；`src/` 相对 A1 只改 `bridge/controller.py`、新增 `bridge/run_admission.py`，`authorization.py` 零额外改动
 - **不变量**：`LiveGate=BLOCKED`、`G4-H=NOT_AUTHORIZED`、`G5=BLOCKED`、`G6=NOT_RUN`、`M0=DECISION_PENDING`、`E5_PRELIVE_FULL=BLOCKED_PENDING_HUMAN_DEPLOYMENT` 全部未变。0 真实 Key / Provider / HTTP / Live。`authorization.py`（A1 所有）、`gates.py`、`scripts/run_live.sh`、`cli.py`、`dsh_adapter.py` 零 diff。
 
 ---
@@ -102,7 +103,7 @@ Trusted Launcher (scripts/a_next/admission/trusted_launcher.py, test-only)
 | R-04 | revoked_ids 命中 | `test_r04_revoked_authorization` | 同上 |
 | R-05 | 同 Run 重启重放 | `test_r05_same_run_restart_is_replay` | `ALREADY_CONSUMED`，consumed=NO，final 保留 |
 | R-06 | 别的 Run 复用同授权 | `test_r06_other_run_epoch_mismatch` | `EPOCH_MISMATCH`，consumed=NO，仅 1 final |
-| R-07 | body id 与 record 不符（A1/P2-01） | `test_r07_r08_invalid_or_replaced_use_record`（stable-code 映射） | 当前基线（A1 未合入）由 consume 返回 INVALID 时映射 `RECORD_INVALID`；A1 合入后该行由 A1 的真实 body-id 文件测试补强（§9） |
+| R-07 | body id 与 record/期望 authorization 不符（A1/P2-01） | **A1 已合入**：`test_r07_body_id_crosscheck.py` 4 个真实文件用例（真实 consume 后把 body id 改为外来 id / body id 与存储名不符 / 非法 consumed_utc / 未篡改记录仍为 true replay 对照）+ 原 stable-code 参数化用例 | 全部 `RUN_ADMISSION_RECORD_INVALID`（consumed=NO，非 REPLAYED/EPOCH_MISMATCH），final 记录不清理；对照用例仍是 `ALREADY_CONSUMED` |
 | R-08 | record 损坏/截断/多 key/非法 schema | `test_r07_r08_invalid_or_replaced_use_record`（4 参数） | `RECORD_INVALID`，consumed=NO |
 | R-09 | symlink / hardlink(nlink>2) | `test_r09_symlink_and_hardlinked_use_record` | `RECORD_INVALID` |
 | R-10 | 并发 8 consumers | `test_r10_concurrent_consumers_exactly_one_wins` | 恰 1 ALLOW + 7 `ALREADY_CONSUMED`；1 条 use record |
@@ -146,7 +147,8 @@ Trusted Launcher (scripts/a_next/admission/trusted_launcher.py, test-only)
 
 | 命令 | 结果 |
 |---|---|
-| `pytest tests/integration/a_next_admission -q -p no:cacheprovider` | **68 passed** |
+| `pytest tests/integration/a_next_admission -q -p no:cacheprovider` | **73 passed**（rebase + R-07 真实文件用例后） |
+| `pytest tests/integration/a_next_auth -q …`（A1 套件，合体后回归） | **39 passed** |
 | `pytest tests/integration/g4_a -q …` | 223 passed |
 | `pytest tests/integration/g4_f5 -q …` | 12 passed |
 | `pytest tests/integration/g4_f2 -q …` | 29 passed, 1 skipped（默认 opt-in 回归） |
@@ -154,9 +156,11 @@ Trusted Launcher (scripts/a_next/admission/trusted_launcher.py, test-only)
 | `pytest tests/security -q …` | 6 passed, **1 pre-existing failure**（见下） |
 | `pytest tests/security -q … --deselect tests/security/test_scan_git_secrets.py::test_repository_worktree_and_history_is_clean` | 6 passed, 1 deselected |
 | `pytest tests/unit -q …` | 396 passed |
-| `pytest tests --collect-only -q …` | **1488 tests collected, exit 0** |
+| `pytest tests --collect-only -q …` | **1532 tests collected, exit 0** |
 | `ruff check <changed scope>` | **All checks passed**（0） |
 | `git diff --name-only fd1d3a6 050411a -- authorization.py gates.py run_live.sh cli.py dsh_adapter.py` | 0 行（零 diff） |
+
+**合计（不含 pre-existing security history finding）：789 passed / 2 skipped**。
 
 **pre-existing failure 证明（非本 PR 引入）**：`tests/security/test_scan_git_secrets.py::
 test_repository_worktree_and_history_is_clean` 在 **基线 `fd1d3a6` 的独立 worktree**上以同一 scanner
@@ -198,16 +202,31 @@ test_repository_worktree_and_history_is_clean` 在 **基线 `fd1d3a6` 的独立 
 
 ---
 
-## 9. A1 接口契约 / 合入顺序
+## 9. 与 A1 合体后的接口/差异（rebase `fix/a-next-auth-record` e6f3aa6）
 
-- `authorization.py` **零 diff**（A1 所有）；`begin_run_admission()` 只调用公开
-  `load_execution_authorization` / `consume_execution_authorization`，不 import `_read_use_record*`。
-- 依赖 A1 保持：body-id 不匹配 → `AUTHORIZATION_USE_RECORD_INVALID`（**非** REPLAYED）；
-  `_replay_reason` 仍返回 REPLAYED/EPOCH_MISMATCH；record path 仍 `sha256(authorization_id)+".json"`；
-  `DURABILITY_UNKNOWN` 语义不变。
-- A1 合入 `work/g4r` 后：本分支 rebase；补一条“真实文件 body-id 不匹配 → RECORD_INVALID/
-  不发送”的集成用例（R-07 的真实文件版本），并重跑 §6 全套；不需要改 A2 公共接口。
-- 若 A1 改变私有 reader 签名：A2 不受影响（只经公共 consume）。
+- **已完成 rebase**：A2 的 5 个提交重放到 A1 HEAD `e6f3aa6` 之上，**无冲突**
+  （A1 只改 `authorization.py` + 新增 `a_next_auth` 测试；A2 只改 controller/新增 run_admission/
+  scripts/a_next_admission 测试，双方文件集不重叠）。
+- **契约验证**：A1 的 `_read_use_record(path, *, expected_authorization_id)` 返回
+  `(authorization_id, epoch)`；body id 不匹配/存储名不匹配/非法 `consumed_utc` 一律
+  `AUTHORIZATION_USE_RECORD_INVALID`（**非** REPLAYED/EPOCH_MISMATCH）。A2 只经公共
+  `begin_run_admission()`/consume 观察，不 import A1 私有函数；`_map_consume_reasons` 将其映射为
+  `RUN_ADMISSION_RECORD_INVALID`（consumed=NO）。
+- **R-07 真实文件用例已补**（`tests/integration/a_next_admission/test_r07_body_id_crosscheck.py`）：
+  1) 真实 consume 成功后把记录 body id 改为外来 id（文件名不变）→ `RECORD_INVALID`，不是 replay；
+  2) body id 哈希与存储名不符 → `RECORD_INVALID`；
+  3) 非法 `consumed_utc` → `RECORD_INVALID`；
+  4) 未篡改记录 → 仍 `ALREADY_CONSUMED`（对照）。
+- **diff 边界**（Lead 的核对项，实际语义如下）：
+  - `git diff --name-only fix/a-next-auth-record..HEAD -- src/autoteacher_m0/security/authorization.py`
+    = **0 行**（A2 在 A1 之上零额外改动）；
+  - `git diff --name-only fd1d3a6..HEAD -- src/.../authorization.py` = 该文件（因为 fd1d3a6 是
+    **A1 之前**的基线，A1 的 +51/−18 已作为祖先进入 HEAD；这不是 A2 的改动）。因此“相对 fd1d3a6
+    为 0”仅对 A2 自身改动成立，不能字面要求整条 ancestry 为 0。
+  - A1 未改 `controller.py`（`git diff fd1d3a6..fix/a-next-auth-record -- controller.py` = 0），
+    A2 的接线面与 A1 完全分离。
+- **合体后无回归**：A1 套件 39 passed；A2 套件 73 passed；g4_a/g4_f5/g4r_packet/unit/security
+  与 rebase 前一致（§6）。
 
 ---
 
@@ -236,3 +255,15 @@ test_repository_worktree_and_history_is_clean` 在 **基线 `fd1d3a6` 的独立 
 3. A-PR3 在独占 OCI 窗口运行 `l2_admission_cases.py`，产出 A2-01..A2-03 L2 证据；A-PR1/A-PR3
    联合报告。
 4. 人类 Gate：G4-H1 前将 run admission 升级为唯一生产路径（§8）；本 PR 不 push/不 merge。
+
+
+## 12. Rebase 记录（A2 → A1 e6f3aa6）
+
+- 命令：`git rebase fix/a-next-auth-record`（A1 HEAD `e6f3aa6`，parent `fd1d3a6`），无冲突。
+- 新提交链：`d7bbf3b`（ADR）→ `07eccb9`（实现）→ `6556967`（ADR errata）→ `ff44ef6`（R-25）
+  → 本报告提交（含 R-07 真实文件用例与本文档更新）。
+- 变化面：仅 A1 的 `authorization.py` 进入 ancestry；A2 未重复修改该文件（相对 A1 分支 diff=0）。
+- 合体后测试：A2 73 passed、A1 39 passed、g4_a 223、g4_f5 12、g4_f2 29+1 skip、
+  g4r_packet 11+1 skip、unit 396、security 6+1 pre-existing（同基线证明）、collect 1532、ruff 0。
+- 无新增风险：A1 仅收紧 use-record 读取（更严格 fail-closed），A2 的映射把 INVALID 当
+  “不可证明/不发送”，二者语义一致。
