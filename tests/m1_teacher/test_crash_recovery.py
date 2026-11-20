@@ -39,8 +39,10 @@ from txn_support import (  # noqa: F401 - local test support module
     db_summary,
     finalize_after_recovery,
     record_matrix,
+    finalize_goal_completion_after_recovery,
     recover_and_assert,
     run_child,
+    setup_goal_completion_pending,
     setup_pending,
 )
 
@@ -208,6 +210,61 @@ def test_crash_during_transaction_b(tmp_path: Path, failpoint: str) -> None:
         assert summary["snapshot_revision"] is None
         recover_and_assert(db_path, setup)
         finalize_after_recovery(db_path, setup)
+
+
+# ---------------------------------------------------------------------------
+# Crash matrix: goal-completion write points (`before_goal`/`after_goal`)
+# ---------------------------------------------------------------------------
+
+
+_GOAL_POINTS = ("commit:before_goal", "commit:after_goal")
+
+
+@pytest.mark.parametrize("failpoint", _GOAL_POINTS)
+def test_crash_during_goal_completion_write_point(tmp_path: Path, failpoint: str) -> None:
+    """P1-2: the GOAL_COMPLETED event/goal-row write points are crash-tested.
+
+    The near-complete snapshot makes the next correct assessment complete the
+    learning goal, so transaction B writes terminal events + snapshot +
+    ``GOAL_COMPLETED`` + the ``goals`` row + the next session.  Killing before or
+    after the goal write must leave the recoverable prepared state (nothing
+    half-committed), and recovery must converge to a COMPLETED goal with exactly
+    one ``GOAL_COMPLETED`` event.
+    """
+
+    db_path = tmp_path / "crash_goal.db"
+    setup = setup_goal_completion_pending(db_path)
+    assert setup.seed_evidence is not None
+    assert setup.snapshot_revision is not None
+    child = run_child(
+        db_path=db_path,
+        session_id=setup.session_id,
+        item_id=setup.item_id,
+        response="A",
+        failpoint=failpoint,
+    )
+    assert child.returncode == SIGKILL_RETURNCODE, (
+        f"goal failpoint {failpoint!r} did not kill the child process: "
+        f"rc={child.returncode} out={child.stdout!r} err={child.stderr!r}"
+    )
+    summary = db_summary(db_path, setup.session_id)
+    assert_common_invariants(summary, setup)
+    record_matrix(f"G-{failpoint}", failpoint, summary)
+    # The prepared attempt is durable; no terminal/goal writes leaked out of the
+    # rolled-back transaction.
+    assert summary["prepared_total"] == 1
+    assert summary["prepared_unresolved"] == 1
+    assert summary["terminal_results"] == 0
+    assert summary["goal_completed_events"] == 0
+    assert summary["goal_status"] == "ACTIVE"
+    assert summary["pending_item_id"] == setup.item_id
+    assert summary["turn_index"] == setup.turn_index
+    assert summary["snapshot_revision"] == setup.snapshot_revision
+    # Recovery re-scores and commits the whole goal-completing turn atomically.
+    recover_and_assert(db_path, setup)
+    final = finalize_goal_completion_after_recovery(db_path, setup)
+    assert final["goal_status"] == "COMPLETED"
+    assert final["goal_completed_events"] == 1
 
 
 # ---------------------------------------------------------------------------

@@ -40,6 +40,12 @@ class PendingSetup:
     turn_index: int
     phase: str
     session_version: str
+    #: persisted learner snapshot revision at setup time (``None`` when no
+    #: snapshot exists yet; near-complete/local scenarios may seed one)
+    snapshot_revision: int | None = None
+    #: per-node evidence counts already persisted before the crash scenario
+    #: (seeded evidence predates the event log and cannot be rebuilt from it)
+    seed_evidence: dict[str, int] | None = None
 
 
 def components() -> demo.Components:
@@ -206,6 +212,144 @@ def _strip_timestamps(value):  # noqa: ANN001, ANN202 - recursive JSON value
     return value
 
 
+def setup_goal_completion_pending(db_path: Path, *, learner_id: str = LEARNER) -> PendingSetup:
+    """Prepare a pending turn whose correct answer completes the learning goal.
+
+    Seeds the B-PR5 near-complete snapshot (all nodes mastered except the two
+    required nodes, one of them just below the success threshold) and drives the
+    session deterministically until the *next* correct submission would emit
+    ``GOAL_COMPLETED``.  Used by the real-``SIGKILL`` tests for the goal write
+    points (review P1-2).
+    """
+
+    from m1_teacher.contracts.types import LearnerSnapshot, MasteryEstimate
+
+    components_ = components()
+    student = demo.load_student_fixture(components_.fixtures_root, STUDENT)
+    repository = SqliteRepository(db_path)
+    try:
+        masteries = {
+            node.node_id: MasteryEstimate(
+                node_id=node.node_id,
+                value=0.9,
+                confidence=0.9,
+                evidence_count=3,
+                created_at=FIXED_TS,
+                updated_at=FIXED_TS,
+            )
+            for node in components_.adapter.knowledge_nodes()
+        }
+        # boundary satisfies the goal, binary is one correct assessment away.
+        masteries["cf.search.boundary"] = MasteryEstimate(
+            node_id="cf.search.boundary",
+            value=0.75,
+            confidence=0.6,
+            evidence_count=1,
+            created_at=FIXED_TS,
+            updated_at=FIXED_TS,
+        )
+        masteries["cf.search.binary"] = MasteryEstimate(
+            node_id="cf.search.binary",
+            value=0.65,
+            confidence=0.6,
+            evidence_count=1,
+            created_at=FIXED_TS,
+            updated_at=FIXED_TS,
+        )
+        seeded = LearnerSnapshot(
+            learner_id=learner_id,
+            masteries=masteries,
+            revision=1,
+            created_at=FIXED_TS,
+            updated_at=FIXED_TS,
+        )
+        repository.ensure_learner(learner_id, created_at=FIXED_TS)
+        repository.upsert_snapshot(seeded)
+        engine, _history = demo._make_engine(  # noqa: SLF001 - deterministic test wiring
+            components_, repository, demo.MockStudentScorer(student)
+        )
+        goal = LearnerGoal(
+            goal_id=f"goal.{learner_id}.{components_.objective.objective_id}",
+            learner_id=learner_id,
+            objective_id=components_.objective.objective_id,
+            created_at=FIXED_TS,
+        )
+        state = engine.start_session(learner_id, goal, components_.objective)
+        session_id = state.session_id
+        for _ in range(64):
+            state = repository.load_session(session_id)
+            if state.phase == "COMPLETE":
+                raise AssertionError("session completed before the goal crash scenario")
+            if state.pending_item_id is None:
+                action = engine.current_action(session_id)
+                if action.item_id is None:
+                    engine.advance_session(session_id)
+                continue
+            item = engine._items_by_id[state.pending_item_id]  # noqa: SLF001
+            predicted = engine._scorer.score(  # noqa: SLF001 - prediction only
+                item, learner_id, "A", result_id="m1b.goal.predict"
+            )
+            snapshot = repository.get_snapshot(learner_id) or seeded
+            updated = engine.history.model.apply_result(snapshot, item, predicted)
+            complete, _reason = engine._planner.check_goal_completion(  # noqa: SLF001
+                components_.objective, updated
+            )
+            if complete and predicted.status in {"CORRECT", "INCORRECT", "PARTIAL"}:
+                return PendingSetup(
+                    session_id=session_id,
+                    item_id=state.pending_item_id,
+                    turn_index=state.turn_index,
+                    phase=state.phase,
+                    session_version=session_version(state),
+                    snapshot_revision=(
+                        None if snapshot is None else snapshot.revision
+                    ),
+                    seed_evidence={
+                        node_id: estimate.evidence_count
+                        for node_id, estimate in seeded.masteries.items()
+                    },
+                )
+            engine.submit_response(session_id, state.pending_item_id, "A")
+        raise AssertionError("could not prepare a goal-completing pending turn")
+    finally:
+        repository.close()
+
+
+def finalize_goal_completion_after_recovery(db_path: Path, setup: PendingSetup) -> dict:
+    """Assert the goal-completing turn committed atomically and retries are no-ops."""
+
+    repository = SqliteRepository(db_path)
+    try:
+        summary = db_summary(db_path, setup.session_id)
+        assert summary["goal_status"] == "COMPLETED"
+        assert summary["goal_completed_events"] == 1
+        assert summary["terminal_results"] == 1
+        assert summary["prepared_unresolved"] == 0
+        assert summary["pending_item_id"] is None
+        assert summary["turn_index"] == setup.turn_index + 1
+        assert summary["snapshot_revision"] == (setup.snapshot_revision or 0) + 1
+    finally:
+        repository.close()
+    result_id = summary["prepared_result_ids"][0]
+    before = summary["event_count"]
+    retry = run_child(
+        db_path=db_path,
+        session_id=setup.session_id,
+        item_id=setup.item_id,
+        response="A",
+        mode="submit",
+        result_id=result_id,
+    )
+    # The session is COMPLETE: a repeated submission fails closed before touching
+    # state (no duplicate result/mastery; recovery itself is the zero-event no-op).
+    assert retry.returncode != 0, retry.stdout + retry.stderr
+    assert json.loads(retry.stdout).get("code") == "CONFLICT"
+    after = db_summary(db_path, setup.session_id)
+    assert after["event_count"] == before, "rejected retry must append zero events"
+    assert after["goal_status"] == "COMPLETED"
+    return summary
+
+
 def _content_hash(events) -> str:  # noqa: ANN001 - HistoryEvent list
     """Reproducible content hash of the persisted event log.
 
@@ -267,6 +411,10 @@ def db_summary(db_path: Path, session_id: str, *, learner_id: str = LEARNER) -> 
             for event in assessed
         ]
         verify_rebuild = LearningHistory(repository).verify_rebuild(learner_id)
+        goal = repository.get_goal(state.goal_id)
+        goal_completed_events = [
+            event for event in events if event.event_type == "GOAL_COMPLETED"
+        ]
         return {
             "session_id": session_id,
             "phase": state.phase,
@@ -303,6 +451,8 @@ def db_summary(db_path: Path, session_id: str, *, learner_id: str = LEARNER) -> 
                 }
             ),
             "snapshot_learner": None if snapshot is None else snapshot.learner_id,
+            "goal_status": None if goal is None else goal.status,
+            "goal_completed_events": len(goal_completed_events),
             "learners": repository.list_learners(),
             "sessions": [item.session_id for item in repository.list_sessions(learner_id)],
             "verify_rebuild": verify_rebuild,
@@ -354,9 +504,17 @@ def assert_common_invariants(summary: dict, setup: PendingSetup) -> None:
     assert summary["learners"] == [LEARNER], "no other learner row may appear"
     assert summary["sessions"] == [setup.session_id], "no other session may appear"
     assert summary["snapshot_learner"] in (None, LEARNER)
-    assert summary["verify_rebuild"] is True, (
-        "the persisted snapshot must equal the snapshot rebuilt from the event log"
-    )
+    if setup.seed_evidence is None:
+        assert summary["verify_rebuild"] is True, (
+            "the persisted snapshot must equal the snapshot rebuilt from the event log"
+        )
+    else:
+        # Seeded prior evidence predates the event log (documented B-PR5 seed
+        # limitation); rebuild-in-log equality is asserted by the scenarios that
+        # do not seed.  The persisted revision must still be monotonic.
+        assert summary["snapshot_revision"] is not None
+        if setup.snapshot_revision is not None:
+            assert summary["snapshot_revision"] >= setup.snapshot_revision
     assert summary["turn_index"] >= setup.turn_index, "turn_index must never go backwards"
     if summary["pending_item_id"] is None:
         assert summary["prepared_unresolved"] == 0, (
@@ -364,10 +522,15 @@ def assert_common_invariants(summary: dict, setup: PendingSetup) -> None:
         )
     assert summary["mutating_assessed"] <= summary["assessed"]
     if summary["snapshot_revision"] is not None:
-        assert summary["snapshot_revision"] <= summary["mutating_assessed"], (
-            "snapshot revision cannot exceed the number of mutating assessments"
-        )
-        node_evidence: dict[str, int] = {}
+        if setup.seed_evidence is None:
+            assert summary["snapshot_revision"] <= summary["mutating_assessed"], (
+                "snapshot revision cannot exceed the number of mutating assessments"
+            )
+        else:
+            assert summary["snapshot_revision"] >= (setup.snapshot_revision or 0), (
+                "the persisted snapshot revision must not go backwards"
+            )
+        node_evidence: dict[str, int] = dict(setup.seed_evidence or {})
         items = item_node_ids()
         for event in summary["_assessed_payloads"]:
             if event["status"] not in {"CORRECT", "INCORRECT", "PARTIAL"}:

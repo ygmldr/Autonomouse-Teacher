@@ -369,6 +369,7 @@ with defaults, new protocols/helpers), must be recorded in
 | 2026-11-20 | B-PR3 | Diagnostic engine + curriculum planner with structured `Reason`s (50 tests) |
 | 2026-11-20 | B-PR4 | Teaching-session state machine + independent assessment scorer (75 tests) |
 | 2026-11-20 | B-PR5 final | Student A/B E2E paths, deterministic demo/CLI, reproducible evidence JSONL, implementation/evaluation/review/next-phase docs, next-phase interface stubs (43 tests, 536 total) |
+| 2026-11-20 | B-NEXT B-PR2 | Additive `HISTORY_EVENT_TYPE` value `ASSESSMENT_PREPARED` for the durable prepared assessment attempt of the B-PR2 transactional teaching turn (ADR-M1-001 §6 item 9, rule D12). No value renamed/removed and no record/field changed; the enum-freeze test gained exactly this one value. Storage is forward-only for this value: older builds reject it (see `docs/M1_B_TXN_RECOVERY.md` §10). |
 
 ---
 
