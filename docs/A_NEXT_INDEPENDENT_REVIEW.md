@@ -780,3 +780,148 @@ packet v2:  Reviewer r_rev5_packet_verifier.py --packet <restored> --expected-im
             -> {"status":"PASS","issues":[],"mutation_undetected":[]}
 v1 packet:  find / -maxdepth 8 -name "*e7d92967*" -> none; tar -tf backup.tar | grep review-packet-g4f -> none
 ```
+
+
+---
+
+## 10. 阶段 2 batch-2：A-PR2 Registry 裁决独立复核 — 2026-11-20T20:00Z–20:50Z
+
+### 10.1 审阅对象与范围（独立核对）
+
+| 项 | 值（Reviewer 实测） |
+|---|---|
+| 分支/HEAD | `feat/a-next-registry` @ **`e09ac7c47c0193a54a7e541edde3185d88bf66a0`**（parent `fd1d3a6`；`c4500f8` 脚本/测试 + `e09ac7c` docs） |
+| 变更 | `git diff --name-status fd1d3a6..e09ac7c` = **6 A 文件、+1635**：`docs/A_NEXT_REGISTRY_DECISION.md`、`scripts/a_next/registry/{run_matrix.py,fake_bridge.py,forged_replay_attack.py,probe_plugin/lib/index.js}`、`tests/a_next_registry/test_registry_attack_matrix.py` |
+| 未改 | `git diff fd1d3a6..e09ac7c -- src/ config/` = **空**；`config/g4/runtime-policy.json` sha256 **d0851a41…**（与基线一致）；`registry_status` = `UNVERIFIED_NO_AUTHORITATIVE_MERGED_EXPORT` **未改**；`config/g3d/candidate/bridge.patch.yml` sha **0cf5d340…**（与 identity 一致） |
+| 边界 | 0 容器/0 podman/0 frozen rootfs 直挂（`grep podman|docker|--rootfs` 无）；0 真实 Key/Provider/HTTP（见 §10.5）；A4 独占窗口期间 Reviewer **未跑 OCI** |
+
+### 10.2 独立复跑（不采信 Owner）
+
+```text
+$ pytest tests/a_next_registry -q                       -> 6 passed, 1 skipped (skip=gated runtime, 0.12s)
+$ ruff check scripts/a_next tests/a_next_registry       -> All checks passed!
+$ G4R_RUN_RUNTIME=1 G4R_STAGE=<恢复后 stage> pytest tests/a_next_registry -q
+  -> 7 passed in 17.46s（与 Owner 自称 7 passed/17.49s 一致；runtime 集成被真实执行，非 skip）
+$ python scripts/a_next/registry/run_matrix.py --all --stage <恢复后 stage> --out /tmp/a-next-registry-reviewer-run
+  -> 11/11 modes EXIT=0；verdict 与 Owner 矩阵逐项一致（baseline/register-unregister/schema-drift/
+     duplicate-name/internal-execute/observer-loss/late-bash-before-dispatch/two-turn-bash/
+     two-turn-internal-execute/two-turn-title/resume）；/work 已清理、worktree status=clean
+```
+
+**恢复后 stage 独立校验（因 INCIDENT_20261121 原 path 已删）**：使用
+`worktrees/a-next-rrev6/artifacts/g3c/stage`（restored copy），**逐文件 SHA 与 identity/policy 完全一致**：
+bridge build `2cb42461…`（== policy `stage_binding.adapter_built_js_sha256`）、skill `521bc0f1…`、
+dsh-tools `5d95d7f4…`、dsh-llm `45f7d934…`、cordis `70be1056…`；Runtime binary **1cc41d5a…** 一致。
+=> Owner 声称的 runtime 证据可在恢复副本上**按 SHA 复现**（Reviewer 已复现 7 passed + 11/11 modes）。
+
+### 10.3 forge / replay / suppress 攻击独立验证（Reviewer 自写 verifier，不 import Owner 攻击脚本）
+
+对 Owner 原始 L1 记录（genuine=`20261120T194522Z-late-bash-before-dispatch`，8 条；clean=baseline，4 条）
+用 Reviewer 自写 naive verifier（dispatch face 全部命中 approved `{skill_lookup}` 才接受）：
+
+```text
+genuine (未篡改)          -> accepted=false, unapproved=["bash"]   (命中 true 负面基线)
+forge   (改 face 为干净)  -> accepted=true                          (攻击成功)
+replay  (干净 run 换 label)-> accepted=true                         (攻击成功)
+suppress(删违规+补干净)   -> accepted=true                          (攻击成功)
+record 字段扫描: 无 MAC/signature/nonce/controller-binding 字段（trust_binding_fields=[]）
+REVIEWER A-PR2 ATTACK PROBE: PASS
+```
+
+结论与 Owner `attack-report.json` 一致：**L1 自报 JSONL 可被 forge/replay/suppress，不能升格为 attestation**；
+该结论是**负面安全结论**，不是“Registry 通过”。
+
+### 10.4 观测链与内部执行证据审核
+
+- `two-turn-bash`（Owner run，Reviewer 复现）：turn1 face `[skill_lookup]` 放行 → turn 间注册 `bash` → turn2
+  face `[bash, skill_lookup]`、`unknown=[bash]`、`enforcement_denial=true`、**fake bridge 只收到 1 次 request**
+  ⇒ “不只检查首轮”成立（turn2 未到 adapter）。
+- `late-bash-before-dispatch`：`denial=true`、face 含 bash/unknown；Reviewer 独立 —all 复现同 verdict
+  （该 run 即 Owner attack-report 的 genuine 来源 **`attack_run`**）。
+- `two-turn-internal-execute`：原始 probe 证据显示 turn1 dispatch face `[skill_lookup]` → 两 turn 间
+  `between_turns:marker:registered`（epoch2）→ `internal_execute` 成功（sentinel `19:45:40.224Z`）→
+  `marker:unregistered`（epoch3）→ turn2 dispatch face **仍为 `[skill_lookup]`**；fake bridge 仅 2 个 request、
+  `tools` 均只 `[skill_lookup]` ⇒ 内部工具执行确实可完全不出现在 Provider request；Owner doc 判
+  `MEASURED_PASS`（机制观测）合理。
+- `observer-loss`：probe 只写 2 条即停（`failAfterRecords=2` **注入故障**，Owner 表已注明），Runtime exit 0 且继续运行；
+  Owner 判为“evidence gap 已证、非 fail-open”**分类诚实**（Reviewer 独立复现 probe_records=2/exit 0）。
+- `resume`/`two-turn-title`：Reviewer 独立复现 `two-turn-title` 2 dispatch/2 bridge request、无 title purpose；
+  resume 进程 2 成功 dispatch；`compaction-effective-registry` 保持 `UNVERIFIED`（未启用/未触发）——**诚实**。
+
+### 10.5 裁决诚实性核验（A3-01/A3-02 / B03/E5-P04 / 无 Key）
+
+- **A3-01**（handoff：`Either independent trusted snapshot and tool-exec deny or explicitly UNVERIFIED`）：
+  文档 §0 三选一明确给出 **`UNVERIFIED`**，并给出 A 要件缺失（无 candidate-immutable registry 导出；唯一
+  registry 入口是同进程/同 UID Cordis 插件）——与 Reviewer 独立代码/证据一致；**满足“explicitly UNVERIFIED”**。
+- **A3-02**（two-turn resumed late registration + observer-loss 分类诚实）：L1 分类诚实（见 §10.4）；
+  但**真实 DSH resumed late-registration / observer-loss 的 L2 未执行**（Owner 标 `NOT_RUN`/`UNVERIFIED`），
+  矩阵行不得升级为 PASS。
+- **B 补偿控制**：文档明确 B ≠ Registry 关闭，内部工具风险依赖 OS sandbox（**A4 L2 NOT_RUN**），
+  `B03/E5-P04` **维持 `UNVERIFIED`**，E5-Full/G5 不因 B 放行——**诚实，无安全降级**。policy `registry_status`
+  未被改写（Reviewer 实测 sha 与基线一致）。
+- **无 Key/无 Provider/无 HTTP**：`env -i` + `unshare -n`（代码实测）、fake bridge AF_UNIX、无 http/net import、
+  `real_provider_calls=0`（注意：`real_key_present`/`real_provider_calls` 字段是 runner **硬编码声明**而非实测，
+  属 P3 证据措辞 nit；结构上由隔离/合成 bridge 支持）。
+- **未误改 config/registry_status**：见 §10.1（diff 空 + sha 一致）。
+
+### 10.6 发现（本批无 P0/P1；P2/P3 如下）
+
+- **P2-A3-1（复现路径断裂/事故 provenance）**：`run_matrix.py` `DEFAULT_STAGE = /tmp/at-f4-clean/artifacts/g3c/stage`
+  （INCIDENT_20261121 已删除）；identity.txt 与各 run-summary `stage_dir` 也指向该已消失路径。文档“复现命令”
+  `python3 scripts/a_next/registry/run_matrix.py --all` 不带 `--stage` 现在会失败。**要求**：显式 `--stage`（或更新
+  DEFAULT_STAGE 为恢复后路径）+ 文档/identity append-only 注明“stage 恢复自经哈希验证副本（a-next-rrev6，
+  bridge 2cb42461…）；Reviewer 已按恢复副本复现 7 passed + 11/11 modes”。
+- **P2-A3-2（矩阵行遗漏）**：§2.2 状态表未列 `late-bash-before-dispatch`（该 run 是 attack-report 的 genuine
+  `attack_run`，也是 denial 证据源之一）；应补一行（L1 MEASURED，denial/unknown 分类）或在 §3 攻击证据处显式引用。
+- **P2-A3-3（“host 复验 19:56Z”无可核文件）**：`ATTACK_MATRIX_INDEX.json` 只有 `generated_utc 19:54:00` 与 runs，
+  无 host-verification 记录；文档首页“host 复验 19:56Z 前后”**缺少对应证据文件**。要求：补证据或删掉该表述
+  （Reviewer 本批已独立复跑 7 passed/17.46s + 11/11 modes，可作为独立 host 复验替代记录）。
+- **P3-A3-4（状态词汇）**：表中 #14–16 用 `MEASURED_PASS` 表示“攻击成功（负面结论成立）”，虽同表说明
+  但易被误读为安全 PASS；建议改标 `ATTACK_CONFIRMED（负面结论）`，并在 A3-01/A3-02 记录中保留 “not Registry PASS”。
+- **P3-A3-5（identity 行内不一致）**：identity.txt `# worktree … head: fd1d3a6` 与同文件 `final_commits … head=e09ac7c` 不一致
+  （按最终提交 e09ac7c 为准即可；不影响证据哈希）。
+- **P3-A3-6（summary 字段）**：`real_key_present=false`/`real_provider_calls=0` 为 runner 常量声明，非独立测量；
+  建议改为“由 design/isolated runner 保证”措辞，避免被当作量测证据。
+
+### 10.7 裁定（A-PR2）
+
+| 项 | 裁定 | 是否允许集成 | 前置条件 |
+|---|---|---|---|
+| **A-PR2 Registry 裁决（A3-01 `UNVERIFIED` + B 补偿控制）** | **PASS（条件）** | **是（docs/scripts/tests；无 runtime/config 变更）** | C1–C5 |
+| A3-01 终态 | **UNVERIFIED**（保留，不得升级） | — | 由人类/安全 Reviewer 决定是否投入方案 A |
+| A3-02 终态 | **L1 分类 PASS；L2 真实 DSH resumed late-registration/observer-loss = NOT_RUN** | 矩阵行不得写 PASS | A4 L2 独立证据 |
+| B 补偿控制 | **条件式可用**（依赖 OS sandbox 证明） | 条件式 | A4 L2 `NOT_RUN` 前不得作为 G4-H1 放行依据 |
+| B03/E5-P04 | **UNVERIFIED（不变）** | — | 不得以本 PR 关闭 |
+| 误改 config/registry_status | **未发生（实测）** | — | 保持 |
+
+**C1（必做，Packet v3 前）**：修复 `DEFAULT_STAGE`/复现路径 + identity/run-summary 恢复 provenance 标注（P2-A3-1）。
+**C2（必做）**：§2.2 补 `late-bash-before-dispatch` 行/引用（P2-A3-2），并补/删“host 复验”表述（P2-A3-3）。
+**C3（必做）**：A3-01/A3-02 状态按 §10.7 写入矩阵与 Packet v3；A3-01 保持 `UNVERIFIED`；A3-02 仅 L1-classified，
+L2 行 `NOT_RUN`。
+**C4**：B 补偿控制只在 A4 L2 OS sandbox 证据到位后可作为 G4-H1 前置；`B03/E5-P04` 保持 `UNVERIFIED`，
+不得出现“Registry 已关闭/已通过”。
+**C5**：状态词汇/identity/summary 字段修正（P3-A3-4/5/6）；保留本事件/恢复 provenance（§9）与 `ATTACK_CONFIRMED`
+负面结论性质。
+
+> **本 PR 不改变任何门**：`LiveGate=BLOCKED`、`G4-H=NOT_AUTHORIZED`、`G5=BLOCKED`、`G6=NOT_RUN`、
+> `M0=DECISION_PENDING`；`B03/E5-P04=UNVERIFIED`；A-PR2 为“诚实 UNVERIFIED + 攻击矩阵 L1”，**不是** Registry 通过。
+
+---
+
+## 附录 E：A-PR2 复核命令与输出（§10）
+
+```text
+$ git -C worktrees/a-next-registry diff --name-status fd1d3a6..e09ac7c  -> 6 A files
+$ git -C worktrees/a-next-registry diff fd1d3a6..e09ac7c -- src/ config/ -> empty
+$ sha256sum config/g4/runtime-policy.json -> d0851a41…8066 (unchanged); registry_status unchanged
+$ pytest tests/a_next_registry -q -> 6 passed, 1 skipped (0.12s)
+$ ruff check scripts/a_next tests/a_next_registry -> All checks passed!
+$ G4R_RUN_RUNTIME=1 G4R_STAGE=worktrees/a-next-rrev6/artifacts/g3c/stage     pytest tests/a_next_registry -q -> 7 passed in 17.46s
+$ python scripts/a_next/registry/run_matrix.py --all --stage <restored stage> --out /tmp/a-next-registry-reviewer-run
+  -> 11/11 modes exit 0, verdicts match Owner matrix; /work cleaned; worktree clean
+$ reviewer /tmp/a-pr2_independent_attack_probe.py
+  -> genuine rejected UNAPPROVED bash; forge/replay/suppress accepted; trust_binding_fields=[]
+  -> REVIEWER A-PR2 ATTACK PROBE: PASS
+恢复 stage 哈希: bridge 2cb42461… / skill 521bc0f1… / dsh-tools 5d95d7f4… / dsh-llm 45f7d934… /
+                cordis 70be1056… / runtime 1cc41d5a…（均 == identity/policy）
+```
