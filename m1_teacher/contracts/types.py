@@ -111,6 +111,11 @@ HISTORY_EVENT_TYPE_VALUES: tuple[str, ...] = (
     "SESSION_RESUMED",
     "GOAL_COMPLETED",
     "ERROR",
+    # B-NEXT (B-PR2) additive value: a durable assessment attempt/prepared
+    # response record written atomically before the external scorer runs, so a
+    # crash between scoring preparation and the terminal ASSESSED/ERROR events
+    # is recoverable.  Appended only; no existing value is renamed/removed.
+    "ASSESSMENT_PREPARED",
 )
 
 DIAGNOSIS_STATUS_VALUES: tuple[str, ...] = (

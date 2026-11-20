@@ -62,6 +62,7 @@ Event payload schemas produced by this module (all fields JSON-serialisable):
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from typing import Any
 
 from ..contracts.errors import ConflictError, ValidationError
@@ -76,10 +77,47 @@ from ..contracts.types import (
 )
 from .model import MasteryModel, applied_result_ids
 
-__all__ = ["ASSESSED_EVENT_PREFIX", "MASTERY_UPDATED_EVENT_PREFIX", "LearningHistory"]
+__all__ = [
+    "ASSESSED_EVENT_PREFIX",
+    "MASTERY_UPDATED_EVENT_PREFIX",
+    "EventDraft",
+    "LearningHistory",
+]
 
 ASSESSED_EVENT_PREFIX = "evt.assessed."
 MASTERY_UPDATED_EVENT_PREFIX = "evt.mastery."
+
+
+@dataclass(frozen=True)
+class EventDraft:
+    """A sequence-independent event ready to be materialised inside a commit.
+
+    The B-NEXT transactional turn commit builds drafts without a ``seq`` (the
+    sequence number is allocated inside the single SQLite transaction and
+    retried on an explicit ``EVENT_SEQ_CONFLICT``), then materialises them with
+    :meth:`materialize`.  Drafts are JSON/payload-only and never persisted
+    directly.
+    """
+
+    event_id: str
+    event_type: str
+    payload: Mapping[str, Any]
+    created_at: str
+
+    def materialize(
+        self, *, learner_id: str, session_id: str, seq: int
+    ) -> HistoryEvent:
+        """Build the frozen :class:`HistoryEvent` record for this draft."""
+
+        return HistoryEvent(
+            event_id=self.event_id,
+            learner_id=learner_id,
+            session_id=session_id,
+            seq=seq,
+            event_type=self.event_type,
+            payload=dict(self.payload),
+            created_at=self.created_at,
+        )
 
 _REQUIRED_REPOSITORY_METHODS: tuple[str, ...] = (
     "get_snapshot",
@@ -207,6 +245,87 @@ class LearningHistory:
 
     # -- assessment application ----------------------------------------------
 
+    def assessment_event_drafts(
+        self,
+        learner_id: str,
+        session_id: str,
+        item: AssessmentItem,
+        result: AssessmentResult,
+        snapshot: LearnerSnapshot,
+    ) -> tuple[list[EventDraft], LearnerSnapshot, bool]:
+        """Build the canonical ``ASSESSED``/``MASTERY_UPDATED`` drafts (pure).
+
+        This is the single source of the assessment event payload schema, reused
+        by :meth:`apply_assessment` and by the session engine's transactional
+        teaching-turn commit.  It applies the deterministic mastery model to
+        ``snapshot`` (the caller passes the current persisted snapshot) and
+        returns ``(drafts, updated_snapshot, mutated)``.  The model maps
+        ``NEEDS_REVIEW``/``EVAL_ERROR`` to a *no-op* update (``mutated=False``),
+        so both statuses produce audit ``ASSESSED``/``MASTERY_UPDATED`` drafts
+        with ``applied=false``; the session engine records ``EVAL_ERROR`` as an
+        ``ERROR`` event instead (never as mastery evidence).
+        """
+
+        learner_id = _require_nonempty_str(
+            learner_id, "LearningHistory.assessment_event_drafts()"
+        )
+        session_id = _require_nonempty_str(
+            session_id, "LearningHistory.assessment_event_drafts(session_id)"
+        )
+        _require_instance(
+            item, AssessmentItem, "LearningHistory.assessment_event_drafts(item)"
+        )
+        _require_instance(
+            result, AssessmentResult, "LearningHistory.assessment_event_drafts(result)"
+        )
+        _require_instance(
+            snapshot, LearnerSnapshot, "LearningHistory.assessment_event_drafts(snapshot)"
+        )
+        if result.learner_id != learner_id:
+            raise ValidationError(
+                "LearningHistory.assessment_event_drafts(): result.learner_id "
+                f"{result.learner_id!r} does not match learner {learner_id!r}"
+            )
+        if result.item_id != item.item_id:
+            raise ValidationError(
+                "LearningHistory.assessment_event_drafts(): result.item_id "
+                f"{result.item_id!r} does not match item.item_id {item.item_id!r}"
+            )
+        if snapshot.learner_id != learner_id:
+            raise ValidationError(
+                "LearningHistory.assessment_event_drafts(): snapshot belongs to learner "
+                f"{snapshot.learner_id!r}, not {learner_id!r}"
+            )
+        updated = self._model.apply_result(snapshot, item, result)
+        mutated = updated is not snapshot
+        drafts = [
+            EventDraft(
+                event_id=assessed_event_id(result.result_id),
+                event_type="ASSESSED",
+                payload={
+                    "result_id": result.result_id,
+                    "item_id": item.item_id,
+                    "status": result.status,
+                    "result": result.to_dict(),
+                    "item": item.to_dict(),
+                },
+                created_at=result.created_at,
+            ),
+            EventDraft(
+                event_id=mastery_updated_event_id(result.result_id),
+                event_type="MASTERY_UPDATED",
+                payload={
+                    "result_id": result.result_id,
+                    "status": result.status,
+                    "applied": mutated,
+                    "snapshot": updated.to_dict(),
+                    "policy_version": self._model.policy.policy_version,
+                },
+                created_at=result.created_at,
+            ),
+        ]
+        return drafts, updated, mutated
+
     def apply_assessment(
         self,
         learner_id: str,
@@ -276,40 +395,13 @@ class LearningHistory:
                 self._repository.upsert_snapshot(rebuilt)
             return rebuilt
 
-        updated = self._model.apply_result(base, item, result)
-        mutated = updated is not base
+        drafts, updated, mutated = self.assessment_event_drafts(
+            learner_id, session_id, item, result, base
+        )
         seq = self._next_seq(learner_id)
         events = [
-            HistoryEvent(
-                event_id=assessed_event_id(result.result_id),
-                learner_id=learner_id,
-                session_id=session_id,
-                seq=seq,
-                event_type="ASSESSED",
-                payload={
-                    "result_id": result.result_id,
-                    "item_id": item.item_id,
-                    "status": result.status,
-                    "result": result.to_dict(),
-                    "item": item.to_dict(),
-                },
-                created_at=result.created_at,
-            ),
-            HistoryEvent(
-                event_id=mastery_updated_event_id(result.result_id),
-                learner_id=learner_id,
-                session_id=session_id,
-                seq=seq + 1,
-                event_type="MASTERY_UPDATED",
-                payload={
-                    "result_id": result.result_id,
-                    "status": result.status,
-                    "applied": mutated,
-                    "snapshot": updated.to_dict(),
-                    "policy_version": self._model.policy.policy_version,
-                },
-                created_at=result.created_at,
-            ),
+            draft.materialize(learner_id=learner_id, session_id=session_id, seq=seq + offset)
+            for offset, draft in enumerate(drafts)
         ]
 
         if mutated:

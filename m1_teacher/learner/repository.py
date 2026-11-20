@@ -54,14 +54,62 @@ Fail-closed rules
 Single-writer assumption
 ------------------------
 The repository serialises writers with SQLite, but sequence allocation is owned
-by :class:`LearningHistory` and assumes one writer per learner.  Multi-writer
-retry/coordination is out of scope for B-PR2.
+by :class:`LearningHistory`/the session engine and assumes one writer per
+learner *scope*: concurrent writers are serialised by ``BEGIN IMMEDIATE`` and
+must resolve explicit ``ConflictError`` codes (``SESSION_VERSION_CONFLICT``,
+``EVENT_SEQ_CONFLICT``, ``DUPLICATE_EVENT``, ``DB_BUSY``) by reloading and
+retrying.  Silent last-write-wins is never allowed.  Multi-process operation
+against one SQLite file is supported for crash recovery and serialised
+concurrency tests; a single active writer per learner/session remains the
+product constraint documented in ``docs/M1_B_TXN_RECOVERY.md``.
+
+B-NEXT (B-PR2) transactional teaching-turn commit
+-------------------------------------------------
+``commit_teaching_turn(learner_id=..., session_id=..., expected_session_version=...,
+events=..., snapshot=None, next_session=..., goal=None)`` commits the whole
+assessment turn in **one** ``BEGIN IMMEDIATE`` transaction:
+
+1. validate every argument (re-using the fail-closed ``_validated_*`` helpers);
+2. compare the stored session content digest with ``expected_session_version``
+   (compare-and-swap; mismatch -> ``ConflictError`` code
+   ``SESSION_VERSION_CONFLICT``).  The digest is
+   :meth:`SqliteRepository.session_version`, a 16-hex-character SHA-256 prefix
+   of the canonical JSON session payload (no schema/field change);
+3. insert the events (duplicate ``event_id`` -> ``ConflictError`` code
+   ``DUPLICATE_EVENT``; ``(learner_id, seq)`` collision -> ``ConflictError`` code
+   ``EVENT_SEQ_CONFLICT``);
+4. upsert the snapshot when supplied (stale ``revision`` ->
+   ``ConflictError`` code ``SNAPSHOT_REVISION_CONFLICT``);
+5. optionally upsert the goal;
+6. write ``next_session`` after validating identity, monotonic
+   ``turn_index`` and the pending/terminal/PREPARED consistency invariant;
+7. ``COMMIT``; any exception rolls the whole transaction back.
+
+The method is *additive*: all legacy methods keep their old behaviour and the
+engine falls back to the legacy (non-atomic, explicitly documented) flow when a
+repository does not implement it.
+
+Crash failpoints (test-only)
+----------------------------
+When the environment variable :data:`FAILPOINT_ENV` is set (never in normal
+operation), the commit path calls ``os.kill(os.getpid(), SIGKILL)`` at the named
+write point, producing a *real* process crash (never a mock exception).  Point
+names: ``after_begin``, ``after_session_check``,
+``before_event_insert_<n>``/``after_event_insert_<n>`` (1-based),
+``before_snapshot``/``after_snapshot``, ``before_goal``/``after_goal``,
+``before_session``/``after_session``, ``before_commit``, ``after_commit``.
+A ``prepare:`` / ``commit:`` prefix restricts the failpoint to the
+``ASSESSMENT_PREPARED`` transaction A / terminal transaction B respectively
+(inferred from the event types); an unprefixed name matches both.
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
+import os
 import re
+import signal
 import sqlite3
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
@@ -69,7 +117,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from ..contracts.errors import ConflictError, ValidationError
+from ..contracts.errors import ConflictError, NotFoundError, ValidationError
 from ..contracts.types import (
     HistoryEvent,
     LearnerGoal,
@@ -78,13 +126,78 @@ from ..contracts.types import (
     now_utc,
 )
 
-__all__ = ["SCHEMA_VERSION", "SqliteRepository"]
+__all__ = ["FAILPOINT_ENV", "SCHEMA_VERSION", "SqliteRepository", "session_version"]
 
 SCHEMA_VERSION = 1
 """Current on-disk schema version."""
 
 _TS_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
 _TS_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
+
+FAILPOINT_ENV = "M1B_CRASH_FAILPOINT"
+"""Environment variable enabling the real-process crash failpoints (test only)."""
+
+_SESSION_VERSION_LENGTH = 16
+_PREPARED_EVENT_TYPE = "ASSESSMENT_PREPARED"
+_TERMINAL_EVENT_TYPES = frozenset({"ASSESSED", "MASTERY_UPDATED", "ERROR", "GOAL_COMPLETED"})
+_FAILPOINT_SCOPES = frozenset({"prepare", "commit"})
+_DEFAULT_BUSY_TIMEOUT_MS = 5000
+
+
+def _canonical_session_payload(state: SessionState) -> str:
+    """Canonical (sorted-key, compact) JSON of a validated session state."""
+
+    try:
+        normalized = SessionState.from_dict(state.to_dict())
+    except ValidationError as exc:
+        raise ValidationError(f"session_version(): invalid SessionState: {exc.message}") from None
+    return json.dumps(
+        normalized.to_dict(),
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    )
+
+
+def session_version(state: SessionState) -> str:
+    """Content digest used as the optimistic-concurrency version of a session.
+
+    ``sha256(canonical_json(session.to_dict()))[:16]``.  The frozen
+    :class:`SessionState` contract is unchanged: no field is added, the version
+    is a pure function of the persisted content (so any state change, including
+    a ``pending_item_id``/``turn_index``/``phase`` transition, changes it).
+    """
+
+    if not isinstance(state, SessionState):
+        raise ValidationError("session_version(): expected a SessionState instance")
+    payload = _canonical_session_payload(state)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:_SESSION_VERSION_LENGTH]
+
+
+def _crash_failpoint(point: str, scope: str) -> None:
+    """Kill the current process at a named write point when explicitly enabled.
+
+    Disabled unless :data:`FAILPOINT_ENV` is set to exactly this point (or to
+    ``"<scope>:<point>"``); the normal code path is unchanged (a dictionary
+    lookup returning immediately).
+    """
+
+    raw = os.environ.get(FAILPOINT_ENV)
+    if not raw:
+        return
+    wanted_point = raw
+    wanted_scope: str | None = None
+    if ":" in raw:
+        prefix, _, suffix = raw.partition(":")
+        if prefix in _FAILPOINT_SCOPES:
+            wanted_scope = prefix
+            wanted_point = suffix
+    if wanted_scope is not None and wanted_scope != scope:
+        return
+    if wanted_point != point:
+        return
+    os.kill(os.getpid(), signal.SIGKILL)
 
 _TABLE_SQL: tuple[str, ...] = (
     """CREATE TABLE IF NOT EXISTS schema_meta (
@@ -229,7 +342,18 @@ def _event_from_row(row: sqlite3.Row) -> HistoryEvent:
 class SqliteRepository:
     """Stdlib SQLite implementation of learner + session persistence."""
 
-    def __init__(self, db_path: str | Path, *, initialize: bool = True) -> None:
+    def __init__(
+        self,
+        db_path: str | Path,
+        *,
+        initialize: bool = True,
+        busy_timeout_ms: int = _DEFAULT_BUSY_TIMEOUT_MS,
+    ) -> None:
+        if type(busy_timeout_ms) is not int or busy_timeout_ms < 0:
+            raise ValidationError(
+                "SqliteRepository(busy_timeout_ms=...): expected an int >= 0"
+            )
+        self._busy_timeout_ms = busy_timeout_ms
         if isinstance(db_path, Path):
             candidate: str | Path = db_path
         elif isinstance(db_path, str):
@@ -255,7 +379,9 @@ class SqliteRepository:
 
         try:
             self._conn: sqlite3.Connection = sqlite3.connect(
-                target, isolation_level=None, timeout=5.0
+                target,
+                isolation_level=None,
+                timeout=max(0.1, float(busy_timeout_ms) / 1000.0),
             )
         except sqlite3.Error as exc:  # pragma: no cover - filesystem failure
             raise ValidationError(f"SqliteRepository(): cannot open database: {exc}") from exc
@@ -281,7 +407,7 @@ class SqliteRepository:
                     f"SqliteRepository(): could not enable WAL journal mode (got {mode!r})"
                 )
         self._conn.execute("PRAGMA foreign_keys=ON")
-        self._conn.execute("PRAGMA busy_timeout=5000")
+        self._conn.execute(f"PRAGMA busy_timeout={int(self._busy_timeout_ms)}")
         self._conn.execute("PRAGMA synchronous=NORMAL")
 
     def initialize_schema(self) -> None:
@@ -318,6 +444,12 @@ class SqliteRepository:
         """Whether :meth:`close` has been called."""
 
         return self._closed
+
+    @staticmethod
+    def session_version(state: SessionState) -> str:
+        """Content digest CAS version of a :class:`SessionState` (see module docstring)."""
+
+        return session_version(state)
 
     def close(self) -> None:
         """Close the SQLite connection (idempotent)."""
@@ -422,7 +554,12 @@ class SqliteRepository:
         return row is not None
 
     @staticmethod
-    def _check_seq_conflict(conn: sqlite3.Connection, event: HistoryEvent) -> None:
+    def _check_seq_conflict(
+        conn: sqlite3.Connection,
+        event: HistoryEvent,
+        *,
+        code: str = "CONFLICT",
+    ) -> None:
         row = conn.execute(
             "SELECT event_id FROM history_events WHERE learner_id = ? AND seq = ?",
             (event.learner_id, event.seq),
@@ -430,7 +567,9 @@ class SqliteRepository:
         if row is not None and row["event_id"] != event.event_id:
             raise ConflictError(
                 f"SqliteRepository.append_event(): seq {event.seq} for learner "
-                f"{event.learner_id!r} is already used by event {row['event_id']!r}"
+                f"{event.learner_id!r} is already used by event {row['event_id']!r}",
+                code=code,
+                details={"learner_id": event.learner_id, "seq": event.seq},
             )
 
     @staticmethod
@@ -451,17 +590,34 @@ class SqliteRepository:
 
     @staticmethod
     def _upsert_snapshot_row(
-        conn: sqlite3.Connection, snapshot: LearnerSnapshot
+        conn: sqlite3.Connection,
+        snapshot: LearnerSnapshot,
+        *,
+        code: str = "CONFLICT",
+        require_advance: bool = False,
     ) -> None:
         row = conn.execute(
             "SELECT revision FROM snapshots WHERE learner_id = ?",
             (snapshot.learner_id,),
         ).fetchone()
-        if row is not None and int(row["revision"]) > snapshot.revision:
+        stored_revision = None if row is None else int(row["revision"])
+        stale = stored_revision is not None and stored_revision > snapshot.revision
+        not_advancing = (
+            require_advance
+            and stored_revision is not None
+            and stored_revision >= snapshot.revision
+        )
+        if stale or not_advancing:
             raise ConflictError(
                 "SqliteRepository.upsert_snapshot(): stale snapshot revision "
                 f"{snapshot.revision} for learner {snapshot.learner_id!r} "
-                f"(stored revision is {int(row['revision'])})"
+                f"(stored revision is {stored_revision})",
+                code=code,
+                details={
+                    "learner_id": snapshot.learner_id,
+                    "revision": snapshot.revision,
+                    "stored_revision": stored_revision,
+                },
             )
         conn.execute(
             "INSERT INTO snapshots(learner_id, revision, updated_at, snapshot_json) "
@@ -475,6 +631,326 @@ class SqliteRepository:
                 snapshot.to_json(),
             ),
         )
+
+    @staticmethod
+    def _write_session_row(conn: sqlite3.Connection, state: SessionState) -> None:
+        conn.execute(
+            "INSERT INTO sessions(session_id, learner_id, state_json, updated_at) "
+            "VALUES (?, ?, ?, ?) ON CONFLICT(session_id) DO UPDATE SET "
+            "learner_id = excluded.learner_id, state_json = excluded.state_json, "
+            "updated_at = excluded.updated_at",
+            (state.session_id, state.learner_id, state.to_json(), state.updated_at),
+        )
+
+    @staticmethod
+    def _write_goal_row(conn: sqlite3.Connection, goal: LearnerGoal) -> None:
+        conn.execute(
+            "INSERT INTO goals(goal_id, learner_id, objective_id, status, goal_json, "
+            "created_at) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(goal_id) DO UPDATE SET "
+            "learner_id = excluded.learner_id, objective_id = excluded.objective_id, "
+            "status = excluded.status, goal_json = excluded.goal_json, "
+            "created_at = excluded.created_at",
+            (
+                goal.goal_id,
+                goal.learner_id,
+                goal.objective_id,
+                goal.status,
+                goal.to_json(),
+                goal.created_at,
+            ),
+        )
+
+    @staticmethod
+    def _session_row(conn: sqlite3.Connection, session_id: str) -> SessionState | None:
+        row = conn.execute(
+            "SELECT state_json FROM sessions WHERE session_id = ?", (session_id,)
+        ).fetchone()
+        if row is None:
+            return None
+        return _parse_session(row["state_json"], session_id)
+
+    @staticmethod
+    def _prepared_attempt_rows(
+        conn: sqlite3.Connection, session_id: str
+    ) -> list[dict[str, Any]]:
+        rows = conn.execute(
+            "SELECT event_id, seq, payload_json FROM history_events "
+            "WHERE session_id = ? AND event_type = ? ORDER BY seq ASC",
+            (session_id, _PREPARED_EVENT_TYPE),
+        ).fetchall()
+        attempts: list[dict[str, Any]] = []
+        for row in rows:
+            payload = _decode_json_object(
+                row["payload_json"], f"prepared event {row['event_id']!r}"
+            )
+            attempts.append(
+                {"event_id": row["event_id"], "seq": int(row["seq"]), "payload": payload}
+            )
+        return attempts
+
+    @staticmethod
+    def _terminal_result_ids(conn: sqlite3.Connection, session_id: str) -> set[str]:
+        rows = conn.execute(
+            "SELECT event_id, payload_json FROM history_events "
+            "WHERE session_id = ? AND event_type IN ('ASSESSED', 'ERROR')",
+            (session_id,),
+        ).fetchall()
+        result_ids: set[str] = set()
+        for row in rows:
+            payload = _decode_json_object(
+                row["payload_json"], f"terminal event {row['event_id']!r}"
+            )
+            result_id = payload.get("result_id")
+            if type(result_id) is str and result_id:
+                result_ids.add(result_id)
+        return result_ids
+
+    @classmethod
+    def _assert_no_unresolved_prepared(
+        cls, conn: sqlite3.Connection, session_id: str
+    ) -> None:
+        """Invariant: a session without a pending item has no orphan PREPARED attempt."""
+
+        prepared = cls._prepared_attempt_rows(conn, session_id)
+        if not prepared:
+            return
+        terminal_ids = cls._terminal_result_ids(conn, session_id)
+        for attempt in prepared:
+            payload = attempt["payload"]
+            result_id = payload.get("result_id")
+            if type(result_id) is not str or result_id not in terminal_ids:
+                raise ValidationError(
+                    "SqliteRepository.commit_teaching_turn(): refusing to leave a "
+                    "session without a pending item while attempt "
+                    f"{payload.get('attempt_id')!r} (result {result_id!r}) has no "
+                    "terminal ASSESSED/ERROR event; this state is not recoverable",
+                    code="INCONSISTENT_PENDING",
+                    details={
+                        "session_id": session_id,
+                        "attempt_id": payload.get("attempt_id"),
+                        "result_id": result_id,
+                    },
+                )
+
+    @staticmethod
+    def _validate_turn_transition(
+        current: SessionState,
+        next_session: SessionState,
+        events: Sequence[HistoryEvent],
+    ) -> None:
+        def _fail(message: str) -> None:
+            raise ValidationError(
+                f"SqliteRepository.commit_teaching_turn(): {message}",
+                code="INVALID_SESSION_TRANSITION",
+                details={
+                    "session_id": next_session.session_id,
+                    "current_turn_index": current.turn_index,
+                    "next_turn_index": next_session.turn_index,
+                },
+            )
+
+        if next_session.goal_id != current.goal_id:
+            _fail("goal_id must not change within a session")
+        if next_session.objective_id != current.objective_id:
+            _fail("objective_id must not change within a session")
+        if next_session.turn_index < current.turn_index:
+            _fail("turn_index must be monotonic non-decreasing")
+        has_prepared = any(event.event_type == _PREPARED_EVENT_TYPE for event in events)
+        has_terminal = any(event.event_type in _TERMINAL_EVENT_TYPES for event in events)
+        if has_prepared and has_terminal:
+            _fail("PREPARED and terminal events must not share one commit")
+        if has_prepared:
+            if next_session.turn_index != current.turn_index:
+                _fail("a PREPARED attempt must not advance turn_index")
+            if next_session.pending_item_id != current.pending_item_id:
+                _fail("a PREPARED attempt must not change the pending item")
+            if next_session.phase != current.phase:
+                _fail("a PREPARED attempt must not change the session phase")
+        elif has_terminal:
+            if next_session.turn_index != current.turn_index + 1:
+                _fail("a terminal turn commit must advance turn_index by exactly one")
+        elif next_session.turn_index > current.turn_index + 1:
+            _fail("a session write may advance turn_index by at most one")
+        if next_session.pending_item_id is not None and next_session.phase == "COMPLETE":
+            _fail("a COMPLETE session cannot keep a pending item")
+
+    # -- B-NEXT: transactional teaching-turn commit ---------------------------
+
+    def commit_teaching_turn(
+        self,
+        *,
+        learner_id: str,
+        session_id: str,
+        expected_session_version: str,
+        events: Sequence[HistoryEvent],
+        snapshot: LearnerSnapshot | None = None,
+        next_session: SessionState,
+        goal: LearnerGoal | None = None,
+    ) -> list[bool]:
+        """Atomically commit one teaching turn (events + snapshot + goal + session).
+
+        See the module docstring for the ordering, the compare-and-swap session
+        version, the fail-closed error codes and the real-process crash
+        failpoints.  Returns one ``True`` flag per inserted event (duplicates and
+        conflicts are errors here, not silent ``False`` results, so an engine can
+        never mistake a lost turn for success).
+        """
+
+        learner_id = _require_nonempty_str(
+            learner_id, "SqliteRepository.commit_teaching_turn(learner_id)"
+        )
+        session_id = _require_nonempty_str(
+            session_id, "SqliteRepository.commit_teaching_turn(session_id)"
+        )
+        expected_session_version = _require_nonempty_str(
+            expected_session_version,
+            "SqliteRepository.commit_teaching_turn(expected_session_version)",
+        )
+        if isinstance(events, (str, bytes)) or not isinstance(events, Sequence):
+            raise ValidationError(
+                "SqliteRepository.commit_teaching_turn(events=...): expected a sequence "
+                "of HistoryEvent instances"
+            )
+        normalized_events: list[HistoryEvent] = []
+        seen_event_ids: set[str] = set()
+        last_seq = -1
+        for index, event in enumerate(events):
+            event = self._validated_event(event)
+            where = f"SqliteRepository.commit_teaching_turn(events[{index}])"
+            if event.learner_id != learner_id:
+                raise ValidationError(f"{where}: event belongs to another learner")
+            if event.session_id != session_id:
+                raise ValidationError(f"{where}: event belongs to another session")
+            if event.event_id in seen_event_ids:
+                raise ValidationError(f"{where}: duplicate event_id {event.event_id!r} in request")
+            seen_event_ids.add(event.event_id)
+            if event.seq <= last_seq:
+                raise ValidationError(
+                    f"{where}: event seq values must be strictly ascending "
+                    f"({event.seq} after {last_seq})"
+                )
+            last_seq = event.seq
+            normalized_events.append(event)
+        next_session = self._validated_session(next_session)
+        if next_session.session_id != session_id:
+            raise ValidationError(
+                "SqliteRepository.commit_teaching_turn(): next_session.session_id "
+                f"{next_session.session_id!r} does not match {session_id!r}"
+            )
+        if next_session.learner_id != learner_id:
+            raise ValidationError(
+                "SqliteRepository.commit_teaching_turn(): next_session.learner_id "
+                f"{next_session.learner_id!r} does not match {learner_id!r}"
+            )
+        if snapshot is not None:
+            snapshot = self._validated_snapshot(snapshot)
+            if snapshot.learner_id != learner_id:
+                raise ValidationError(
+                    "SqliteRepository.commit_teaching_turn(): snapshot.learner_id "
+                    f"{snapshot.learner_id!r} does not match {learner_id!r}"
+                )
+        if goal is not None:
+            goal = self._validated_goal(goal)
+            if goal.learner_id != learner_id:
+                raise ValidationError(
+                    "SqliteRepository.commit_teaching_turn(): goal.learner_id "
+                    f"{goal.learner_id!r} does not match {learner_id!r}"
+                )
+            if goal.goal_id != next_session.goal_id:
+                raise ValidationError(
+                    "SqliteRepository.commit_teaching_turn(): goal.goal_id "
+                    f"{goal.goal_id!r} does not match the session goal "
+                    f"{next_session.goal_id!r}"
+                )
+        scope = (
+            "prepare"
+            if any(event.event_type == _PREPARED_EVENT_TYPE for event in normalized_events)
+            else "commit"
+        )
+        self._ensure_open()
+        try:
+            self._conn.execute("BEGIN IMMEDIATE")
+        except sqlite3.OperationalError as exc:
+            raise ConflictError(
+                "SqliteRepository.commit_teaching_turn(): cannot acquire the SQLite "
+                f"write lock: {exc}",
+                code="DB_BUSY",
+            ) from None
+        try:
+            conn = self._conn
+            _crash_failpoint("after_begin", scope)
+            current = self._session_row(conn, session_id)
+            if current is None:
+                raise NotFoundError(
+                    f"SqliteRepository.commit_teaching_turn(): unknown session_id "
+                    f"{session_id!r}"
+                )
+            if current.learner_id != learner_id:
+                raise ConflictError(
+                    "SqliteRepository.commit_teaching_turn(): session belongs to "
+                    f"learner {current.learner_id!r}, not {learner_id!r}",
+                    code="SESSION_OWNER_CONFLICT",
+                )
+            current_version = session_version(current)
+            if current_version != expected_session_version:
+                raise ConflictError(
+                    "SqliteRepository.commit_teaching_turn(): stale session version "
+                    f"for {session_id!r} (expected {expected_session_version!r}, "
+                    f"stored {current_version!r}); another writer advanced the session",
+                    code="SESSION_VERSION_CONFLICT",
+                    details={
+                        "session_id": session_id,
+                        "expected_session_version": expected_session_version,
+                        "current_session_version": current_version,
+                    },
+                )
+            _crash_failpoint("after_session_check", scope)
+            self._validate_turn_transition(current, next_session, normalized_events)
+            for index, event in enumerate(normalized_events, start=1):
+                _crash_failpoint(f"before_event_insert_{index}", scope)
+                if self._event_exists(conn, event.event_id):
+                    raise ConflictError(
+                        "SqliteRepository.commit_teaching_turn(): duplicate event_id "
+                        f"{event.event_id!r}",
+                        code="DUPLICATE_EVENT",
+                        details={"event_id": event.event_id},
+                    )
+                self._check_seq_conflict(conn, event, code="EVENT_SEQ_CONFLICT")
+                self._ensure_learner_row(conn, learner_id, event.created_at)
+                self._insert_event(conn, event)
+                _crash_failpoint(f"after_event_insert_{index}", scope)
+            if snapshot is not None:
+                _crash_failpoint("before_snapshot", scope)
+                # A teaching turn must strictly advance the materialised
+                # snapshot revision: a stale caller snapshot (loaded before a
+                # concurrent turn of the same learner) fails closed instead of
+                # silently overwriting newer evidence.
+                self._upsert_snapshot_row(
+                    conn,
+                    snapshot,
+                    code="SNAPSHOT_REVISION_CONFLICT",
+                    require_advance=True,
+                )
+                _crash_failpoint("after_snapshot", scope)
+            if goal is not None:
+                _crash_failpoint("before_goal", scope)
+                self._write_goal_row(conn, goal)
+                _crash_failpoint("after_goal", scope)
+            _crash_failpoint("before_session", scope)
+            self._write_session_row(conn, next_session)
+            _crash_failpoint("after_session", scope)
+            if next_session.pending_item_id is None:
+                self._assert_no_unresolved_prepared(conn, session_id)
+            _crash_failpoint("before_commit", scope)
+            conn.execute("COMMIT")
+        except BaseException:
+            try:
+                self._conn.execute("ROLLBACK")
+            except sqlite3.Error:  # pragma: no cover - transaction already gone
+                pass
+            raise
+        _crash_failpoint("after_commit", scope)
+        return [True] * len(normalized_events)
 
     # -- LearnerRepository: snapshots ----------------------------------------
 
@@ -644,21 +1120,7 @@ class SqliteRepository:
         goal = self._validated_goal(goal)
         with self._write_transaction() as conn:
             self._ensure_learner_row(conn, goal.learner_id, goal.created_at)
-            conn.execute(
-                "INSERT INTO goals(goal_id, learner_id, objective_id, status, goal_json, "
-                "created_at) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(goal_id) DO UPDATE SET "
-                "learner_id = excluded.learner_id, objective_id = excluded.objective_id, "
-                "status = excluded.status, goal_json = excluded.goal_json, "
-                "created_at = excluded.created_at",
-                (
-                    goal.goal_id,
-                    goal.learner_id,
-                    goal.objective_id,
-                    goal.status,
-                    goal.to_json(),
-                    goal.created_at,
-                ),
-            )
+            self._write_goal_row(conn, goal)
 
     # -- SessionRepository ----------------------------------------------------
 
@@ -668,13 +1130,7 @@ class SqliteRepository:
         state = self._validated_session(state)
         with self._write_transaction() as conn:
             self._ensure_learner_row(conn, state.learner_id, state.updated_at)
-            conn.execute(
-                "INSERT INTO sessions(session_id, learner_id, state_json, updated_at) "
-                "VALUES (?, ?, ?, ?) ON CONFLICT(session_id) DO UPDATE SET "
-                "learner_id = excluded.learner_id, state_json = excluded.state_json, "
-                "updated_at = excluded.updated_at",
-                (state.session_id, state.learner_id, state.to_json(), state.updated_at),
-            )
+            self._write_session_row(conn, state)
 
     def load_session(self, session_id: str) -> SessionState | None:
         """Return a session state by id, ``None`` if unknown."""

@@ -56,12 +56,18 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Mapping, Sequence
 
 from ..assessment.scorer import AssessmentScorer, DeterministicScorer
 from ..contracts.domain import DomainAdapter
-from ..contracts.errors import ConflictError, NotFoundError, ValidationError
+from ..contracts.errors import (
+    ConflictError,
+    NotFoundError,
+    UnsupportedOperationError,
+    ValidationError,
+)
 from ..contracts.repository import LearnerRepository, SessionRepository
 from ..contracts.types import (
     SESSION_PHASE_VALUES,
@@ -79,13 +85,19 @@ from ..contracts.types import (
 from ..diagnostic.engine import INSUFFICIENT_EVIDENCE, READY, DiagnosticEngine
 from ..knowledge.graph import KnowledgeGraph
 from ..learner.history import (
+    EventDraft,
     LearningHistory,
     assessed_event_id,
     mastery_updated_event_id,
 )
 from ..planner.planner import CurriculumPlanner
 
-__all__ = ["SessionPolicy", "TeachingSessionEngine", "SESSION_POLICY_VERSION"]
+__all__ = [
+    "RecoveryReport",
+    "SessionPolicy",
+    "TeachingSessionEngine",
+    "SESSION_POLICY_VERSION",
+]
 
 SESSION_POLICY_VERSION = "m1a.session.v0"
 
@@ -111,12 +123,80 @@ _ITEM_ACTION_PHASES = {
 }
 _EVAL_ERROR_EVENT_PREFIX = "evt.evalerror."
 _GOAL_COMPLETED_EVENT_PREFIX = "evt.goalcompleted."
+_ATTEMPT_EVENT_PREFIX = "evt.responsesubmitted."
+_PREPARED_EVENT_PREFIX = "evt.assessmentprepared."
+_RECOVERY_ERROR_EVENT_PREFIX = "evt.recoveryerror."
+_ATTEMPT_ID_PREFIX = "attempt:"
+_TERMINAL_EVENT_TYPES = frozenset({"ASSESSED", "MASTERY_UPDATED", "ERROR", "GOAL_COMPLETED"})
+_IDEMPOTENCY_CONFLICT = "IDEMPOTENCY_CONFLICT"
+_SESSION_VERSION_CONFLICT = "SESSION_VERSION_CONFLICT"
+_EVENT_SEQ_CONFLICT = "EVENT_SEQ_CONFLICT"
+_DUPLICATE_EVENT = "DUPLICATE_EVENT"
 _KEEP = object()
 
 
 # ---------------------------------------------------------------------------
-# Session policy
+# B-NEXT transactional turn / recovery structures
 # ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class _PreparedAttempt:
+    """A durable ``ASSESSMENT_PREPARED`` attempt (transaction A evidence)."""
+
+    attempt_id: str
+    learner_id: str
+    session_id: str
+    result_id: str
+    item_id: str
+    turn_index: int
+    response_digest: str
+    response_kind: str
+    canonical_response: str
+    session_version: str
+    event_id: str
+
+
+@dataclass(frozen=True)
+class _TurnTransition:
+    """Pure description of one assessment turn's persisted transition."""
+
+    phase: str
+    turn_index: int
+    pending_item_id: str | None
+    snapshot: LearnerSnapshot | None
+    drafts: tuple[EventDraft, ...]
+    goal: LearnerGoal | None
+
+
+@dataclass(frozen=True)
+class RecoveryReport:
+    """Explainable outcome of :meth:`TeachingSessionEngine.recover_session`.
+
+    ``status`` is one of ``ALREADY_CONSISTENT`` (nothing prepared, no write),
+    ``RECOVERED`` (every prepared attempt received its terminal event),
+    ``PARTIAL`` (some recovered, some need operator attention) or ``FAILED``
+    (nothing recovered: the session stays pending and unchanged).
+    """
+
+    session_id: str
+    learner_id: str
+    status: str
+    prepared_attempts: int
+    recovered_attempts: int
+    pending_attempt_ids: tuple[str, ...]
+    error_codes: tuple[str, ...]
+    events_appended: int
+
+
+class _RecoveryFailure(Exception):
+    """Internal: recovery could not deterministically re-score an attempt."""
+
+    def __init__(self, code: str, detail: str) -> None:
+        super().__init__(f"{code}: {detail}")
+        self.code = code
+        self.detail = detail
+
 
 
 @dataclass(frozen=True)
@@ -202,6 +282,31 @@ def _response_kind(response: Any) -> str:
     return type(response).__name__
 
 
+_SESSION_TS_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
+
+
+def _fresh_session_timestamp(previous: str) -> str:
+    """Return the current UTC second, strictly greater than ``previous``.
+
+    The compare-and-swap session version is a content digest; a write that only
+    changes ``updated_at`` (transaction A persists the prepared attempt without
+    changing turn/pending/phase) must therefore produce a new timestamp even
+    when it happens within the same wall-clock second.  The value stays a valid
+    second-precision UTC timestamp (the frozen ``SessionState`` contract).
+    """
+
+    candidate = now_utc()
+    if candidate > previous:
+        return candidate
+    try:
+        moment = datetime.strptime(previous, _SESSION_TS_FORMAT).replace(
+            tzinfo=timezone.utc
+        )
+    except ValueError:  # pragma: no cover - persisted contract guarantees format
+        return candidate
+    return (moment + timedelta(seconds=1)).strftime(_SESSION_TS_FORMAT)
+
+
 # ---------------------------------------------------------------------------
 # Engine
 # ---------------------------------------------------------------------------
@@ -268,6 +373,9 @@ class TeachingSessionEngine:
         self._planner = planner if planner is not None else CurriculumPlanner(domain, graph)
         self._scorer: AssessmentScorer = scorer if scorer is not None else DeterministicScorer()
         self._policy = policy if policy is not None else SessionPolicy()
+        self._supports_txn = callable(
+            getattr(repository, "commit_teaching_turn", None)
+        ) and callable(getattr(repository, "session_version", None))
         self._items_by_id = {item.item_id: item for item in domain.assessment_items()}
         self._objectives_by_id = {
             objective.objective_id: objective for objective in domain.objectives()
@@ -493,7 +601,56 @@ class TeachingSessionEngine:
         *,
         result_id: str | None = None,
     ) -> AssessmentResult:
-        """Score one submission and run ASSESS -> UPDATE -> REVIEW atomically enough."""
+        """Score one submission and advance the session through ASSESS -> UPDATE.
+
+        With a repository that implements the B-NEXT transactional extension
+        (:meth:`SqliteRepository.commit_teaching_turn`), the submission runs as:
+
+        * **transaction A** — atomically persist the durable attempt
+          (``RESPONSE_SUBMITTED`` + ``ASSESSMENT_PREPARED`` with the canonical
+          response and session version; compare-and-swap protected);
+        * **outside any database transaction** — call the injected external
+          scorer (at-least-once invocation is possible after a crash; state
+          application stays exactly-once via the terminal event ids);
+        * **transaction B** — atomically commit ``ASSESSED``/``MASTERY_UPDATED``
+          (or ``ERROR`` for ``EVAL_ERROR``), the learner snapshot, the optional
+          ``GOAL_COMPLETED`` event/goal row and the next session state.
+
+        A crash between A and B leaves a recoverable prepared attempt that
+        :meth:`recover_session` completes deterministically.  Legacy repositories
+        without the extension fall back to the old multi-transaction flow, which
+        is explicitly **not atomic** (``supports_transactional_turns`` is
+        ``False`` and the recovery API fails closed).
+        """
+
+        if self._supports_txn:
+            return self._submit_response_transactional(
+                session_id, item_id, response, result_id=result_id
+            )
+        return self._submit_response_legacy(
+            session_id, item_id, response, result_id=result_id
+        )
+
+    @property
+    def supports_transactional_turns(self) -> bool:
+        """Whether the attached repository supports the B-NEXT atomic turn API."""
+
+        return self._supports_txn
+
+    def _submit_response_legacy(
+        self,
+        session_id: str,
+        item_id: str,
+        response: str | dict,
+        *,
+        result_id: str | None = None,
+    ) -> AssessmentResult:
+        """Legacy fallback: the pre-B-NEXT multi-transaction submit flow.
+
+        Kept for protocol-only repositories; documented as **non-atomic** (a
+        crash may leave a scored-but-not-advanced session).  Behaviour is
+        unchanged from M1-A so existing callers keep working.
+        """
 
         state = self._load_session(session_id)
         item_id = _require_nonempty_str(
@@ -561,6 +718,788 @@ class TeachingSessionEngine:
             raise ValidationError(f"submit_response(): unsupported status {result.status!r}")
         self._repository.save_session(new_state)
         return result
+
+    # -- B-NEXT: transactional submit (A -> score -> B) --------------------
+
+    def _submit_response_transactional(
+        self,
+        session_id: str,
+        item_id: str,
+        response: str | dict,
+        *,
+        result_id: str | None = None,
+    ) -> AssessmentResult:
+        state = self._load_session(session_id)
+        item_id = _require_nonempty_str(
+            item_id, "TeachingSessionEngine.submit_response(item_id)"
+        )
+        if state.phase == PHASE_PAUSED:
+            raise ConflictError(f"submit_response({session_id!r}): session is PAUSED")
+        if state.phase == PHASE_COMPLETE:
+            raise ConflictError(f"submit_response({session_id!r}): session is COMPLETE")
+        item = self._items_by_id.get(item_id)
+        if item is None:
+            raise NotFoundError(f"submit_response(): unknown item_id {item_id!r}")
+        learner_id = state.learner_id
+        canonical_response = _canonical_response(response)
+        response_digest = hashlib.sha256(
+            canonical_response.encode("utf-8")
+        ).hexdigest()[:16]
+        response_kind = _response_kind(response)
+        requested_result_id: str | None = None
+        if result_id is not None:
+            requested_result_id = _require_nonempty_str(
+                result_id, "TeachingSessionEngine.submit_response(result_id)"
+            )
+            existing = self._lookup_result_for_retry(
+                learner_id=learner_id,
+                item=item,
+                session_id=session_id,
+                result_id=requested_result_id,
+                response_digest=response_digest,
+            )
+            if existing is not None:
+                return existing
+        if state.pending_item_id is None:
+            raise ConflictError(
+                f"submit_response({session_id!r}): no item is pending; call "
+                "current_action() first"
+            )
+        if state.pending_item_id != item_id:
+            raise ConflictError(
+                f"submit_response(): pending item is {state.pending_item_id!r}, "
+                f"not {item_id!r}"
+            )
+        attempt_id = self._attempt_id(session_id, state.turn_index, item_id)
+        prepared: _PreparedAttempt | None = None
+        prepared_payload = self._prepared_payload(attempt_id)
+        if prepared_payload is not None:
+            prepared = self._decode_prepared(attempt_id, prepared_payload)
+            self._assert_attempt_matches_request(
+                prepared, state, item, response_digest, requested_result_id
+            )
+            terminal = self._terminal_result(prepared.result_id)
+            if terminal is not None:
+                return terminal
+            current_state = self._load_session(session_id)
+        else:
+            result_id_final = (
+                requested_result_id
+                if requested_result_id is not None
+                else self._default_attempt_result_id(state, item_id, response)
+            )
+            try:
+                prepared = self._prepare_attempt(
+                    state=state,
+                    item=item,
+                    canonical_response=canonical_response,
+                    response_digest=response_digest,
+                    response_kind=response_kind,
+                    attempt_id=attempt_id,
+                    result_id=result_id_final,
+                )
+            except ConflictError as exc:
+                code = getattr(exc, "code", "")
+                if code not in {_SESSION_VERSION_CONFLICT, _DUPLICATE_EVENT}:
+                    raise
+                retry_payload = self._prepared_payload(attempt_id)
+                if retry_payload is None:
+                    terminal = self._terminal_result(result_id_final)
+                    if terminal is not None:
+                        return terminal
+                    raise
+                prepared = self._decode_prepared(attempt_id, retry_payload)
+                self._assert_attempt_matches_request(
+                    prepared, state, item, response_digest, requested_result_id
+                )
+                terminal = self._terminal_result(prepared.result_id)
+                if terminal is not None:
+                    return terminal
+            current_state = self._load_session(session_id)
+        # B: the external scorer runs OUTSIDE any database transaction.  It may
+        # be invoked more than once across a crash/retry; the persisted state is
+        # still applied exactly once because the terminal event ids are
+        # deterministic functions of result_id and the commit fails closed on
+        # duplicates.
+        result = self._score_safely(item, learner_id, response, prepared.result_id)
+        return self._commit_result_turn(current_state, item, result)
+
+    def _prepare_attempt(
+        self,
+        *,
+        state: SessionState,
+        item: AssessmentItem,
+        canonical_response: str,
+        response_digest: str,
+        response_kind: str,
+        attempt_id: str,
+        result_id: str,
+    ) -> _PreparedAttempt:
+        """Transaction A: atomically persist the durable assessment attempt."""
+
+        expected_version = self._repository.session_version(state)
+        now = now_utc()
+        prepared_event_id = f"{_PREPARED_EVENT_PREFIX}{attempt_id}"
+        drafts = (
+            EventDraft(
+                event_id=f"{_ATTEMPT_EVENT_PREFIX}{attempt_id}",
+                event_type="RESPONSE_SUBMITTED",
+                payload={
+                    "item_id": item.item_id,
+                    "result_id": result_id,
+                    "response_digest": response_digest,
+                    "response_kind": response_kind,
+                    "attempt": state.turn_index,
+                    "attempt_id": attempt_id,
+                    "session_version": expected_version,
+                },
+                created_at=now,
+            ),
+            EventDraft(
+                event_id=prepared_event_id,
+                event_type="ASSESSMENT_PREPARED",
+                payload={
+                    "attempt_id": attempt_id,
+                    "learner_id": state.learner_id,
+                    "session_id": state.session_id,
+                    "item_id": item.item_id,
+                    "turn_index": state.turn_index,
+                    "result_id": result_id,
+                    "response_digest": response_digest,
+                    "response_kind": response_kind,
+                    "canonical_response": canonical_response,
+                    "session_version": expected_version,
+                    "session_policy_version": self._policy.policy_version,
+                },
+                created_at=now,
+            ),
+        )
+        self._commit_turn_with_retry(
+            learner_id=state.learner_id,
+            session_id=state.session_id,
+            expected_version=expected_version,
+            drafts=drafts,
+            snapshot=None,
+            next_state=replace(
+                state, updated_at=_fresh_session_timestamp(state.updated_at)
+            ),
+            goal=None,
+        )
+        return _PreparedAttempt(
+            attempt_id=attempt_id,
+            learner_id=state.learner_id,
+            session_id=state.session_id,
+            result_id=result_id,
+            item_id=item.item_id,
+            turn_index=state.turn_index,
+            response_digest=response_digest,
+            response_kind=response_kind,
+            canonical_response=canonical_response,
+            session_version=expected_version,
+            event_id=prepared_event_id,
+        )
+
+    def _commit_result_turn(
+        self, state: SessionState, item: AssessmentItem, result: AssessmentResult
+    ) -> AssessmentResult:
+        """Transaction B: atomically apply the scored assessment turn."""
+
+        snapshot = self._current_snapshot(state.learner_id)
+        transition = self._plan_result_transition(state, item, result, snapshot)
+        next_state = self._next_state_from_transition(state, transition)
+        expected_version = self._repository.session_version(state)
+        try:
+            self._commit_turn_with_retry(
+                learner_id=state.learner_id,
+                session_id=state.session_id,
+                expected_version=expected_version,
+                drafts=transition.drafts,
+                snapshot=transition.snapshot,
+                next_state=next_state,
+                goal=transition.goal,
+            )
+        except ConflictError as exc:
+            code = getattr(exc, "code", "")
+            if code in {_SESSION_VERSION_CONFLICT, _DUPLICATE_EVENT}:
+                terminal = self._terminal_result(result.result_id)
+                if terminal is not None:
+                    return terminal
+            raise
+        return result
+
+    def _plan_result_transition(
+        self,
+        state: SessionState,
+        item: AssessmentItem,
+        result: AssessmentResult,
+        snapshot: LearnerSnapshot,
+    ) -> _TurnTransition:
+        """Pure transition planner for one scored response (no writes)."""
+
+        next_turn = state.turn_index + 1
+        if result.status == "EVAL_ERROR":
+            retries = self._eval_error_streak(self._session_events(state), item.item_id) + 1
+            exhausted = retries > self._policy.eval_error_retry_limit
+            draft = EventDraft(
+                event_id=f"{_EVAL_ERROR_EVENT_PREFIX}{result.result_id}",
+                event_type="ERROR",
+                payload={
+                    "stage": "ASSESS",
+                    "status": "EVAL_ERROR",
+                    "item_id": item.item_id,
+                    "result_id": result.result_id,
+                    "result": result.to_dict(),
+                    "failure_reason": result.failure_reason,
+                    "retry_attempt": retries,
+                    "retry_exhausted": exhausted,
+                    "mastery_unchanged": True,
+                },
+                created_at=now_utc(),
+            )
+            return _TurnTransition(
+                phase=PHASE_REVIEW if exhausted else state.phase,
+                turn_index=next_turn,
+                pending_item_id=None if exhausted else item.item_id,
+                snapshot=None,
+                drafts=(draft,),
+                goal=None,
+            )
+        drafts, updated, mutated = self._history.assessment_event_drafts(
+            state.learner_id, state.session_id, item, result, snapshot
+        )
+        phase = PHASE_REVIEW
+        goal_update: LearnerGoal | None = None
+        if mutated and result.status in _MUTATING_STATUSES:
+            objective = self._objective(state)
+            complete, completion_reason = self._planner.check_goal_completion(
+                objective, updated
+            )
+            if complete:
+                phase = PHASE_COMPLETE
+                goal_event_id = f"{_GOAL_COMPLETED_EVENT_PREFIX}{objective.objective_id}"
+                if self._repository.get_event(goal_event_id) is None:
+                    drafts.append(
+                        EventDraft(
+                            event_id=goal_event_id,
+                            event_type="GOAL_COMPLETED",
+                            payload={
+                                "objective_id": objective.objective_id,
+                                "reason": completion_reason.to_dict(),
+                                "policy_version": self._policy.policy_version,
+                            },
+                            created_at=now_utc(),
+                        )
+                    )
+                goal_update = replace(self._goal(state), status="COMPLETED")
+        return _TurnTransition(
+            phase=phase,
+            turn_index=next_turn,
+            pending_item_id=None,
+            snapshot=updated if mutated else None,
+            drafts=tuple(drafts),
+            goal=goal_update,
+        )
+
+    @staticmethod
+    def _next_state_from_transition(
+        state: SessionState, transition: _TurnTransition
+    ) -> SessionState:
+        return SessionState(
+            session_id=state.session_id,
+            learner_id=state.learner_id,
+            goal_id=state.goal_id,
+            objective_id=state.objective_id,
+            phase=transition.phase,
+            turn_index=transition.turn_index,
+            pending_item_id=transition.pending_item_id,
+            created_at=state.created_at,
+            updated_at=_fresh_session_timestamp(state.updated_at),
+        )
+
+    def _commit_turn_with_retry(
+        self,
+        *,
+        learner_id: str,
+        session_id: str,
+        expected_version: str,
+        drafts: Sequence[EventDraft],
+        snapshot: LearnerSnapshot | None,
+        next_state: SessionState,
+        goal: LearnerGoal | None,
+    ) -> list[bool]:
+        """Commit drafts; retry only on an explicit cross-writer seq conflict."""
+
+        last: ConflictError | None = None
+        for attempt in range(3):
+            start_seq = self._next_event_seq(learner_id)
+            events = [
+                draft.materialize(
+                    learner_id=learner_id, session_id=session_id, seq=start_seq + offset
+                )
+                for offset, draft in enumerate(drafts)
+            ]
+            try:
+                return list(
+                    self._repository.commit_teaching_turn(
+                        learner_id=learner_id,
+                        session_id=session_id,
+                        expected_session_version=expected_version,
+                        events=events,
+                        snapshot=snapshot,
+                        next_session=next_state,
+                        goal=goal,
+                    )
+                )
+            except ConflictError as exc:
+                last = exc
+                if getattr(exc, "code", "") == _EVENT_SEQ_CONFLICT and attempt < 2:
+                    continue
+                raise
+        assert last is not None  # pragma: no cover - defensive
+        raise last
+
+    def _next_event_seq(self, learner_id: str) -> int:
+        return max((event.seq for event in self._events(learner_id)), default=-1) + 1
+
+    @staticmethod
+    def _attempt_id(session_id: str, turn_index: int, item_id: str) -> str:
+        return f"{_ATTEMPT_ID_PREFIX}{session_id}:{turn_index}:{item_id}"
+
+    def _prepared_payload(self, attempt_id: str) -> dict[str, Any] | None:
+        event = self._repository.get_event(f"{_PREPARED_EVENT_PREFIX}{attempt_id}")
+        if event is None:
+            return None
+        payload = event.payload
+        if not isinstance(payload, Mapping):
+            raise ValidationError(
+                f"stored ASSESSMENT_PREPARED event for attempt {attempt_id!r} is corrupted"
+            )
+        return dict(payload)
+
+    def _decode_prepared(
+        self, attempt_id: str, payload: Mapping[str, Any]
+    ) -> _PreparedAttempt:
+        where = f"stored ASSESSMENT_PREPARED event for attempt {attempt_id!r}"
+        expected = (
+            "attempt_id",
+            "learner_id",
+            "session_id",
+            "result_id",
+            "item_id",
+            "turn_index",
+            "response_digest",
+            "response_kind",
+            "canonical_response",
+            "session_version",
+        )
+        missing = [key for key in expected if key not in payload]
+        if missing:
+            raise ValidationError(f"{where}: missing field(s) {missing}")
+        turn_index = payload["turn_index"]
+        if type(turn_index) is not int or turn_index < 0:
+            raise ValidationError(f"{where}: invalid turn_index {turn_index!r}")
+        for key in expected:
+            if key == "turn_index":
+                continue
+            if type(payload[key]) is not str or not payload[key]:
+                raise ValidationError(f"{where}: expected a non-blank string for {key!r}")
+        if payload["attempt_id"] != attempt_id:
+            raise ValidationError(f"{where}: attempt_id does not match the event id")
+        return _PreparedAttempt(
+            attempt_id=attempt_id,
+            learner_id=payload["learner_id"],
+            session_id=payload["session_id"],
+            result_id=payload["result_id"],
+            item_id=payload["item_id"],
+            turn_index=turn_index,
+            response_digest=payload["response_digest"],
+            response_kind=payload["response_kind"],
+            canonical_response=payload["canonical_response"],
+            session_version=payload["session_version"],
+            event_id=f"{_PREPARED_EVENT_PREFIX}{attempt_id}",
+        )
+
+    def _assert_attempt_matches_request(
+        self,
+        prepared: _PreparedAttempt,
+        state: SessionState,
+        item: AssessmentItem,
+        response_digest: str,
+        requested_result_id: str | None,
+    ) -> None:
+        def _conflict(detail: str) -> None:
+            raise ConflictError(
+                f"submit_response(): idempotency conflict for attempt "
+                f"{prepared.attempt_id!r}: {detail}",
+                code=_IDEMPOTENCY_CONFLICT,
+                details={
+                    "attempt_id": prepared.attempt_id,
+                    "result_id": prepared.result_id,
+                    "session_id": prepared.session_id,
+                    "item_id": prepared.item_id,
+                },
+            )
+
+        if (
+            prepared.learner_id != state.learner_id
+            or prepared.session_id != state.session_id
+            or prepared.item_id != item.item_id
+            or prepared.turn_index != state.turn_index
+        ):
+            _conflict("prepared attempt belongs to a different learner/session/item/turn")
+        if prepared.response_digest != response_digest:
+            _conflict("the same attempt was already prepared with a different response")
+        if requested_result_id is not None and requested_result_id != prepared.result_id:
+            _conflict("the same attempt was already prepared with a different result_id")
+
+    def _find_prepared_payload_for_result(
+        self, learner_id: str, result_id: str
+    ) -> dict[str, Any] | None:
+        found: dict[str, Any] | None = None
+        for event in self._events(learner_id):
+            if event.event_type != "ASSESSMENT_PREPARED":
+                continue
+            payload = event.payload
+            if isinstance(payload, Mapping) and payload.get("result_id") == result_id:
+                found = dict(payload)
+        return found
+
+    def _terminal_event(self, result_id: str):
+        for event_id in (
+            assessed_event_id(result_id),
+            f"{_EVAL_ERROR_EVENT_PREFIX}{result_id}",
+        ):
+            event = self._repository.get_event(event_id)
+            if event is not None:
+                return event
+        return None
+
+    def _terminal_result(self, result_id: str) -> AssessmentResult | None:
+        event = self._terminal_event(result_id)
+        if event is None:
+            return None
+        raw = event.payload.get("result")
+        if not isinstance(raw, Mapping):
+            raise ValidationError(
+                f"stored terminal event for result {result_id!r} has no result payload"
+            )
+        try:
+            return AssessmentResult.from_dict(dict(raw))
+        except ValidationError:
+            raise ValidationError(
+                f"stored assessment result {result_id!r} is corrupted"
+            ) from None
+
+    def _lookup_result_for_retry(
+        self,
+        *,
+        learner_id: str,
+        item: AssessmentItem,
+        session_id: str,
+        result_id: str,
+        response_digest: str,
+    ) -> AssessmentResult | None:
+        result = self._terminal_result(result_id)
+        if result is None:
+            return None
+
+        def _conflict(detail: str) -> None:
+            raise ConflictError(
+                f"submit_response(): idempotency conflict for result "
+                f"{result_id!r}: {detail}",
+                code=_IDEMPOTENCY_CONFLICT,
+                details={
+                    "result_id": result_id,
+                    "learner_id": learner_id,
+                    "session_id": session_id,
+                    "item_id": item.item_id,
+                },
+            )
+
+        if result.learner_id != learner_id or result.item_id != item.item_id:
+            _conflict("result_id already belongs to a different learner/item")
+        prepared = self._find_prepared_payload_for_result(learner_id, result_id)
+        if prepared is not None:
+            if prepared.get("session_id") != session_id:
+                _conflict("result_id already belongs to a different session")
+            if prepared.get("response_digest") != response_digest:
+                _conflict("result_id was already used with a different response digest")
+        else:
+            event = self._terminal_event(result_id)
+            if event is not None and event.session_id != session_id:
+                _conflict("result_id was already recorded in a different session")
+        return result
+
+    # -- B-NEXT: crash recovery -------------------------------------------
+
+    def recover_session(self, session_id: str) -> RecoveryReport:
+        """Complete prepared-but-uncommitted assessment turns from the event log.
+
+        Algorithm (deterministic, idempotent):
+
+        1. load the session and collect ``ASSESSMENT_PREPARED`` events for it
+           that have no terminal ``ASSESSED``/``ERROR`` event;
+        2. for each attempt, verify the persisted ``pending_item_id`` and
+           ``turn_index`` still match the prepared attempt (otherwise record an
+           explicit ``RECOVERY_STATE_INCONSISTENT`` ``ERROR`` event and keep the
+           session untouched);
+        3. re-score the persisted canonical response with the injected scorer
+           (outside any transaction) and require the same deterministic
+           ``result_id``/item/learner identity; a scorer failure or identity
+           mismatch is recorded as ``RECOVERY_SCORER_ERROR`` /
+           ``RECOVERY_SCORER_MISMATCH`` and the session stays pending (**no
+           false completion**);
+        4. commit the terminal events + snapshot + next session through the same
+           atomic API as a normal turn.
+
+        Repeating the call after a successful recovery writes **zero** events
+        (the terminal events are found first) and returns
+        ``status="ALREADY_CONSISTENT"``.
+        """
+
+        if not self._supports_txn:
+            raise UnsupportedOperationError(
+                "recover_session(): the repository does not support transactional "
+                "teaching-turn commits; the legacy flow has no recovery guarantee",
+                code="RECOVERY_UNSUPPORTED",
+            )
+        session_id = _require_nonempty_str(
+            session_id, "TeachingSessionEngine.recover_session()"
+        )
+        state = self._load_session(session_id)
+        learner_id = state.learner_id
+        events_before = len(self._events(learner_id))
+        unresolved = self._unresolved_prepared_attempts(state)
+        if not unresolved:
+            return RecoveryReport(
+                session_id=session_id,
+                learner_id=learner_id,
+                status="ALREADY_CONSISTENT",
+                prepared_attempts=0,
+                recovered_attempts=0,
+                pending_attempt_ids=(),
+                error_codes=(),
+                events_appended=0,
+            )
+        recovered = 0
+        pending_ids: list[str] = []
+        error_codes: list[str] = []
+        for prepared in unresolved:
+            fresh = self._load_session(session_id)
+            if self._terminal_result(prepared.result_id) is not None:
+                recovered += 1
+                continue
+            if (
+                fresh.pending_item_id != prepared.item_id
+                or fresh.turn_index != prepared.turn_index
+            ):
+                code = "RECOVERY_STATE_INCONSISTENT"
+                error_codes.append(code)
+                pending_ids.append(prepared.attempt_id)
+                self._record_recovery_error(
+                    fresh,
+                    prepared,
+                    code,
+                    "session pending_item_id/turn_index does not match the prepared attempt",
+                )
+                continue
+            item = self._items_by_id.get(prepared.item_id)
+            if item is None:
+                code = "RECOVERY_UNKNOWN_ITEM"
+                error_codes.append(code)
+                pending_ids.append(prepared.attempt_id)
+                self._record_recovery_error(
+                    fresh, prepared, code, "the prepared item is not in the domain"
+                )
+                continue
+            try:
+                response = self._decode_prepared_response(prepared)
+                result = self._rescore_for_recovery(fresh, item, response, prepared)
+            except _RecoveryFailure as exc:
+                error_codes.append(exc.code)
+                pending_ids.append(prepared.attempt_id)
+                self._record_recovery_error(fresh, prepared, exc.code, exc.detail)
+                continue
+            try:
+                self._commit_result_turn(fresh, item, result)
+            except ConflictError as exc:
+                if self._terminal_result(prepared.result_id) is not None:
+                    recovered += 1
+                    continue
+                code = f"RECOVERY_{getattr(exc, 'code', 'CONFLICT')}"
+                error_codes.append(code)
+                pending_ids.append(prepared.attempt_id)
+                self._record_recovery_error(fresh, prepared, code, str(exc))
+                continue
+            except Exception as exc:  # noqa: BLE001 - fail closed with a reason
+                code = "RECOVERY_INTERNAL_ERROR"
+                error_codes.append(code)
+                pending_ids.append(prepared.attempt_id)
+                self._record_recovery_error(fresh, prepared, code, repr(exc))
+                continue
+            recovered += 1
+        if recovered == len(unresolved) and not error_codes:
+            status = "RECOVERED"
+        elif recovered == 0:
+            status = "FAILED"
+        else:
+            status = "PARTIAL"
+        return RecoveryReport(
+            session_id=session_id,
+            learner_id=learner_id,
+            status=status,
+            prepared_attempts=len(unresolved),
+            recovered_attempts=recovered,
+            pending_attempt_ids=tuple(pending_ids),
+            error_codes=tuple(error_codes),
+            events_appended=len(self._events(learner_id)) - events_before,
+        )
+
+    def recover_pending_turns(self, learner_id: str) -> list[RecoveryReport]:
+        """Recover every session of ``learner_id`` that has prepared attempts."""
+
+        if not self._supports_txn:
+            raise UnsupportedOperationError(
+                "recover_pending_turns(): the repository does not support "
+                "transactional teaching-turn commits",
+                code="RECOVERY_UNSUPPORTED",
+            )
+        learner_id = _require_nonempty_str(
+            learner_id, "TeachingSessionEngine.recover_pending_turns()"
+        )
+        list_sessions = getattr(self._repository, "list_sessions", None)
+        if not callable(list_sessions):
+            raise UnsupportedOperationError(
+                "recover_pending_turns(): the repository does not expose list_sessions()",
+                code="RECOVERY_UNSUPPORTED",
+            )
+        reports: list[RecoveryReport] = []
+        for session in list_sessions(learner_id):
+            if not isinstance(session, SessionState):
+                raise ValidationError(
+                    "recover_pending_turns(): list_sessions() returned a non-SessionState"
+                )
+            report = self.recover_session(session.session_id)
+            if report.prepared_attempts:
+                reports.append(report)
+        return reports
+
+    def _unresolved_prepared_attempts(
+        self, state: SessionState
+    ) -> list[_PreparedAttempt]:
+        attempts: list[_PreparedAttempt] = []
+        seen: set[str] = set()
+        for event in self._session_events(state):
+            if event.event_type != "ASSESSMENT_PREPARED":
+                continue
+            payload = event.payload
+            if not isinstance(payload, Mapping):
+                raise ValidationError(
+                    "corrupted ASSESSMENT_PREPARED event payload (not an object)"
+                )
+            attempt_id = payload.get("attempt_id")
+            if type(attempt_id) is not str or not attempt_id:
+                raise ValidationError(
+                    "corrupted ASSESSMENT_PREPARED event payload (missing attempt_id)"
+                )
+            if attempt_id in seen:
+                continue
+            seen.add(attempt_id)
+            prepared = self._decode_prepared(attempt_id, payload)
+            if self._terminal_result(prepared.result_id) is None:
+                attempts.append(prepared)
+        return attempts
+
+    def _decode_prepared_response(self, prepared: _PreparedAttempt):
+        kind = prepared.response_kind
+        canonical = prepared.canonical_response
+        if kind == "text":
+            return canonical
+        if kind == "structured":
+            try:
+                return json.loads(canonical)
+            except json.JSONDecodeError:
+                raise _RecoveryFailure(
+                    "RECOVERY_RESPONSE_CORRUPT",
+                    "persisted structured response is not valid JSON",
+                ) from None
+        return canonical
+
+    def _rescore_for_recovery(
+        self,
+        state: SessionState,
+        item: AssessmentItem,
+        response: Any,
+        prepared: _PreparedAttempt,
+    ) -> AssessmentResult:
+        try:
+            result = self._scorer.score(
+                item, state.learner_id, response, result_id=prepared.result_id
+            )
+        except Exception as exc:  # noqa: BLE001 - recovery must fail closed, not crash
+            raise _RecoveryFailure(
+                "RECOVERY_SCORER_ERROR", f"scorer raised {type(exc).__name__}"
+            ) from None
+        if not isinstance(result, AssessmentResult):
+            raise _RecoveryFailure(
+                "RECOVERY_SCORER_MISMATCH", "scorer returned a non-AssessmentResult"
+            )
+        if (
+            result.result_id != prepared.result_id
+            or result.item_id != prepared.item_id
+            or result.learner_id != state.learner_id
+        ):
+            raise _RecoveryFailure(
+                "RECOVERY_SCORER_MISMATCH",
+                "re-scored result identity differs from the persisted attempt "
+                f"(persisted result_id={prepared.result_id!r}, "
+                f"re-scored result_id={result.result_id!r})",
+            )
+        return result
+
+    def _record_recovery_error(
+        self,
+        state: SessionState,
+        prepared: _PreparedAttempt,
+        code: str,
+        detail: str,
+    ) -> None:
+        """Append one deterministic, explainable RECOVERY ``ERROR`` event."""
+
+        event_id = f"{_RECOVERY_ERROR_EVENT_PREFIX}{prepared.attempt_id}"
+        if self._repository.get_event(event_id) is not None:
+            return
+        payload = {
+            "stage": "RECOVERY",
+            "status": code,
+            "attempt_id": prepared.attempt_id,
+            "result_id": prepared.result_id,
+            "item_id": prepared.item_id,
+            "turn_index": prepared.turn_index,
+            "response_digest": prepared.response_digest,
+            "detail": str(detail)[:500],
+            "mastery_unchanged": True,
+            "session_unchanged": True,
+        }
+        for _attempt in range(2):
+            seq = self._next_event_seq(state.learner_id)
+            event = HistoryEvent(
+                event_id=event_id,
+                learner_id=state.learner_id,
+                session_id=state.session_id,
+                seq=seq,
+                event_type="ERROR",
+                payload=payload,
+                created_at=now_utc(),
+            )
+            try:
+                self._repository.append_event(event)
+                return
+            except ConflictError as exc:
+                if getattr(exc, "code", "") == _EVENT_SEQ_CONFLICT:
+                    continue
+                raise
+        return
 
     # -- convenience loop --------------------------------------------------
     def run_until_goal(

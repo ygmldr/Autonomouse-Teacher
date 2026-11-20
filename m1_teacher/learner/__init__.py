@@ -28,16 +28,19 @@ from .model import (
     MasteryPolicy,
     applied_result_ids,
 )
+from .repository import FAILPOINT_ENV
 from .repository import SCHEMA_VERSION as DB_SCHEMA_VERSION
-from .repository import SqliteRepository
+from .repository import SqliteRepository, session_version
 
 __all__ = [
     "EPOCH_TIMESTAMP",
     "OBSERVED_EVIDENCE",
     "DB_SCHEMA_VERSION",
+    "FAILPOINT_ENV",
     "LearningHistory",
     "MasteryModel",
     "MasteryPolicy",
     "SqliteRepository",
     "applied_result_ids",
+    "session_version",
 ]

@@ -237,6 +237,14 @@ def test_consecutive_correct_raise_mastery_exactly(
 def test_duplicate_result_id_updates_mastery_once(
     components: demo.Components, tmp_path: Path
 ) -> None:
+    """B-NEXT: a same-key/same-response retry is idempotent; a same-key *different*
+    response is a stable ``IDEMPOTENCY_CONFLICT`` (never silently returns the old
+    grade, never changes state).  The old assertion returned the first result for
+    the different-text submission; that silent behaviour is exactly the B3
+    data-isolation defect this PR closes, so the test now asserts the stronger,
+    non-weakened contract.
+    """
+
     repository, engine, _history, state = start_engine(
         components, tmp_path / "dup.sqlite", scorer=FixedStatusScorer("CORRECT")
     )
@@ -249,15 +257,26 @@ def test_duplicate_result_id_updates_mastery_once(
         snapshot = repository.get_snapshot(LEARNER)
         assert snapshot is not None
         revision = snapshot.revision
+        event_count = len(repository.list_events(LEARNER))
         assessed_count = sum(
             1 for event in repository.list_events(LEARNER) if event.event_type == "ASSESSED"
         )
+        # Same key + same response: exactly idempotent, zero new events.
         second = engine.submit_response(
-            state.session_id, action.item_id, "A (different text)", result_id="dup-result-1"
+            state.session_id, action.item_id, "A", result_id="dup-result-1"
         )
         assert second.to_dict() == first.to_dict()
+        assert len(repository.list_events(LEARNER)) == event_count
+        # Same key + different response: explicit idempotency conflict, no state
+        # change, and the old grade is not returned.
+        with pytest.raises(ConflictError) as excinfo:
+            engine.submit_response(
+                state.session_id, action.item_id, "A (different text)", result_id="dup-result-1"
+            )
+        assert excinfo.value.code == "IDEMPOTENCY_CONFLICT"
         again = repository.get_snapshot(LEARNER)
         assert again is not None and again.revision == revision
+        assert len(repository.list_events(LEARNER)) == event_count
         assert (
             sum(1 for event in repository.list_events(LEARNER) if event.event_type == "ASSESSED")
             == assessed_count
