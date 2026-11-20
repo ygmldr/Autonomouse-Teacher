@@ -42,5 +42,6 @@ used as PASS evidence.
 - **Prompt artifact manifest**: `m1_teacher/e2e_b5.py` records
   `implementation_commit=12f6290c43523d5c3930915fe18810adca8609a4` (last behavioral code SHA;
   the generation commit `9c383e5` only bumps this provenance constant + docs/README).
-- **Committed in**: the evidence commit immediately following generation (final PR5 SHA recorded in
-  `docs/M1_B_EVALUATION_REPORT.md` §13 and reported by Lead).
+- **Committed in**: evidence commit `580be70fd0f969706bce0f9c274c6f68ed08455c` (regenerated evidence
+  files + audit-index + raw); final docs/PR5 commit SHA is recorded in `docs/M1_B_EVALUATION_REPORT.md`
+  §13 and reported by Lead.

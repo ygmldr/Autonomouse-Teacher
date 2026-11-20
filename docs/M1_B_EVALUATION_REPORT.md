@@ -2,14 +2,14 @@
 
 | 字段 | 值 |
 |---|---|
-| 报告状态 | **FINAL_TREE_MEASURED（Owner 执行侧最终树实测）；独立 Reviewer 最终裁定待 Lead 指派 Reviewer 出具** |
+| 报告状态 | **FINAL_TREE_MEASURED + FINAL_REVIEW_P1_CLOSURE（Owner 执行侧）；最终独立评审 `PASS_WITH_ACTIONS`（P0=0/P1=3/P2=6），P1 修复待 Reviewer delta 复核** |
 | 报告版本 | `m1b.eval-report.v1`（2026-11-20 UTC） |
 | 工作区 / 分支 | `/root/m1b/pr5` / `b-next/pr5-e2e-eval` |
-| 最终集成树 | PR4 final `1de6ae6d3714ab815c47022e4c2cceee107db979`（`b-next/pr4-domain-ports`）合入 PR5 后的 merge commit **`861d147d…`**（`git rev-parse` 见 §13）；PR5 B5 实现提交 **`c420d19…`**；**PR5 最终 commit SHA 在本文档所在 commit 完成后由 Lead/报告回填**（文档不能引用自身 commit SHA；最终以 `git rev-parse b-next/pr5-e2e-eval` 为准） |
+| 最终集成树 | PR4 final `1de6ae6d3714ab815c47022e4c2cceee107db979` 合入 PR5 后的 merge commit **`861d147d…`**；最终行为代码 SHA **`12f6290c43523d5c3930915fe18810adca8609a4`**（P1-1 collector 修复）；P1-2 证据生成 SHA **`9c383e5870ba628c17cd695944878d2b631fd59d`**（tree `333828d…`，clean worktree）；**PR5 最终 commit SHA 在本文档所在 commit 完成后由 Lead/报告回填** |
 | 主基线 | `3e7afee077845a071cd364e93ab209cac20b2d5f` |
 | 环境 | 干净 `TMPDIR=$(mktemp -d)`（串行、无并发测试）；Linux 6.17.13-2-pve；Python 3.11.15（`/root/Autonomous Teacher/.venv/bin/python`）；pytest 9.2.0；bubblewrap 0.9.0；TZ=UTC；PYTHONHASHSEED 由 collector 记录 |
 | 证据包 | `docs/m1b_evidence/audit-index.jsonl`（append-only，含历史 16 条过渡快照记录 + 最终树条目；旧 EXECUTED_FAIL/NOT_RUN 记录保留） + `raw/**` + `e2e_b5_*.jsonl` + `e2e_b5_summary.json` |
-| 证据标签 | 本报告为 `OWNER_REPORTED` + `DETERMINISTIC`（Owner 本地真实命令/哈希）；各 PR Reviewer 结论标 `REVIEWER_REPORTED`（引用其报告）；B-PR5 独立评审 = `PENDING`（Lead 指派）；`B4-01/02/03` 已由 PR4 独立评审 `VERIFIED` |
+| 证据标签 | 本报告为 `OWNER_REPORTED` + `DETERMINISTIC`（Owner 本地真实命令/哈希）；各 PR Reviewer 结论标 `REVIEWER_REPORTED`；**B5-01 最终独立评审 = `PASS_WITH_ACTIONS`（P0=0/P1=3/P2=6）**，P1 修复已实现、待原 Reviewer delta 复核；`B4-01/02/03` 已由 PR4 独立评审 `VERIFIED` |
 | 边界 | **Offline synthetic only, not real teaching effect.** 不构成真人学习收益、真实 Provider/网络/Live/生产授权；不改变 M0 G4-H/G5/LiveGate/M0 决策 |
 
 ---
@@ -28,7 +28,8 @@
 | B-PR5 统一 E2E/评测 | Owner 最终树实测完成（本报告）；`B5-01` 最终独立评审 **`PENDING`（Lead 指派）** | Owner 最终树证据包；独立评审未出 |
 | X-01 无范围漂移 | Owner 侧 `DETERMINISTIC` 检查通过（final diff vs main = **268 files（268 A/0 M/0 D）**；相对 M1-A = **209 files**；保护路径 **0 命中**） | collector entry `X-01-scope-diff`（final 条目）；Reviewer 需重跑 |
 | X-02 无 Key/网络/付费 | Owner 侧 `DETERMINISTIC` 检查通过（网络 import **0**；`autoteacher_m0` 仅隔离断言/注释；无 Key/Provider；LiveGate 仍 BLOCKED） | collector entry `X-02-network-scan`（final 条目）；Reviewer 需重跑 |
-| **Owner 侧最终结论** | **`PENDING_INDEPENDENT_REVIEW`**（所有本地门通过；独立 Reviewer 关闭 B-PR5/B5-01 后，默认只允许 `PASS_FOR_M1B_OFFLINE_INTEGRATION_SCOPE`） | 本报告 §10/§11/§13 |
+| **最终独立评审（B5-01）** | **`PASS_WITH_ACTIONS`**（P0=0 / P1=3 / P2=6；报告 `docs/M1_B_FINAL_INDEPENDENT_REVIEW.md`，待 Reviewer commit 合入）；P1-1/P1-2/P1-3 修复见 §3.4/§8.1/§13 | `REVIEWER_REPORTED` + 本报告修复证据 |
+| **Owner 侧结论（修复后）** | **`PASS_WITH_ACTIONS → P1_CLOSED_PENDING_DELTA_REVIEW`**（不预填无条件 PASS；delta Reviewer 关闭 P1 后才允许 `PASS_FOR_M1B_OFFLINE_INTEGRATION_SCOPE`） | 本报告 §10/§11/§13 |
 
 ---
 
@@ -101,7 +102,7 @@ export TMPDIR=$(mktemp -d)
 M1B_REQUIRE_OS_SANDBOX=1 "$PY" -m pytest tests/m1_teacher -q -rs   # 939 passed, 0 skipped
 ```
 
-实测（P1-1 修复后）：clean archive 全量 **939 passed**；strict **939 passed / 0 skipped**（修复前为 `937 passed, 1 failed`，失败项为 collector 测试要求 `git_sha` 40-hex；现在无 `.git` 时明确 `git_sha=null`/`git_available=false`，见 `docs/M1_B_EVIDENCE_PACKET.md` §3.1）。
+实测（P1-1 修复后，`git archive 9c383e5…` 生成的无 `.git` archive）：全量 **939 passed in 105.06s**；strict **939 passed in 102.82s / 0 skipped**（修复前为 `937 passed, 1 failed`，失败项为 collector 测试要求 `git_sha` 40-hex；现在无 `.git` 时明确 `git_sha=null`/`git_available=false`，见 `docs/M1_B_EVIDENCE_PACKET.md` §3.1）。
 
 ## 4. B-PR5 统一 E2E 实测结果（最终树）
 
@@ -158,12 +159,12 @@ B5 统一 E2E：`pytest test_b5_e2e.py -q` → **11 passed in 13.04s**。
 
 | 内容 | 实测 |
 |---|---|
-| `audit-index.jsonl` | **append-only**：旧 16 条过渡快照记录保留（含旧 EXECUTED_FAIL/NOT_RUN 并标注旧窗口；其前缀 sha256 仍为 `11a9f5c3…`）+ 11 条最终树新条目，共 **27 条**；final hash `4b9a0d0e…`（§13） |
+| `audit-index.jsonl` | **append-only**：旧 27 条（含 16 条过渡快照 + 11 条 c420d19 窗口 final）全部字节保留（前 27 行 sha256 仍为 `4b9a0d0e…`；旧 16 条前缀仍为 `11a9f5c3…`）+ P1-2 新增 11 条 clean-worktree 条目，共 **38 条**；final hash `a11ce429…`（§8.1/§13） |
 | `raw/<run_id>/` | 每 run 的 `evidence.json` + `stdout.log` + `stderr.log`（合成数据、无 Key/PII/hidden expected） |
 | `e2e_b5_*.jsonl` | `cf` / `interview` / `cross_domain` / `freshness`；final hashes 见 §9 |
 | `e2e_b5_summary.json` | 固定 artifact_manifest（`implementation_commit=c420d19…`，`generated_at=2026-11-20T00:00:00Z`，`base_sha=3e7afee…`）；final hash 见 §9 |
 
-最终树 collector entries（P1-2 重新生成后以新条目为准；`status` 为执行状态，非产品 PASS）：`B5-01-full-suite`（939 passed）、`B1-05-os-sandbox-gate`（939 passed，0 skipped）、`B4-01-02-03-e2e`（18 passed：B4 E2E 9 + durability 9）、`B5-01-e2e`（11 passed）、`B1-05-certification`（33 passed / 112 hidden）、`B2-01-02-03-crash`（35 passed）、`B5-01-demo-double-run`（identical True）、`B4-01-demo-double-run`（identical True）、`X-01-scope-diff`、`X-02-network-scan`、`B5-01-evidence-artifacts`（全部 EXECUTED_PASS；旧 16 条保留）。
+最终树 collector entries（P1-2 重新生成后以新条目为准；`status` 为执行状态，非产品 PASS）：`B5-01-full-suite`（939 passed）、`B1-05-os-sandbox-gate`（939 passed，0 skipped）、`B4-01-02-03-e2e`（18 passed：B4 E2E 9 + durability 9）、`B5-01-e2e`（11 passed）、`B1-05-certification`（33 passed / 112 hidden）、`B2-01-02-03-crash`（35 passed）、`B5-01-demo-double-run`（identical True）、`B4-01-demo-double-run`（identical True）、`X-01-scope-diff`、`X-02-network-scan`、`B5-01-evidence-artifacts`（全部 EXECUTED_PASS；旧条目保留）。
 
 ## 9. 证据类与最终哈希
 
@@ -173,17 +174,17 @@ B5 统一 E2E：`pytest test_b5_e2e.py -q` → **11 passed in 13.04s**。
 | `e2e_b5_cross_domain.jsonl` | `c02723ec42e8ec76f3806719ffc6eb81fa38b677623cb982fd519e2eee35925c` |
 | `e2e_b5_freshness.jsonl` | `8a25de6e641313327e24f886abb1577105faae973da129f9ad49336b2a890332` |
 | `e2e_b5_interview.jsonl` | `8f3a16fc51771288c855fa94ab4cec978cf82c0864dd2aedf033c525d2f8452d` |
-| `e2e_b5_summary.json` | `b6e67eb71d4d1f9d4c20fe82a62e9b2eb620735be933746c33cee6a694f8fad4` |
+| `e2e_b5_summary.json`（P1-2 生成，manifest `implementation_commit=12f6290…`） | `a07cfe7ec06208bc3271e01eaaf62a6145c753bf175b23c844658c756d444053` |
 | B5 demo stdout（27 行） | `4d0e0c851f4ff4d745127932aa62fcfabeca47da2f7d23ae434cae1ab300a2fc` |
 | B4 demo `--json` stdout（513 行 / 15,340 bytes） | `b3231658a4ac12a49cd2ac57f4a3e8d9719fbf7476ca36a54e4d8f9eea72d905` |
-| `audit-index.jsonl` / `audit-index.json` | `4b9a0d0e013a5b78f39f3c604cf5dfe6c0a25346f5ef5562cd4381857e06dbec` / `05b4b9ebbed76cdef862cf638283a6a8fb65a2830cc4c6faccf7042d424d883c` |
+| `audit-index.jsonl` / `audit-index.json`（P1-2 后 38 条） | `a11ce42948d5dd43563a1bf6befa8bb7c8600ba3b73f9df32e345b07bc66ea80` / `8db875301cc10f5af3af4f038b42d50a43a9291ac50c96719f7fd9ce37fc34e5` |
 
 证据类标注：CF/interview/JD/freshness 输入与模拟结果 = `MOCK`；状态机/回放/哈希/门禁 = `DETERMINISTIC`；**学习效果/真实 Provider/网络/Live = `NOT_VERIFIED`/`NOT_RUN`**；本报告不含 `HUMAN_REVIEWED` 结论（由独立 Reviewer 出具）。
 
 ## 10. NOT_RUN / UNVERIFIED / BLOCKED（最终树残余）
 
-1. **B-PR5/B5-01 最终独立评审：`PENDING`（Lead 指派 Reviewer）**；本报告不预填最终 PASS。
-2. B-PR1 P1-2（宿主非 root principal）`NOT CLOSED`；B1-04 `PARTIAL`；真实用户 CODE **`BLOCKED`**。
+1. **B-PR5/B5-01 最终独立评审：`PASS_WITH_ACTIONS`（P0=0/P1=3/P2=6）；P1-1/P1-2/P1-3 已修复，delta 复核 `PENDING`**；本报告不预填无条件 PASS。
+2. B-PR1 P1-2：**实现 fail-closed 已存在**；**非 root 目标部署验收 `NOT_RUN`**；B1-04 `PARTIAL`；真实用户 CODE **`BLOCKED`**。
 3. B1-05 目标部署 latency/resource/非 root 验收 `NOT_RUN`；B1-02/03/06 target-deploy 复核 `NOT_RUN`。
 4. B2/B3 的残余 P2（恢复 ERROR 事件语义、legacy digest 边界等）以各自 review 文档为准，最终树未重判。
 5. 真实教学效果、真实学习者、真实模型/Provider、联网研究、真实 JD/简历：`NOT_VERIFIED`/`NOT_RUN`。
@@ -192,8 +193,8 @@ B5 统一 E2E：`pytest test_b5_e2e.py -q` → **11 passed in 13.04s**。
 
 ## 11. 默认 / 最终结论边界
 
-- Owner 最终树所有本地门通过且未触发 STOP；**最终裁定由独立 Reviewer 给出**。
-- 独立 Reviewer 关闭全部 Gate 后，默认只允许：**`PASS_FOR_M1B_OFFLINE_INTEGRATION_SCOPE`**。
+- Owner 最终树所有本地门通过；最终独立评审结论为 **`PASS_WITH_ACTIONS`**（P0=0，P1=3），**P1 修复已实现，delta Reviewer 复核 `PENDING`**。
+- delta Reviewer 关闭 P1 后，默认只允许：**`PASS_FOR_M1B_OFFLINE_INTEGRATION_SCOPE`**；在此之前不得声称无条件 PASS。
 - 该结论仅覆盖：离线、合成 fixtures、确定性/mock E2E、独立复跑证据齐全的 M1-B 集成范围。
 - **明确不包含**（不得暗示）：真人学习收益/教学效果；联网研究/招聘网站/真实 JD/简历；真实 Provider/LLM 能力；真实 OS 判题安全承诺；Live/LiveGate/授权/生产可用；M0 G4-H/G5/LiveGate/M0 决策变更。
 - 人类 Gate 不在本报告范围：H-01/H-02/H-03、G5、LiveGate、M0 决策保持各自状态；B 线无权解除。
@@ -222,14 +223,27 @@ sha256sum docs/m1b_evidence/e2e_b5_*.jsonl docs/m1b_evidence/e2e_b5_summary.json
 
 | 项 | 最终值 |
 |---|---|
-| 最终集成树 merge commit（PR4 final 合入 PR5） | `861d147d…`（`git rev-parse 861d147`；父：`1de6ae6d3714ab815c47022e4c2cceee107db979` PR4 final + PR5 `e3394ae`） |
-| PR5 B5 实现提交 | `c420d19390d87e0d3faa3f716c7b2a3904c36891`（e2e_b5 改为 teacher-visible learner script；artifact manifest `implementation_commit`） |
-| **PR5 最终 commit SHA** | **本报告所在 commit 完成后回填**（`git rev-parse b-next/pr5-e2e-eval`；由 Lead/报告记录） |
-| 最终树 `pytest tests/m1_teacher -q` | **939 passed in 102.72s**（clean TMPDIR，worktree） |
-| 最终树 strict `M1B_REQUIRE_OS_SANDBOX=1 … -q -rs` | **939 passed；0 skipped** |
-| **clean archive（无 `.git`）** | **939 passed**（P1-1 修复后；见 §3.4） |
-| 定向 | B5 11 / B4 9 / B4 durability 9 / certification 33（112/112） / crash 35 / collector 14 |
-| B5 demo/evidence 双跑 | stdout sha256 `4d0e0c85…`（27 行）；5 个 evidence 文件 byte-identical（hashes §9） |
-| `audit-index.jsonl`（append-only：旧 16 条前缀 sha256 保持 `11a9f5c3…` 不变 + 11 条 final 条目，共 27 条） | `4b9a0d0e013a5b78f39f3c604cf5dfe6c0a25346f5ef5562cd4381857e06dbec` |
-| `audit-index.json`（27 entries mirror，content == jsonl） | `05b4b9ebbed76cdef862cf638283a6a8fb65a2830cc4c6faccf7042d424d883c` |
-| 最终 Reviewer 裁定 | `PENDING`（Lead 指派；只允许 §11 的结论类型） |
+| 最终集成树 merge commit（PR4 final 合入 PR5） | `861d147d…`（`1de6ae6d…` PR4 final + PR5 分支） |
+| 最终行为代码 SHA（collector P1-1 修复） | `12f6290c43523d5c3930915fe18810adca8609a4` |
+| **P1-2 证据生成 SHA / tree** | **`9c383e5870ba628c17cd695944878d2b631fd59d` / `333828d38fe8988df6d4a9ef98715b5d0e9f06e3`**；生成开始时 `git status --porcelain` 空 |
+| P1-2 evidence 提交 / 本报告最终提交 | `580be70fd0f969706bce0f9c274c6f68ed08455c`（P1-2 evidence commit）/ **本文档所在最终 PR5 commit（SHA 由 Lead/交付记录回填；`git rev-parse b-next/pr5-e2e-eval`）** |
+| artifact manifest `implementation_commit` | `12f6290…`（最后行为代码 SHA；生成 commit `9c383e5` 仅更新该常量与文档） |
+| 最终树 `pytest tests/m1_teacher -q` | **939 passed in 102.72s**（Owner worktree）；P1-2 生成时 **939 passed in 102.96s** |
+| 最终树 strict `M1B_REQUIRE_OS_SANDBOX=1 … -q -rs` | **939 passed；0 skipped**（生成时 **939 passed in 103.03s，0 skipped**） |
+| clean archive（无 `.git`）全量 / strict | **939 passed in 105.06s / 939 passed in 102.82s（0 skipped）**（P1-1 修复后） |
+| 定向 | B5 11 / B4 9 + durability 9 / certification 33（112/112） / crash 35 / collector 15 |
+| B5 demo/evidence 双跑 | stdout sha256 `4d0e0c85…`（27 行）；5 文件 byte-identical（hashes §9） |
+| `audit-index.jsonl`（append-only，38 条：旧 27 + 新 11） | `a11ce42948d5dd43563a1bf6befa8bb7c8600ba3b73f9df32e345b07bc66ea80` |
+| `audit-index.json`（38 entries mirror） | `8db875301cc10f5af3af4f038b42d50a43a9291ac50c96719f7fd9ce37fc34e5` |
+| 最终独立评审裁定 | `PASS_WITH_ACTIONS`（P0=0/P1=3/P2=6）；**P1 fixes → delta review `PENDING`** |
+
+
+## 14. 最终评审 P1 关闭证据（Owner 侧；待 delta Reviewer 复核）
+
+| P1 | 关闭动作 | 本轮真实证据 |
+|---|---|---|
+| **P1-1** clean archive 可移植性 | collector 无 `.git` 时记录 `git_sha=null`/`git_available=false`/`git_sha_source="unavailable"`；支持显式 `--git-sha/--tree-sha`；新增 no-git 回归测试；文档 §3.1 | `git archive 9c383e5… \| tar -x`（无 `.git`）全量 **939 passed in 105.06s**（`sha256(/tmp/final_archive_full.txt)=217c04055d85ce127dd0827946aa28c4911d8c4690689c21b3a49a101575b823`）；strict **939 passed in 102.82s，0 skipped**（`sha256(/tmp/final_archive_strict.txt)=6b905e37de20d6c7379ab8d7ce8787f0ab057d43c4aebd5f12fb0240e8cc3804`）；回归测试 `test_collector_is_portable_in_a_no_git_archive_copy` 通过；旧失败 `test_collects_executed_pass_with_full_index_entry` 现接受 `git_available=false` |
+| **P1-2** 证据绑定最终树 | 生成前 clean worktree（`git status --porcelain` 空）；生成 SHA/tree 记入 README+§13；append-only 新增 11 条（38 条总），旧 27 条字节保留；manifest `implementation_commit=12f6290…` | generation proof `sha256(/tmp/p12_generation_proof.txt)=d1a2070a53a85f5070f0f3dda629e0f4f597bdf84cbb5137a41a68de5ff05125`；`audit-index.jsonl` `a11ce429…`（38 条；old-27 prefix `4b9a0d0e…` 不变）；`audit-index.json` `8db87530…`；B5 summary `a07cfe7e…`；新条目 28–38 全部 `EXECUTED_PASS`、`git_sha=9c383e5…`、`tree_sha=333828d…`、generation-start clean=true；evidence commit `580be70…` |
+| **P1-3** 报告数字/哈希/状态勘误 | X-01 改实测 268 files（268 A/0M/0D vs main；209 vs M1-A）；B4 demo 改 `b3231658…`/513 行/15,340B；分项计数改 939=913+26（B5 11 + collector 15）且合计一致；PR4 P1 标记“已合入”；PR1 P1-2 分栏、P1-3 脚本已接线/`.github` job `NOT_CONFIGURED`；clean archive 实测更新；PR5 最终评审状态更新 | 本报告 §3/§3.4/§5/§6/§7/§9/§13；collector `X-01-scope-diff` raw 实测 268/0 protected；`demo_b4` double-run hash `b3231658…`；`--collect-only` 939 |
+
+> 残余：最终独立评审为 `PASS_WITH_ACTIONS`；本次仅 Owner 侧关闭 P1 证据，**delta Reviewer 复核结论 `PENDING`**；实现报告数字由 m1a-contracts 后续更新（Lead 指派）。不得据此声称无条件 `PASS_FOR_M1B_OFFLINE_INTEGRATION_SCOPE`。
