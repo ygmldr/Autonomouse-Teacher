@@ -180,3 +180,49 @@ OCI filtered 新计数（rootfs 副本、显式 deselect 后）：total 1081 / p
 5. 本文件中的 TBD 只能由 Reviewer/维护者填写；Agent 不得代填 PASS。
 
 > 本文件为 DRAFT 占位；不改变任何冻结字节、不改变任何门状态、不预填 PASS。
+
+## 9. 集成阶段 Owner-measured 状态（append-only；非 Reviewer 终态）
+
+> 追加于集成阶段。**不修改**上文任何行、不预填 PASS；所有 `reviewer_final_status` 仍为 TBD。
+
+- 集成身份：`work/a-next` HEAD `d553bba4e0cee61410f5e08a462c4ead8e7862b9`（base `fd1d3a6d101f17e6a86d7c43f06c630326e3e3af`；Host 回归运行 HEAD `1dfb24c`，其后仅 docs-only addendum）。完整证据：`artifacts/a_next/integration/`（host-full.log/junit、node/、scanner-*.log、livegate.json、sqlite-probe.json、provenance.txt、summary.json）。
+- Host full：**1626 collected / 1601 passed / 7 failed / 18 skipped / 0 collection error**；7 failures 逐 nodeid = ENVIRONMENT_ONLY（6）/ EXISTING（1），**0 REAL_REGRESSION**（详见 `docs/A_NEXT_IMPLEMENTATION_REPORT.md` §2.1）。
+- Node TAP 36/36；Ruff 变更范围 All checks passed；Scanner self-test PASS、worktree 0、history 2（EXISTING LeadB m1_teacher sentinel）；LiveGate BLOCKED / 四入口 SECURITY_BLOCKED / strace 0；SQLite immutable 抽查通过。
+- OCI filtered = **NOT_RUN**（待 Lead 批准；计划登记 legacy 43 + explicit g4r_auth 26，不静默扩大）。
+
+### 9.1 A-NEXT 19 行 Owner-measured（Reviewer 终态仍 TBD）
+
+| case_id | owner_measured | evidence_ref | reviewer_final |
+|---|---|---|---|
+| A0-01 | PARTIAL | docs/A_NEXT_BRANCH_RECONCILIATION.md（已合并）；reviewer 独立确认待办 | TBD |
+| A0-02 | PARTIAL | 本文件 scaffold + §9；Reviewer 逐 ID 对账待办 | TBD |
+| A0-03 | PARTIAL | oci_guard/rootfs_guard 工具（hygiene 套件 38 passed）+ 本轮 Node/OCI 均用 rootfs 副本；"全程无 frozen --rootfs" 需 Reviewer 抽查 | TBD |
+| A1-01 | PARTIAL | A1 套件已合并；host full 中 a_next_auth 全绿（Reviewer 独立复测待办） | TBD |
+| A1-02 | PARTIAL | 同上（并发/crash 负例由 A1 套件覆盖；Reviewer 独立复测待办） | TBD |
+| A2-01 | NOT_RUN | 按 Reviewer/Lead 指示保持 NOT_RUN | TBD |
+| A2-02 | NOT_RUN | 同上 | TBD |
+| A2-03 | NOT_RUN | 同上 | TBD |
+| A3-01 | PARTIAL | docs/A_NEXT_REGISTRY_DECISION.md（UNVERIFIED + 补偿控制；Reviewer batch-2 PASS cond，终态待办） | TBD |
+| A3-02 | PARTIAL | 同上（攻击矩阵状态以 Reviewer 复核为准） | TBD |
+| A4-01 | NOT_RUN | Reviewer 独立 OCI 复跑 NOT_RUN（Owner L2 host 级 PASS） | TBD |
+| A4-02 | NOT_RUN | 同上 | TBD |
+| A4-03 | NOT_RUN | 同上 | TBD |
+| A5-01 | PARTIAL | packet v3 builder/verifier + mutation tests（37 passed）已合并；最终 Packet 未构建 | TBD |
+| A5-02 | PARTIAL | Host 7 例外已逐项文档化；OCI 69 deselect 待 OCI run 登记/Reviewer 签收 | TBD |
+| A6-01 | BLOCKED | HUMAN_REQUIRED；未部署/未签核 | TBD |
+| A6-02 | BLOCKED | HUMAN_REQUIRED；G5 未授权 | TBD |
+| X-01 | PARTIAL | 受保护文件 diff 仅 A1/A2 已审变更（见 report §1）；LeadB 侧 zero-touch 需联合确认 | TBD |
+| X-02 | PARTIAL | 0 real key/network；strace 0；LiveGate BLOCKED；仍需 Reviewer 独立确认 | TBD |
+
+### 9.2 旧 65 行
+
+- 保持冻结 CSV 原值，`reviewer_final_status` 全部仍为 TBD；本文件不预填任何 PASS。
+- 集成阶段产生的 Exception 归类（Host 7 项）与 OCI 待登记项见 `docs/A_NEXT_IMPLEMENTATION_REPORT.md` §2；Reviewer 逐项复跑后回填。
+
+### 9.3 事件与已知既有项
+
+- **INCIDENT_20261121**：v1 Packet 原始字节 LOST；恢复 provenance（backup tar `11172f02…`、rootfs `25491e45…`、deps `e07729d7…`）见 report §4；不得声明全程 NO_DRIFT/证据完整。
+- **EXISTING history finding**：`fixtures/m1_teacher/judge/sentinels/sentinels.json` 合成 sentinel（LeadB 线，masked）；并非 A-NEXT 改动文件；Reviewer batch-3 已在 main@3e7afee / fd1d3a6 / A2 三处复现。
+- **P2-A4-1**：evidence-index v2 路径键修正由 rrev6 addendum `0735d7b` 完成（evidence-index-v2 sha `bac7b550…`）。
+
+> 本 §9 为 Owner-measured 追加；Reviewer 独立复核后才可回填终态，Agent 不得代签。

@@ -206,3 +206,17 @@ G5 authorization：NOT ISSUED
 
 > **STOP**：本文件不授权任何部署/真实调用；等待维护者逐项签署。当前 `G4-H=NOT_AUTHORIZED`、`G5=BLOCKED`、
 > `LiveGate=BLOCKED`、`M0=DECISION_PENDING` 保持不变。
+
+## 9. 集成阶段 append-only 追加（2026-11-20 集成轮；不覆盖上文）
+
+> 本节为 append-only 追加，不改动上文任何行/签核栏。所有人类决策仍 **UNSIGNED**；状态常量不变。
+
+- **集成身份**：`work/a-next` HEAD `d553bba4e0cee61410f5e08a462c4ead8e7862b9`（base `fd1d3a6d101f17e6a86d7c43f06c630326e3e3af`；A1 e6f3aa6 / A2 c7eb74e / A0 bf312c8 / hygiene 7d7c0a5 / A6 13e39a4 / registry 748fd0a / packet ce914c1 / rrev6 95a020b + addendum 0735d7b 已按序合并）。Host 全量 1626/1601/7/18；Node 36/36；ruff 变更范围 pass；scanner/ LiveGate / SQLite 见 `docs/A_NEXT_IMPLEMENTATION_REPORT.md` §2。
+- **D-14 / BLK-07 / BLK-08 / BLK-09 状态（由 A1/A2 集成）**：代码已合并——P2-01 body `authorization_id` 交叉校验（A1）与 run-level Fake-only admission 接线（A2）；Reviewer batch-3 对 A2 给 **PASS（条件）**，独立 73 passed。**但仍 `UNSIGNED`**：人类签核栏不改；不得把代码合并当作 D-14 决策完成。A2 非阻断备注：被拒 payload 也消耗 ordinal（fail-closed；`effective_max_calls` 计 dispatch 尝试）、`_map_consume_reasons` 子串匹配较脆。
+- **A4/R-REV6**：Owner L2 host 级 PASS；Reviewer 独立 OCI 复跑 **NOT_RUN** → **A4-01..03 保持 NOT_RUN**；**A2-01..03 亦 NOT_RUN**（按 Reviewer/Lead 指示）。P2-A4-1 evidence-index v2 路径键修正已由 addendum `0735d7b` 记录（sha `bac7b550…`）。
+- **INCIDENT_20261121 披露**：2026-11-20T19:53Z 前后 `artifacts/` 被误删并自哈希验证副本恢复；恢复后 rootfs `25491e45…`、deps `e07729d7…`；**v1 Packet 原始字节 LOST**（不可再核验），v2 仅 HISTORICAL_REFERENCE；不得声明“全程 NO_DRIFT/证据完整”。防再发措施见 `docs/A_NEXT_G4H1_DEPLOYMENT_RUNBOOK.md` §16。
+- **既有 history finding**：`fixtures/m1_teacher/judge/sentinels/sentinels.json` 的合成 sentinel 历史 blob（LeadB 线，masked）被 scanner history 模式扫到；属 **EXISTING/ENVIRONMENT**，非 A-NEXT/A2 回归（Reviewer batch-3 三处复现）。
+- **OCI filtered 联合回归 NOT_RUN**（等 Lead 批准）；最终 Packet v3 未构建（等集成冻结 SHA/staging 清单）；`B03/E5-P04` 仍 UNVERIFIED；G4-H-01..06 / G5 仍 NOT AUTHORIZED。
+- **请维护者决策**（仍为空栏）：D-14 P2-01/P2-02 处置、D-15..D-22、A4/A2 的 NOT_RUN 结论接受与否、incident/EXISTING finding 的处理方式。Agent 不得代填。
+
+> 本节追加不改变任何签核状态；STOP，等待维护者。

@@ -275,3 +275,26 @@ TLS 证书链/主机名校验且不可关闭；DNS 固定解析/受控 resolver�
 
 本 Runbook 执行到 **S9 维护者签名前一步**必须 STOP；S11 需要新的、单独的人类签署 G5 单次授权。
 当前默认状态：**未授权、未部署、未调用、LiveGate=BLOCKED、M0=DECISION_PENDING**。
+
+## 16. 集成阶段 append-only 追加：环境事件与防再发（不覆盖上文）
+
+> 本节为 append-only 追加；本 Runbook 仍是**未执行设计稿**，不构成部署/授权。
+
+### 16.1 INCIDENT_20261121（环境事件）
+
+- 2026-11-20T19:53Z 前后 repo `artifacts/` 被误删，随后自哈希验证副本恢复：backup tar sha256 `11172f0268cdf2dc2bde08e90d9d93c0a444b134f8eaab9a712057c9d5159d42`；恢复后 rootfs canonical `25491e45…`、deps canonical `e07729d7…`（与冻结声明一致）。
+- **v1 Packet 原始字节 LOST**（不可再独立核验）；v2 Packet 仅历史引用且未修改字节。事故与恢复详见 `docs/A_NEXT_ENVIRONMENT_INCIDENT.md`；**不得**声明“全程 NO_DRIFT/证据完整”。
+
+### 16.2 部署/测试前强制防再发检查（P0）
+
+1. **永远禁止** `podman run --rootfs <frozen rootfs>`；冻结 rootfs 只能被只读哈希/·识别。所有容器运行使用 `cp -a` 的工作副本（运行后删除）。
+2. 预检/运行守卫：`scripts/a_next/oci_guard.py`（拒绝 frozen `--rootfs`、输出目录预检、单 writer、T0/T1 漂移 STOP、env 脱敏）、`scripts/a_next/rootfs_guard.py`（权限/只读挂载/测试 uid 不可写）、`scripts/a_next/ci_guard.py`（分支来源/受保护文件/H0 cherry-pick/未授权 merge）。
+3. 每批次仅一个 writer + 全新独占 evidence 目录（不得复用旧 evidence/JUnit 路径）；批前/批后 frozen rootfs canonical SHA 对比（`25491e45…`），漂移即 STOP 并保全证据。
+4. 不静默扩大 OCI deselect：legacy 43 + explicit `tests/integration/g4r_auth`（26，环境类）必须在矩阵/报告登记原因、host 覆盖与缺失真 OCI 用例，并由 Reviewer 签收。
+5. 新证据/新 Packet 用**新身份**（如 `review-packet-a-next-v3-<impl_sha>`），不覆盖 v1/v2 与旧 Review 字节；最终 Packet 必须内嵌 INCIDENT_20261121 披露与恢复 provenance。
+6. 任何 `artifacts/` 删除/移动前先停所有容器与测试 writer，并确认已有哈希验证备份。
+
+### 16.3 不改变的结论
+
+- 本 Runbook 仍未执行；人类信任根/Key Broker/Egress/Watchdog/E5-Full/G5 均未部署、未授权；`LiveGate=BLOCKED`、`G4-H=NOT_AUTHORIZED`、`G5=BLOCKED`、`G6=NOT_RUN`、`M0=DECISION_PENDING` 不变。
+- 集成阶段 Host/Node 证据、A1/A2 代码合并**不构成**部署批准或人类签核。
