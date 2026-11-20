@@ -17,7 +17,7 @@ extensions required for crash-consistent state + history updates:
 ``ensure_learner(learner_id)``
     Explicitly register a learner row (writes otherwise auto-provision it).
 
-Schema (``schema_meta.version == 1``)
+Schema (``schema_meta.version == 2``)
 -------------------------------------
 * ``schema_meta(version)`` — one row with the schema version; opening a
   database written by an unsupported/newer version fails closed.
@@ -28,6 +28,13 @@ Schema (``schema_meta.version == 1``)
 * ``goals(goal_id PK, learner_id -> learners, objective_id, status, goal_json,
   created_at)``
 * ``sessions(session_id PK, learner_id -> learners, state_json, updated_at)``
+* ``result_scopes(result_id PK, scope_version, learner_id, session_id,
+  item_id, turn_index, request_digest, status, attempt_id, result_event_id,
+  origin, created_at, updated_at)`` — B-NEXT (B-PR3) scoped-idempotency index.
+  Additive table only: existing ``history_events`` rows are never rewritten.
+  Existing v1 databases are migrated by **adding** this table and backfilling
+  metadata rows from the append-only event log (see ``_backfill_legacy_scopes``);
+  opening a newer/unknown schema version still fails closed.
 
 ``PRAGMA journal_mode=WAL``, ``PRAGMA foreign_keys=ON`` and a busy timeout are
 enabled on every connection.  Writes use ``BEGIN IMMEDIATE`` transactions.
@@ -111,25 +118,44 @@ import os
 import re
 import signal
 import sqlite3
-from collections.abc import Iterator, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from ..contracts.errors import ConflictError, NotFoundError, ValidationError
+from ..contracts.errors import (
+    IDEMPOTENCY_CONFLICT,
+    ConflictError,
+    NotFoundError,
+    ValidationError,
+)
 from ..contracts.types import (
+    AssessmentResult,
     HistoryEvent,
     LearnerGoal,
     LearnerSnapshot,
     SessionState,
     now_utc,
 )
+from ..idempotency import (
+    CONFLICT_REASON_CONCURRENT,
+    CONFLICT_REASON_ITEM,
+    CONFLICT_REASON_REQUEST_DIGEST,
+    CONFLICT_REASON_RESULT_ID_SCOPE,
+    CONFLICT_REASON_TURN,
+    IDEMPOTENCY_POLICY_VERSION,
+    SCOPE_VERSION,
+    ResultScope,
+    ScopeMetadata,
+    default_attempt_id,
+    validate_result_id,
+)
 
 __all__ = ["FAILPOINT_ENV", "SCHEMA_VERSION", "SqliteRepository", "session_version"]
 
-SCHEMA_VERSION = 1
-"""Current on-disk schema version."""
+SCHEMA_VERSION = 2
+"""Current on-disk schema version (v2 = B-PR3 scoped idempotency table)."""
 
 _TS_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
 _TS_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
@@ -243,6 +269,31 @@ _TABLE_SQL: tuple[str, ...] = (
        )""",
     "CREATE INDEX IF NOT EXISTS idx_sessions_learner_updated "
     "ON sessions(learner_id, updated_at)",
+)
+
+
+#: Additive v2 schema objects (B-PR3 scoped idempotency).  Created on every open
+#: with ``IF NOT EXISTS`` (self-healing), never altering v1 tables.
+_RESULT_SCOPES_SQL: tuple[str, ...] = (
+    """CREATE TABLE IF NOT EXISTS result_scopes (
+           result_id TEXT PRIMARY KEY,
+           scope_version TEXT NOT NULL,
+           learner_id TEXT NOT NULL REFERENCES learners(learner_id),
+           session_id TEXT NOT NULL,
+           item_id TEXT NOT NULL,
+           turn_index INTEGER NOT NULL CHECK (turn_index >= -1),
+           request_digest TEXT NOT NULL,
+           status TEXT NOT NULL CHECK (status IN ('PREPARED', 'TERMINAL')),
+           attempt_id TEXT NOT NULL,
+           result_event_id TEXT,
+           origin TEXT NOT NULL DEFAULT 'v1' CHECK (origin IN ('v1', 'legacy')),
+           created_at TEXT NOT NULL,
+           updated_at TEXT NOT NULL
+       )""",
+    "CREATE INDEX IF NOT EXISTS idx_result_scopes_scope "
+    "ON result_scopes(learner_id, session_id, item_id, turn_index)",
+    "CREATE INDEX IF NOT EXISTS idx_result_scopes_session "
+    "ON result_scopes(learner_id, session_id, status)",
 )
 
 
@@ -411,21 +462,145 @@ class SqliteRepository:
         self._conn.execute("PRAGMA synchronous=NORMAL")
 
     def initialize_schema(self) -> None:
-        """Create/migrate the schema (idempotent; version mismatch fails closed)."""
+        """Create/migrate the schema (idempotent; unsupported versions fail closed).
+
+        v1 -> v2 migration is **additive only**: it creates the
+        ``result_scopes`` table/indexes (``CREATE ... IF NOT EXISTS``) and
+        backfills scope metadata rows from the append-only ``history_events``
+        log.  It never updates/deletes/rewrites existing events, snapshots,
+        goals or sessions.  A failure rolls the whole migration back and the
+        repository is closed by ``__init__`` (no half-migrated database is
+        left usable).  Unknown/newer schema versions raise ``ValidationError``.
+        """
 
         with self._write_transaction() as conn:
             for statement in _TABLE_SQL:
                 conn.execute(statement)
             row = conn.execute("SELECT version FROM schema_meta LIMIT 1").fetchone()
             if row is None:
+                for statement in _RESULT_SCOPES_SQL:
+                    conn.execute(statement)
                 conn.execute("INSERT INTO schema_meta(version) VALUES (?)", (SCHEMA_VERSION,))
+                return
+            found = row["version"]
+            if type(found) is not int:
+                raise ValidationError(
+                    "SqliteRepository(): unsupported on-disk schema version "
+                    f"{found!r} (this build supports {SCHEMA_VERSION})"
+                )
+            if found == SCHEMA_VERSION:
+                # Self-heal a v2 database whose additive table is missing
+                # (e.g. a partially restored backup); never downgrade.
+                for statement in _RESULT_SCOPES_SQL:
+                    conn.execute(statement)
+                return
+            if found == 1:
+                for statement in _RESULT_SCOPES_SQL:
+                    conn.execute(statement)
+                self._backfill_legacy_scopes(conn)
+                conn.execute("UPDATE schema_meta SET version = ?", (SCHEMA_VERSION,))
+                return
+            raise ValidationError(
+                "SqliteRepository(): unsupported on-disk schema version "
+                f"{found!r} (this build supports {SCHEMA_VERSION}; "
+                "v1 databases are migrated additively, newer/unknown versions fail closed)"
+            )
+
+    @staticmethod
+    def _backfill_legacy_scopes(conn: sqlite3.Connection) -> None:
+        """Backfill ``result_scopes`` metadata from append-only legacy events.
+
+        This is metadata derivation, not history rewriting: ``history_events``
+        is only read.  For every ``ASSESSED``/``ERROR`` event that carries a
+        self-contained ``result`` object we insert an ``origin='legacy'`` row.
+        Turn/digest are recovered from the matching ``ASSESSMENT_PREPARED`` or
+        ``RESPONSE_SUBMITTED`` event when possible; otherwise the row is marked
+        unproven (``turn_index=-1``, ``request_digest='legacy:unproven'``) and a
+        later replay is rejected unless an explicit migration tool opts in.
+        Rows are inserted with ``INSERT OR IGNORE`` so the migration is
+        idempotent and never overwrites v1 rows.
+        """
+
+        submitted: dict[tuple[str, str, str], dict[str, Any]] = {}
+        prepared: dict[tuple[str, str, str], dict[str, Any]] = {}
+        for row in conn.execute(
+            "SELECT learner_id, session_id, event_type, payload_json FROM history_events "
+            "WHERE event_type IN ('RESPONSE_SUBMITTED', 'ASSESSMENT_PREPARED')"
+        ).fetchall():
+            payload = _decode_json_object(
+                row["payload_json"], f"legacy attempt event in session {row['session_id']!r}"
+            )
+            result_id = payload.get("result_id")
+            if type(result_id) is not str or not result_id:
+                continue
+            key = (str(row["learner_id"]), str(row["session_id"]), result_id)
+            if row["event_type"] == "ASSESSMENT_PREPARED":
+                prepared.setdefault(key, payload)
             else:
-                found = row["version"]
-                if type(found) is not int or found != SCHEMA_VERSION:
-                    raise ValidationError(
-                        "SqliteRepository(): unsupported on-disk schema version "
-                        f"{found!r} (this build supports {SCHEMA_VERSION})"
-                    )
+                submitted.setdefault(key, payload)
+        terminal_rows = conn.execute(
+            "SELECT event_id, learner_id, session_id, payload_json, created_at "
+            "FROM history_events WHERE event_type IN ('ASSESSED', 'ERROR') "
+            "ORDER BY learner_id, seq"
+        ).fetchall()
+        for row in terminal_rows:
+            payload = _decode_json_object(
+                row["payload_json"], f"legacy terminal event {row['event_id']!r}"
+            )
+            raw_result = payload.get("result")
+            if not isinstance(raw_result, Mapping):
+                # Recovery/audit ERROR events carry no grading result; they are
+                # not terminal assessment results and must not be indexed.
+                continue
+            result_id = payload.get("result_id", raw_result.get("result_id"))
+            item_id = payload.get("item_id", raw_result.get("item_id"))
+            if type(result_id) is not str or not result_id.strip():
+                raise ValidationError(
+                    f"legacy result event {row['event_id']!r} has no result_id"
+                )
+            if type(item_id) is not str or not item_id.strip():
+                raise ValidationError(
+                    f"legacy result event {row['event_id']!r} has no item_id"
+                )
+            learner_id = str(row["learner_id"])
+            session_id = str(row["session_id"])
+            key = (learner_id, session_id, result_id)
+            attempt = prepared.get(key) or submitted.get(key)
+            turn_index = -1
+            request_digest_marker = "legacy:unproven"
+            attempt_id = "legacy:attempt:" + hashlib.sha256(
+                f"{learner_id}{session_id}{item_id}".encode("utf-8")
+            ).hexdigest()[:32]
+            if attempt is not None:
+                raw_turn = attempt.get("turn_index", attempt.get("attempt"))
+                if type(raw_turn) is int and raw_turn >= 0:
+                    turn_index = raw_turn
+                raw_digest = attempt.get("response_digest")
+                if type(raw_digest) is str and len(raw_digest) == 16:
+                    request_digest_marker = f"legacy:{raw_digest}"
+                raw_attempt_id = attempt.get("attempt_id")
+                if type(raw_attempt_id) is str and raw_attempt_id:
+                    attempt_id = raw_attempt_id
+            conn.execute(
+                "INSERT OR IGNORE INTO result_scopes("
+                "result_id, scope_version, learner_id, session_id, item_id, turn_index, "
+                "request_digest, status, attempt_id, result_event_id, origin, "
+                "created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, 'TERMINAL', ?, ?, "
+                "'legacy', ?, ?)",
+                (
+                    result_id,
+                    SCOPE_VERSION,
+                    learner_id,
+                    session_id,
+                    item_id,
+                    turn_index,
+                    request_digest_marker,
+                    attempt_id,
+                    str(row["event_id"]),
+                    str(row["created_at"]),
+                    str(row["created_at"]),
+                ),
+            )
 
     @property
     def db_path(self) -> str | Path:
@@ -786,8 +961,16 @@ class SqliteRepository:
         snapshot: LearnerSnapshot | None = None,
         next_session: SessionState,
         goal: LearnerGoal | None = None,
+        scope: ResultScope | None = None,
     ) -> list[bool]:
         """Atomically commit one teaching turn (events + snapshot + goal + session).
+
+        ``scope`` is the optional B-PR3 scoped-idempotency key of this turn.  When
+        supplied, the ``result_scopes`` row is written in the **same transaction**
+        (PREPARED on transaction A, TERMINAL on transaction B); uniqueness / CAS
+        mismatches raise ``ConflictError`` code ``IDEMPOTENCY_CONFLICT`` and roll
+        the whole turn back.  Omitting ``scope`` keeps the B-PR2 behaviour for
+        callers that do not use scoped idempotency.
 
         See the module docstring for the ordering, the compare-and-swap session
         version, the fail-closed error codes and the real-process crash
@@ -862,6 +1045,23 @@ class SqliteRepository:
                     f"{goal.goal_id!r} does not match the session goal "
                     f"{next_session.goal_id!r}"
                 )
+        if scope is not None:
+            if not isinstance(scope, ResultScope):
+                raise ValidationError(
+                    "SqliteRepository.commit_teaching_turn(scope=...): expected a "
+                    "ResultScope instance or None"
+                )
+            if scope.learner_id != learner_id:
+                raise ValidationError(
+                    "SqliteRepository.commit_teaching_turn(): scope.learner_id "
+                    f"{scope.learner_id!r} does not match {learner_id!r}"
+                )
+            if scope.session_id != session_id:
+                raise ValidationError(
+                    "SqliteRepository.commit_teaching_turn(): scope.session_id "
+                    f"{scope.session_id!r} does not match {session_id!r}"
+                )
+        turn_scope = scope
         scope = (
             "prepare"
             if any(event.event_type == _PREPARED_EVENT_TYPE for event in normalized_events)
@@ -919,6 +1119,8 @@ class SqliteRepository:
                 self._ensure_learner_row(conn, learner_id, event.created_at)
                 self._insert_event(conn, event)
                 _crash_failpoint(f"after_event_insert_{index}", scope)
+            if turn_scope is not None:
+                self._write_scope_row(conn, turn_scope, normalized_events)
             if snapshot is not None:
                 _crash_failpoint("before_snapshot", scope)
                 # A teaching turn must strictly advance the materialised
@@ -1178,6 +1380,284 @@ class SqliteRepository:
             "SELECT learner_id FROM learners ORDER BY learner_id ASC"
         ).fetchall()
         return [row["learner_id"] for row in rows]
+
+    # -- B-NEXT (B-PR3): scoped idempotency ---------------------------------
+
+    def supports_scoped_idempotency(self) -> bool:
+        """True: this repository implements the scoped-idempotency extension."""
+
+        return True
+
+    def find_scope_owner(self, result_id: str) -> ScopeMetadata | None:
+        """Return scope **metadata** for ``result_id`` (never the grading result).
+
+        Metadata-only by design: cross-scope conflict decisions and error
+        details can be built without ever loading another learner's or session's
+        ``AssessmentResult``.
+        """
+
+        result_id = validate_result_id(
+            result_id, "SqliteRepository.find_scope_owner(result_id)"
+        )
+        self._ensure_open()
+        row = self._conn.execute(
+            "SELECT result_id, scope_version, learner_id, session_id, item_id, turn_index, "
+            "request_digest, status, attempt_id, result_event_id, origin, created_at, "
+            "updated_at FROM result_scopes WHERE result_id = ?",
+            (result_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        return self._scope_metadata(row)
+
+    def find_result_in_scope(self, scope: ResultScope) -> AssessmentResult | None:
+        """Return the terminal result **only** for a fully matching v1 scope.
+
+        * no row / PREPARED / legacy-origin row -> ``None`` (the engine handles
+          legacy adoption separately, with digest proof);
+        * a row for the same ``result_id`` but a different
+          learner/session/item/turn/digest -> ``ConflictError`` code
+          ``IDEMPOTENCY_CONFLICT`` with metadata-only details (no foreign data);
+        * TERMINAL row -> the stored result, re-validated against the scope
+          (learner and item must match; otherwise fail closed).
+        """
+
+        if not isinstance(scope, ResultScope):
+            raise ValidationError(
+                "SqliteRepository.find_result_in_scope(scope=...): expected a ResultScope"
+            )
+        self._ensure_open()
+        row = self._conn.execute(
+            "SELECT result_id, scope_version, learner_id, session_id, item_id, turn_index, "
+            "request_digest, status, attempt_id, result_event_id, origin, created_at, "
+            "updated_at FROM result_scopes WHERE result_id = ?",
+            (scope.result_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        owner = self._scope_metadata(row)
+        if owner.origin != "v1":
+            # Legacy rows are adopted by the engine's legacy adapter (which
+            # requires learner/session/item match and digest proof); this
+            # scoped API never returns them directly.
+            return None
+        reason = self._scope_mismatch_reason(owner, scope)
+        if reason is not None:
+            self._raise_idempotency_conflict(reason, scope)
+        if owner.status != "TERMINAL":
+            return None
+        if owner.result_event_id is None:  # pragma: no cover - schema invariant
+            raise ValidationError(
+                f"stored scope row for result_id {scope.result_id!r} is TERMINAL but has "
+                "no terminal_event_id"
+            )
+        event = self.get_event_for_learner(owner.learner_id, owner.result_event_id)
+        if event is None:  # pragma: no cover - corrupted index
+            raise ValidationError(
+                f"stored scope row for result_id {scope.result_id!r} references a missing "
+                "terminal event"
+            )
+        if event.session_id != owner.session_id:
+            raise ValidationError(
+                f"stored terminal event for result_id {scope.result_id!r} belongs to a "
+                "different session than its scope row"
+            )
+        raw = event.payload.get("result")
+        if not isinstance(raw, Mapping):
+            raise ValidationError(
+                f"stored terminal event for result_id {scope.result_id!r} has no result payload"
+            )
+        try:
+            result = AssessmentResult.from_dict(dict(raw))
+        except ValidationError:
+            raise ValidationError(
+                f"stored assessment result {scope.result_id!r} is corrupted"
+            ) from None
+        if result.learner_id != scope.learner_id or result.item_id != scope.item_id:
+            raise ValidationError(
+                f"stored assessment result for result_id {scope.result_id!r} does not match "
+                "its scope owner/item; refusing to return cross-scope data"
+            )
+        return result
+
+    def get_event_for_learner(
+        self, learner_id: str, event_id: str
+    ) -> HistoryEvent | None:
+        """Learner-filtered event lookup (used by the legacy adoption adapter).
+
+        Returns ``None`` when the event does not exist **or belongs to another
+        learner**, so callers cannot accidentally read foreign history through a
+        global event id.
+        """
+
+        learner_id = _require_nonempty_str(
+            learner_id, "SqliteRepository.get_event_for_learner(learner_id)"
+        )
+        event_id = _require_nonempty_str(
+            event_id, "SqliteRepository.get_event_for_learner(event_id)"
+        )
+        self._ensure_open()
+        row = self._conn.execute(
+            "SELECT event_id, learner_id, session_id, seq, event_type, payload_json, "
+            "created_at FROM history_events WHERE event_id = ? AND learner_id = ?",
+            (event_id, learner_id),
+        ).fetchone()
+        if row is None:
+            return None
+        return _event_from_row(row)
+
+    # -- scoped-idempotency internals ---------------------------------------
+
+    @staticmethod
+    def _scope_metadata(row: sqlite3.Row) -> ScopeMetadata:
+        return ScopeMetadata(
+            learner_id=str(row["learner_id"]),
+            session_id=str(row["session_id"]),
+            item_id=str(row["item_id"]),
+            turn_index=int(row["turn_index"]),
+            result_id=str(row["result_id"]),
+            request_digest=str(row["request_digest"]),
+            status=str(row["status"]),
+            attempt_id=str(row["attempt_id"]),
+            result_event_id=(
+                None if row["result_event_id"] is None else str(row["result_event_id"])
+            ),
+            origin=str(row["origin"]),
+            created_at=str(row["created_at"]),
+            updated_at=str(row["updated_at"]),
+        )
+
+    @staticmethod
+    def _scope_mismatch_reason(
+        owner: ScopeMetadata, scope: ResultScope
+    ) -> str | None:
+        if owner.learner_id != scope.learner_id or owner.session_id != scope.session_id:
+            return CONFLICT_REASON_RESULT_ID_SCOPE
+        if owner.item_id != scope.item_id:
+            return CONFLICT_REASON_ITEM
+        if owner.request_digest != scope.request_digest:
+            # Deterministic precedence: a different response for the same token
+            # is the most useful reason even when the (advanced) turn also
+            # differs; a same-response replay in a later turn reports TURN.
+            return CONFLICT_REASON_REQUEST_DIGEST
+        if owner.turn_index != scope.turn_index:
+            return CONFLICT_REASON_TURN
+        return None
+
+    @staticmethod
+    def _raise_idempotency_conflict(
+        reason: str, scope: ResultScope, *, message: str | None = None
+    ) -> None:
+        # details contain ONLY the requester's own scope + stable reason/policy
+        # version; never the current owner's learner/session/item/grading data.
+        raise ConflictError(
+            message
+            or (
+                "idempotency conflict for result_id "
+                f"{scope.result_id!r} ({reason}); the key is bound to a different "
+                "request/scope"
+            ),
+            code=IDEMPOTENCY_CONFLICT,
+            details={
+                "reason": reason,
+                "requested_scope": scope.to_dict(),
+                "policy_version": IDEMPOTENCY_POLICY_VERSION,
+            },
+        )
+
+    def _scope_row(
+        self, conn: sqlite3.Connection, result_id: str
+    ) -> sqlite3.Row | None:
+        return conn.execute(
+            "SELECT result_id, scope_version, learner_id, session_id, item_id, turn_index, "
+            "request_digest, status, attempt_id, result_event_id, origin, created_at, "
+            "updated_at FROM result_scopes WHERE result_id = ?",
+            (result_id,),
+        ).fetchone()
+
+    def _write_scope_row(
+        self,
+        conn: sqlite3.Connection,
+        scope: ResultScope,
+        events: Sequence[HistoryEvent],
+    ) -> None:
+        """Insert/advance the scoped-idempotency row inside the turn transaction."""
+
+        if not isinstance(scope, ResultScope):
+            raise ValidationError(
+                "SqliteRepository.commit_teaching_turn(scope=...): expected ResultScope"
+            )
+        terminal_event: HistoryEvent | None = None
+        for event in events:
+            if event.event_type not in ("ASSESSED", "ERROR"):
+                continue
+            payload = event.payload
+            if isinstance(payload, Mapping) and isinstance(payload.get("result"), Mapping):
+                terminal_event = event
+                break
+        attempt_id = default_attempt_id(
+            scope.learner_id, scope.session_id, scope.item_id, scope.turn_index
+        )
+        if events:
+            created_at = events[0].created_at
+            updated_at = events[-1].created_at
+        else:  # pragma: no cover - the engine always commits at least one event
+            created_at = updated_at = now_utc()
+        row = self._scope_row(conn, scope.result_id)
+        if row is None:
+            status = "TERMINAL" if terminal_event is not None else "PREPARED"
+            try:
+                conn.execute(
+                    "INSERT INTO result_scopes("
+                    "result_id, scope_version, learner_id, session_id, item_id, turn_index, "
+                    "request_digest, status, attempt_id, result_event_id, origin, "
+                    "created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'v1', ?, ?)",
+                    (
+                        scope.result_id,
+                        SCOPE_VERSION,
+                        scope.learner_id,
+                        scope.session_id,
+                        scope.item_id,
+                        scope.turn_index,
+                        scope.request_digest,
+                        status,
+                        attempt_id,
+                        None if terminal_event is None else terminal_event.event_id,
+                        created_at,
+                        updated_at,
+                    ),
+                )
+            except sqlite3.IntegrityError:  # pragma: no cover - serialized by BEGIN IMMEDIATE
+                self._raise_idempotency_conflict(CONFLICT_REASON_CONCURRENT, scope)
+            return
+        owner = self._scope_metadata(row)
+        if owner.origin == "legacy":
+            self._raise_idempotency_conflict(
+                CONFLICT_REASON_RESULT_ID_SCOPE,
+                scope,
+                message=(
+                    f"result_id {scope.result_id!r} is already bound to a legacy "
+                    "(pre-scope) terminal result; it cannot be reused"
+                ),
+            )
+        reason = self._scope_mismatch_reason(owner, scope)
+        if reason is not None:
+            self._raise_idempotency_conflict(reason, scope)
+        if terminal_event is None:
+            # Transaction-A retry with an identical scope/digest: idempotent
+            # no-op (never regress a TERMINAL row back to PREPARED).
+            return
+        if owner.status == "TERMINAL":
+            # Idempotent repeat of an already-terminal commit.  The duplicate
+            # event ids would have failed closed before reaching this point.
+            return
+        cursor = conn.execute(
+            "UPDATE result_scopes SET status = 'TERMINAL', result_event_id = ?, "
+            "updated_at = ? WHERE result_id = ? AND status = 'PREPARED'",
+            (terminal_event.event_id, updated_at, scope.result_id),
+        )
+        if cursor.rowcount != 1:  # pragma: no cover - serialized by BEGIN IMMEDIATE
+            self._raise_idempotency_conflict(CONFLICT_REASON_CONCURRENT, scope)
 
     @staticmethod
     def _validated_event_batch(

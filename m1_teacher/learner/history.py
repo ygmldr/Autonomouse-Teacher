@@ -50,7 +50,8 @@ Event payload schemas produced by this module (all fields JSON-serialisable):
     ``{"result_id", "item_id", "status", "result": <AssessmentResult.to_dict()>,
     "item": <AssessmentItem.to_dict()>}`` — self-contained so the log alone is
     enough to rebuild state: the teacher-visible item metadata and the
-    assessment outcome travel with the event.
+    assessment outcome travel with the event.  B-PR3 transactional writes add
+    an optional ``"scope"`` object (additive; legacy events omit it).
 
 ``MASTERY_UPDATED``
     ``{"result_id", "status", "applied": bool, "snapshot":
@@ -75,6 +76,7 @@ from ..contracts.types import (
     LearnerSnapshot,
     now_utc,
 )
+from ..idempotency import ResultScope
 from .model import MasteryModel, applied_result_ids
 
 __all__ = [
@@ -252,6 +254,8 @@ class LearningHistory:
         item: AssessmentItem,
         result: AssessmentResult,
         snapshot: LearnerSnapshot,
+        *,
+        scope: ResultScope | None = None,
     ) -> tuple[list[EventDraft], LearnerSnapshot, bool]:
         """Build the canonical ``ASSESSED``/``MASTERY_UPDATED`` drafts (pure).
 
@@ -264,6 +268,11 @@ class LearningHistory:
         so both statuses produce audit ``ASSESSED``/``MASTERY_UPDATED`` drafts
         with ``applied=false``; the session engine records ``EVAL_ERROR`` as an
         ``ERROR`` event instead (never as mastery evidence).
+
+        When ``scope`` is supplied (B-PR3 transactional path), an additive
+        ``scope`` object is embedded in both payloads.  Legacy call sites omit
+        it, so old payloads remain valid and replay/rebuild only need to ignore
+        the extra key.
         """
 
         learner_id = _require_nonempty_str(
@@ -296,6 +305,21 @@ class LearningHistory:
                 "LearningHistory.assessment_event_drafts(): snapshot belongs to learner "
                 f"{snapshot.learner_id!r}, not {learner_id!r}"
             )
+        if scope is not None:
+            _require_instance(
+                scope, ResultScope, "LearningHistory.assessment_event_drafts(scope)"
+            )
+            if scope.learner_id != learner_id or scope.session_id != session_id:
+                raise ValidationError(
+                    "LearningHistory.assessment_event_drafts(): scope belongs to a "
+                    "different learner/session than the event"
+                )
+            if scope.item_id != item.item_id or scope.result_id != result.result_id:
+                raise ValidationError(
+                    "LearningHistory.assessment_event_drafts(): scope item/result id "
+                    "does not match the assessment"
+                )
+        scope_payload = None if scope is None else scope.to_dict()
         updated = self._model.apply_result(snapshot, item, result)
         mutated = updated is not snapshot
         drafts = [
@@ -308,6 +332,7 @@ class LearningHistory:
                     "status": result.status,
                     "result": result.to_dict(),
                     "item": item.to_dict(),
+                    **({} if scope_payload is None else {"scope": scope_payload}),
                 },
                 created_at=result.created_at,
             ),
@@ -320,6 +345,7 @@ class LearningHistory:
                     "applied": mutated,
                     "snapshot": updated.to_dict(),
                     "policy_version": self._model.policy.policy_version,
+                    **({} if scope_payload is None else {"scope": scope_payload}),
                 },
                 created_at=result.created_at,
             ),
