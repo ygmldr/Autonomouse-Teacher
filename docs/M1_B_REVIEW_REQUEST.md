@@ -46,11 +46,11 @@
 | PR | 分支（本轮 tip） | 评审文档（路径 @ 所在分支/commit） | 评审结论 | Review-fix 状态 |
 |---|---|---|---|---|
 | B-PR0 | `b-next/pr0-convergence-adr` @ `3001d99` | `docs/M1_B_BOUNDARY_PRE_REVIEW.md`（预审，在树）；响应 `docs/M1_B_PR0_REVIEW_RESPONSE.md`（`3001d99`） | `PRE_REVIEW_PASS_WITH_ACTIONS`（0 P0 / 8 P1 / 13 P2）→ 响应逐条处置；B0-01 独立合同验收仍 `NOT_RUN` | 文档修订已提交；最终需按协议 G1–G8 复核 |
-| B-PR1 | 实现 `b-next/pr1-judge-worker` @ `fb6cf33`；修复/附录 `b-next/pr1-trusted-judge` @ `550ad37`（含 `8175233`/`af09cff`） | `docs/M1_B_PR1_REVIEW.md` @ `62c32c5`（分支 `b-next/pr1-review`）；`docs/M1_B_PR1_REVIEW_ADDENDUM.md` @ `af09cff` | 首轮 `PASS_WITH_ACTIONS`（P0=0，P1=4）；附录 `P1_ACTIONS_PARTIALLY_CLOSED`（P1-1/P1-4 closed；P1-3 机制关闭但 CI 未接线；P1-2 未关闭）；`550ad37` 补 P1-2 启动 fail-closed + P1-3 仓库安全 CI 脚本 | **待合入当前快照 + 独立复评**（B1-04 仍 `PARTIAL`，目标部署 `NOT_RUN`；真实 CODE `BLOCKED`） |
+| B-PR1 | 实现 `b-next/pr1-judge-worker` @ `fb6cf33`；修复/附录 `b-next/pr1-trusted-judge` @ `550ad37`（含 `8175233`/`af09cff`） | `docs/M1_B_PR1_REVIEW.md` @ `62c32c5`（分支 `b-next/pr1-review`）；`docs/M1_B_PR1_REVIEW_ADDENDUM.md` @ `af09cff` | 首轮 `PASS_WITH_ACTIONS`（P0=0，P1=4）；附录 ``P1_ACTIONS_PARTIALLY_CLOSED`；final tree：P1-1/P1-4 CLOSED；P1-3 脚本已接线/`.github` job NOT_CONFIGURED；P1-2 实现 fail-closed 已存在/非 root 目标部署 NOT_RUN；`550ad37` 补 P1-2 启动 fail-closed + P1-3 仓库安全 CI 脚本 | **待合入当前快照 + 独立复评**（B1-04 仍 `PARTIAL`，目标部署 `NOT_RUN`；真实 CODE `BLOCKED`） |
 | B-PR2 | `b-next/pr2-session-txn` @ `7f9ce06`（含 `10fdaa9` 修复） | `docs/M1_B_PR2_REVIEW.md` @ `434f731`（在树） | `PASS_WITH_ACTIONS`（P0=0，P1=2 文档治理、P2=5）；B2-01/02/03 + B-Q2 **VERIFIED** | 修复 `10fdaa9` **已在当前树**（P1/P2 关闭） |
 | B-PR3 | 实现 `18b08fe`/`2f32f13`/`3103a06`；评审 `b-next/pr3-review` @ `db636ea`；修复 `b-next/pr3-scoped-idempotency` @ `a5373f1`（含 `3ad85c2`） | `docs/M1_B_PR3_REVIEW.md` @ `db636ea`（分支 `b-next/pr3-review`） | `PASS_WITH_ACTIONS`（P0=0，P1=2、P2=5）；B3-01/B3-02 核心成立 | **P1/P2 修复待合入 + 复评**（P1-1 legacy digest 投影、P1-2 `history.apply_assessment` 全局查找） |
 | B-PR4 | 实现 `b-next/pr4-interview-freshness` @ `e265b96`；评审 `b-next/pr4-domain-ports`/`b-next/pr4-review` @ `dfda203` | `docs/M1_B_PR4_REVIEW.md` @ `dfda203` | `PASS_WITH_ACTIONS`（P0=0，P1=3、P2=7）；B4-01/02/03 为 **VERIFIED（E2E-MOCK，带限制）**；B4-04 部分、B4-05 `NOT_RUN` | **修复尚未创建/合入**：P1-1 持久化 interview 阶段计划；P1-2 hidden reader/`reference_answers.json`；P1-3 session replay/版本拒绝（或降级声明） |
-| B-PR5 | `b-next/pr5-e2e-eval` @ `861d147`/`c420d19`（最终树） | **`docs/M1_B_EVALUATION_REPORT.md`（Owner FINAL_TREE_MEASURED；938 passed/strict 0 skipped；final evidence hashes）**；协议 `docs/M1_B_EVALUATION_PROTOCOL.md` | 最终独立评审 **`PENDING`（Lead 指派）**；`B5-01` 待独立 Reviewer 复跑 | 报告 §13 已填 owner 最终数字；独立裁定由 Reviewer 给出 |
+| B-PR5 | `b-next/pr5-e2e-eval` @ `861d147`/`c420d19`（最终树） | **`docs/M1_B_EVALUATION_REPORT.md`（Owner FINAL_TREE_MEASURED；939 passed/strict 0 skipped；final evidence hashes）**；协议 `docs/M1_B_EVALUATION_PROTOCOL.md` | 最终独立评审 **`PENDING`（Lead 指派）**；`B5-01` 待独立 Reviewer 复跑 | 报告 §13 已填 owner 最终数字；独立裁定由 Reviewer 给出 |
 
 **最终独立评审文档路径**：本轮请求的最终评测报告为 `docs/M1_B_EVALUATION_REPORT.md`（模板 `docs/M1_B_EVALUATION_REPORT_TEMPLATE.md`，由独立 Reviewer 在冻结 SHA 上填充）；若 LeadB/维护者另指定独立评审文档（如 `docs/M1_B_INDEPENDENT_REVIEW.md`），以该指定路径为准，但最终裁定仍必须引用本评测报告与证据包。
 
@@ -74,7 +74,7 @@
 - `m1_teacher/idempotency.py`（PR3 scoped 幂等）。
 - `m1_teacher/session/vertical.py`、`m1_teacher/domains/interview.py`、`m1_teacher/knowledge/freshness.py`、`m1_teacher/assessment/interview_judge.py`、`m1_teacher/demo_b4.py`（PR4 双域闭环）。
 - `scripts/m1b/collect_evidence.py`、`docs/M1_B_EVIDENCE_PACKET.md`、`docs/M1_B_EVALUATION_REPORT_TEMPLATE.md`（PR5 证据/评测入口）。
-- `tests/m1_teacher/**`（最终树 **938** = PR4 final 913 + PR5 25（B5 11 + collector 14）；strict `M1B_REQUIRE_OS_SANDBOX=1 -rs` 938 passed/0 skipped；以评测报告 §13 为准）。
+- `tests/m1_teacher/**`（最终树 **939** = PR4 final 913 + PR5 26（B5 11 + collector 15）；strict `M1B_REQUIRE_OS_SANDBOX=1 -rs` 939 passed/0 skipped；以评测报告 §13 为准）。
 
 ### 3.3 证据与评审
 
@@ -102,7 +102,7 @@ PY="/root/Autonomous Teacher/.venv/bin/python"
 ```
 
 - C-00 通过条件：SHA 正确、无 `.git`/未提交文件、`TMPDIR` 私有、无网络/Key、环境变量记录齐全。
-- **注意（final tree 实测）**：共享 `/tmp` 残留 `m1b_judge_worker_*` 会使 judge 临时目录清理断言假失败（旧快照默认环境曾 `4 failed / 869 passed`）；final tree 用私有 TMPDIR 串行实测 **938 passed / 0 skipped**。最终 Reviewer 必须使用私有 TMPDIR 或先清理残留，且不得把该假失败写成产品回归。
+- **注意（final tree 实测）**：共享 `/tmp` 残留 `m1b_judge_worker_*` 会使 judge 临时目录清理断言假失败（旧快照默认环境曾 `4 failed / 869 passed`）；final tree 用私有 TMPDIR 串行实测 **939 passed / 0 skipped**。最终 Reviewer 必须使用私有 TMPDIR 或先清理残留，且不得把该假失败写成产品回归。
 
 ### 4.2 回归与安全矩阵
 
@@ -110,7 +110,7 @@ PY="/root/Autonomous Teacher/.venv/bin/python"
 |---|---|---|---|---|
 | C-01 | M1-A 历史基线（独立复跑） | `git archive 4706250 \| tar -x -C /tmp/m1a-base && cd /tmp/m1a-base && "$PY" -m pytest tests/m1_teacher -q` | `536 passed`（历史冻结；Reviewer 曾独立确认 16.41s） | `NOT_RUN`（本轮由 Reviewer 执行） |
 | C-02 | M1-Offline 历史基线（独立复跑） | `cd /root/at-m1-offline && env PYTHONDONTWRITEBYTECODE=1 "$PY" -m pytest tests/m1_offline -q -p no:cacheprovider` | `365 passed`（历史冻结；**不加入 C-03 计数**） | `NOT_RUN` |
-| C-03 | 新 B 集成套件（最终树全部测试） | `TMPDIR=$(mktemp -d) "$PY" -m pytest tests/m1_teacher -q -p no:cacheprovider` | **final tree 938 passed**（clean TMPDIR）；strict `M1B_REQUIRE_OS_SANDBOX=1 -q -rs` 938 passed/0 skipped；历史 536/365 不相加 | `OWNER_REPORTED`（final tree） |
+| C-03 | 新 B 集成套件（最终树全部测试） | `TMPDIR=$(mktemp -d) "$PY" -m pytest tests/m1_teacher -q -p no:cacheprovider` | **final tree 939 passed**（clean TMPDIR）；strict `M1B_REQUIRE_OS_SANDBOX=1 -q -rs` 939 passed/0 skipped；历史 536/365 不相加 | `OWNER_REPORTED`（final tree） |
 | C-04 | 分 PR 计数/归组 | `pytest tests/m1_teacher --collect-only -q` + 按文件归组 | **final tree 938 = PR4 final 913 + PR5 25（B5 11 + collector 14）**；每 skip 须写理由 | `OWNER_REPORTED` |
 | C-05 | Judge 安全负例/正确性 | `pytest tests/m1_teacher/test_judge_supervisor.py test_judge_worker.py test_judge_sandbox.py test_judge_negatives.py test_judge_correctness.py test_judge_fixture_integrity.py test_hidden_leakage_scan.py -q` | B1-01..06 负例矩阵；默认 blocked；伪造 PASS 全拒；112/112 hidden cases；无 sentinel 泄漏 | `NOT_RUN` |
 | C-06 | 安全 CI gate（要求 OS 证据不可 skip） | 合入 PR1 修复后：`PYTHON="$PY" ./scripts/m1b/run_safety_ci.sh`（默认 `M1B_REQUIRE_OS_SANDBOX=1 M1B_REQUIRE_NONROOT_SANDBOX=1`，断言 exit 0 + 0 skipped）；仅本地 root 合成可用 `--allow-root-synthetic`（**不是部署安全证据**） | 脚本在 PR1 修复分支 `550ad37`；当前快照 **`NOT_CONFIGURED`**（无脚本/env）；`.github` job 未配置，需维护者接线 | `NOT_RUN` / `NOT_CONFIGURED` |

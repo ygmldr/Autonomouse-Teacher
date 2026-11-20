@@ -21,12 +21,12 @@
 | M1-A 历史冻结 | `PASS_FOR_M1A_OFFLINE_MVP`（536 tests @ C6 `3010426…`） | `REVIEWER_REPORTED`：`docs/M1_INDEPENDENT_REVIEW.md`（历史引用） |
 | M1-Offline 历史冻结 | `PASS_FOR_M1_OFFLINE_DESIGN_AND_EVALUATION_SCOPE`（365 tests @ C2 `052d980d…`） | `REVIEWER_REPORTED`：M1-Offline `REVIEW_M1_OFFLINE.md`（不在本树，历史引用） |
 | B-PR0 预审 | `PRE_REVIEW_PASS_WITH_ACTIONS`（P0=0 / P1=8 / P2=13；B0-01 仍 `NOT_RUN`） | `REVIEWER_REPORTED`：`docs/M1_B_BOUNDARY_PRE_REVIEW.md`、`docs/M1_B_PR0_REVIEW_RESPONSE.md` |
-| B-PR1 安全评审 | `PASS_WITH_ACTIONS` → 修复复核 `P1_ACTIONS_PARTIALLY_CLOSED`（P1-1/P1-4 `CLOSED`；P1-3 CI gate 已合入（`scripts/m1b/run_safety_ci.sh` + `tests/m1_teacher/judge_os_gate.py`，strict 938 passed/0 skipped）；P1-2 非 root principal `NOT CLOSED`） | `REVIEWER_REPORTED`：`docs/M1_B_PR1_REVIEW.md`、`docs/M1_B_PR1_REVIEW_ADDENDUM.md`；final tree 含修复 |
+| B-PR1 安全评审 | `PASS_WITH_ACTIONS` → 修复复核 `P1_ACTIONS_PARTIALLY_CLOSED`；**最终树状态**：P1-1 `CLOSED`、P1-4 `CLOSED`、**P1-3 脚本已接线（`scripts/m1b/run_safety_ci.sh`）但 `.github` job `NOT_CONFIGURED`**、**P1-2 实现 fail-closed 已存在 / 非 root 目标部署验收 `NOT_RUN`（B1-04 仍 `PARTIAL`）** | `REVIEWER_REPORTED`：`docs/M1_B_PR1_REVIEW.md`、`docs/M1_B_PR1_REVIEW_ADDENDUM.md`；final tree 含修复 |
 | B-PR2 事务评审 | `PASS_WITH_ACTIONS`；B2-01/02/03 + B-Q2 `VERIFIED`；review-fix tree 已合入（goal failpoint/D12 记录等） | `REVIEWER_REPORTED`：`docs/M1_B_PR2_REVIEW.md`；final tree = PR4 final 合入树 |
 | B-PR3 幂等评审 | `PASS_WITH_ACTIONS`；B3-01/02 + B-Q3 `VERIFIED`；review-fix tree 已合入（legacy digest/公共 API scoped 查找等） | `REVIEWER_REPORTED`：`docs/M1_B_PR3_REVIEW.md`；final tree 含修复 |
-| B-PR4 独立评审 | `PASS_WITH_ACTIONS`（P0=0 / P1=3 / P2=7）；B4-01 `VERIFIED`、B4-02 `VERIFIED`（重启计划持久化修复后）、B4-03 `VERIFIED`（E2E-MOCK）；响应 `M1_B_PR4_REVIEW_RESPONSE.md` 记录 P1-1..P1-3 关闭（P1-3 event-level schema 版本 = PARTIAL 明示） | `REVIEWER_REPORTED`：`docs/M1_B_PR4_REVIEW.md` + 响应文档；final tree 含修复 |
+| B-PR4 独立评审 | `PASS_WITH_ACTIONS`（P0=0 / P1=3 / P2=7）；**P1 修复已合入 final tree**（`49cf45b`/`1de6ae6`）：P1-1 会话计划持久化、P1-2 hidden reader 守卫、P1-3 版本拒绝/事件schema 部分（PARTIAL 明示）；B4-01/02/03 均 `VERIFIED`（E2E-MOCK；B4-02 以重启计划持久化修复为前提） | `REVIEWER_REPORTED`：`docs/M1_B_PR4_REVIEW.md` + `M1_B_PR4_REVIEW_RESPONSE.md`；final tree 含修复 |
 | B-PR5 统一 E2E/评测 | Owner 最终树实测完成（本报告）；`B5-01` 最终独立评审 **`PENDING`（Lead 指派）** | Owner 最终树证据包；独立评审未出 |
-| X-01 无范围漂移 | Owner 侧 `DETERMINISTIC` 检查通过（final diff vs main = **235 files**；保护路径 **0 命中**） | collector entry `X-01-scope-diff`（final 条目）；Reviewer 需重跑 |
+| X-01 无范围漂移 | Owner 侧 `DETERMINISTIC` 检查通过（final diff vs main = **268 files（268 A/0 M/0 D）**；相对 M1-A = **209 files**；保护路径 **0 命中**） | collector entry `X-01-scope-diff`（final 条目）；Reviewer 需重跑 |
 | X-02 无 Key/网络/付费 | Owner 侧 `DETERMINISTIC` 检查通过（网络 import **0**；`autoteacher_m0` 仅隔离断言/注释；无 Key/Provider；LiveGate 仍 BLOCKED） | collector entry `X-02-network-scan`（final 条目）；Reviewer 需重跑 |
 | **Owner 侧最终结论** | **`PENDING_INDEPENDENT_REVIEW`**（所有本地门通过；独立 Reviewer 关闭 B-PR5/B5-01 后，默认只允许 `PASS_FOR_M1B_OFFLINE_INTEGRATION_SCOPE`） | 本报告 §10/§11/§13 |
 
@@ -50,7 +50,7 @@
 | TZ / LANG / LC_ALL | `UTC` / `C.UTF-8` / `C.UTF-8` |
 | 网络 / Key / Provider | 无（AST 扫描 0 网络 import；collector 子进程 env 剥离凭据；未配置 provider） |
 
-## 3. 最终集成套件实测（938 tests，clean TMPDIR）
+## 3. 最终集成套件实测（939 tests，clean TMPDIR）
 
 ### 3.1 全量命令与输出
 
@@ -59,9 +59,9 @@ cd /root/m1b/pr5
 export TMPDIR=$(mktemp -d)
 PY="/root/Autonomous Teacher/.venv/bin/python"
 "$PY" -m pytest tests/m1_teacher -q
-# exit 0 -> 938 passed in 102.76s (0:01:42)          [collector final: B5-01-full-suite]
+# exit 0 -> 939 passed in 102.72s (0:01:42)          [P1-1 fix 后 worktree 实测]
 M1B_REQUIRE_OS_SANDBOX=1 "$PY" -m pytest tests/m1_teacher -q -rs
-# exit 0 -> 938 passed in 102.95s (0:01:42); 0 skipped  [collector final: B1-05-os-sandbox-gate]
+# exit 0 -> 939 passed; 0 skipped                    [strict OS-sandbox 模式]
 "$PY" -m ruff check m1_teacher tests/m1_teacher
 # All checks passed!
 ```
@@ -70,10 +70,10 @@ M1B_REQUIRE_OS_SANDBOX=1 "$PY" -m pytest tests/m1_teacher -q -rs
 
 | 来源 | tests | 说明 |
 |---|---:|---|
-| M1-A 历史基线（含于 final tree，未改） | 536 | `REVIEWER_REPORTED` 历史冻结参考；`tests/m1_teacher` 中仍全通过 |
+| M1-A 历史基线（历史冻结参考） | 536 | `REVIEWER_REPORTED` 历史值（`4706250`：独立 Reviewer 实测 536 passed）；**final tree 中 5 个 M1-A 测试文件随 D12/去 flake 更新过，故不能声称“536 原样未改”**（P2-4）；计数仍为 536 |
 | PR4 final 树（`1de6ae6…`） | 913 | Lead 冻结值；含 PR1/PR2/PR3 review-fix tree 与 PR4 final（913 = 536 + 377 PR1/PR2/PR3/PR4 新增/修复测试） |
-| B-PR5 新增（PR5 分支） | 25 | B5 统一 E2E `test_b5_e2e` 11 + 证据收集器 `test_evidence_collector` 14 |
-| **最终集成套件合计** | **938** | 913 + 25 = 938；`pytest --collect-only` 确认 938 |
+| B-PR5 新增（PR5 分支） | 26 | B5 统一 E2E `test_b5_e2e` 11 + 证据收集器 `test_evidence_collector` 15（含 P1-1 no-.git 回归） |
+| **最终集成套件合计** | **939** | 913 + 26 = 939；`pytest --collect-only` 独立确认 939 |
 | M1-Offline 历史冻结（另一分支） | 365 | `REVIEWER_REPORTED` 历史；**不在本树、未合并、不得相加**（无“901”） |
 
 ### 3.3 定向实测（最终树）
@@ -88,7 +88,20 @@ M1B_REQUIRE_OS_SANDBOX=1 "$PY" -m pytest tests/m1_teacher -q -rs
 | `pytest tests/m1_teacher/test_evidence_collector.py -q` | **14 passed in 1.28s** |
 | `ruff check m1_teacher tests/m1_teacher` | `All checks passed!` |
 
-> 过渡快照（`e2b6e85`+PR5 前次提交）的 884 tests 数值仅保留在 git 历史与旧 evidence 记录中；本报告最终数字以 938 为准。
+> 过渡快照（`e2b6e85` 等）的旧数值仅保留在 git 历史/旧 evidence 记录中；本报告最终数字以 **939** 为准（P1-1 回归测试 +1）。
+
+### 3.4 clean archive 交叉复跑（P1-1 修复后）
+
+```bash
+rm -rf /tmp/m1b-archive && mkdir -p /tmp/m1b-archive
+git archive <FINAL_SHA> | tar -x -C /tmp/m1b-archive      # no .git
+cd /tmp/m1b-archive
+export TMPDIR=$(mktemp -d)
+"$PY" -m pytest tests/m1_teacher -q                       # 939 passed
+M1B_REQUIRE_OS_SANDBOX=1 "$PY" -m pytest tests/m1_teacher -q -rs   # 939 passed, 0 skipped
+```
+
+实测（P1-1 修复后）：clean archive 全量 **939 passed**；strict **939 passed / 0 skipped**（修复前为 `937 passed, 1 failed`，失败项为 collector 测试要求 `git_sha` 40-hex；现在无 `.git` 时明确 `git_sha=null`/`git_available=false`，见 `docs/M1_B_EVIDENCE_PACKET.md` §3.1）。
 
 ## 4. B-PR5 统一 E2E 实测结果（最终树）
 
@@ -102,7 +115,7 @@ M1B_REQUIRE_OS_SANDBOX=1 "$PY" -m pytest tests/m1_teacher -q -rs
 | **跨域（同一 learner）** | CF 暂停于 turn 4 → interview session（2 sessions，domains `["cf_binary_search","interview_coach"]`）→ resume CF → final REVIEW；per-learner seq 连续、`verify_rebuild=True`、snapshot 同时含 `cf.*` 与 `interview.*` 节点；interview clarifications=1、jd=v2 |
 | **Freshness（B4-03）** | 9 knowledge 场景：KEEP 2 / RECHECK 5 / UPDATE 2；5 个 RECHECK（expired/conflict/unauthoritative/future-dated/older）全部 `rejected=True`、`events_written=0`、`FRESHNESS_KNOWLEDGE_GATE_BLOCKED` + MAP-E08/E09；3 个 JD 时间窗（expired/not-yet-active/overlap-conflict）全部拒绝、0 events、`FRESHNESS_JD_GATE_BLOCKED` + MAP-E10；2 个 eligible UPDATE 可进入新计划（events=4）；`silent_imports=0`、`gate_enforced=True` |
 | **Unified journal** | 5 learners（2 CF + 2 interview + 1 cross-domain）；事件数分别 75/65/45/42/89；全部 `seq_contiguous=True`、`verify_rebuild=True`；单 SQLite 文件；事件类型含 `SESSION_STARTED/PLAN_CREATED/ACTION_TAKEN/TURN_ADVANCED/ASSESSED/MASTERY_UPDATED/...` |
-| **确定性** | `python -m m1_teacher.e2e_b5` 双跑 stdout 逐字节一致：sha256 `4d0e0c851f4ff4d745127932aa62fcfabeca47da2f7d23ae434cae1ab300a2fc`（27 行）；`demo_b4 --json` 双跑一致 sha256 `6b7bb66e…`（511 行，PR4 final 评审已复跑）；`e2e_b5 --write-evidence` 双跑 5 文件 byte-identical |
+| **确定性** | `python -m m1_teacher.e2e_b5` 双跑 stdout 逐字节一致：sha256 `4d0e0c851f4ff4d745127932aa62fcfabeca47da2f7d23ae434cae1ab300a2fc`（27 行）；`demo_b4 --json` 双跑一致 sha256 `b3231658a4ac12a49cd2ac57f4a3e8d9719fbf7476ca36a54e4d8f9eea72d905`（**513 行 / 15,340 bytes**，final tree 实测；旧 511 行/15,108 bytes 为旧树）；`e2e_b5 --write-evidence` 双跑 5 文件 byte-identical |
 | **Mock provenance** | 学生/面试回答来自 teacher-visible `fixtures/.../learner_scripts/answers.json`（`hidden=false`、synthetic CC0-1.0）；hidden reference/rubrics 仅由 `assessment/scorer.py`、`assessment/interview_judge.py` 读取（PR4 P1-2 守卫在 final tree 通过） |
 
 B4 本地 E2E：`pytest test_b4_e2e.py -q` → **9 passed in 4.76s**（B4-01/02/03 本地 E2E-MOCK）。
@@ -123,11 +136,11 @@ B5 统一 E2E：`pytest test_b5_e2e.py -q` → **11 passed in 13.04s**。
 
 | case_id | 目标 | 最终状态 | 残余限制 |
 |---|---|---|---|
-| B1-01 | untrusted CODE fail-closed，不可数据路径开启 | `VERIFIED (LOCAL_ONLY)`（PR1 review；final tree 含修复，strict 938/0 skipped） | 真实用户 CODE 仍 **BLOCKED** |
+| B1-01 | untrusted CODE fail-closed，不可数据路径开启 | `VERIFIED (LOCAL_ONLY)`（PR1 review；final tree strict 939/0 skipped） | 真实用户 CODE 仍 **BLOCKED** |
 | B1-02 | hidden expected 不进入 worker 内存/argv/log | `VERIFIED (LOCAL_ONLY)` | target-deploy 复核 `NOT_RUN` |
 | B1-03 | 不可信 worker 不能伪造可信 PASS | `VERIFIED (LOCAL_ONLY)` | 同上 |
-| B1-04 | OS confinement：网络/宿主秘密/逃逸/资源 | **`PARTIAL`**（P1-2 非 root principal `NOT CLOSED`；本地 `LOCAL_ONLY`） | 非 root principal 目标部署 `NOT_RUN` |
-| B1-05 | 判题正确性/可用性 | **`PARTIAL`**（112/112 hidden、33 passed；默认 TLE 分类 P1-1 已修复；目标部署 latency/resource 验收 `NOT_RUN`） | target-deploy latency/resource `NOT_RUN` |
+| B1-04 | OS confinement：网络/宿主秘密/逃逸/资源 | **`PARTIAL`**（P1-2：**实现 fail-closed 已存在**；**非 root 目标部署验收 `NOT_RUN`**；本地 `LOCAL_ONLY`） | 非 root principal 目标部署 `NOT_RUN` |
+| B1-05 | 判题正确性/可用性 | **`PARTIAL`**（112/112 hidden、33 passed；默认 TLE 分类 P1-1 已修复；**目标部署 latency/resource 验收 `NOT_RUN`**） | target-deploy latency/resource `NOT_RUN` |
 | B1-06 | hidden 泄漏扫描 | `VERIFIED (LOCAL_ONLY)`（final tree `test_hidden_leakage_scan` 15 passed；B5 证据无 hidden 内容） | target-deploy 运行时导出复核 `NOT_RUN` |
 | B2-01/02/03 | 原子 turn commit / crash replay / 并发语义 | `VERIFIED`（PR2 review；final tree 含 review-fix；crash 35 passed） | P2 项（恢复 ERROR 事件等）记录于 PR2 review |
 | B3-01/02 | scoped result_id / 跨 learner 隔离 | `VERIFIED`（PR3 review；final tree scope migration 15 + scoped 31 passed） | P2 项记录于 PR3 review |
@@ -136,7 +149,7 @@ B5 统一 E2E：`pytest test_b5_e2e.py -q` → **11 passed in 13.04s**。
 
 | case_id | 检查 | 命令 | 实测（Owner） | 标签 |
 |---|---|---|---|---|
-| X-01 | M1 提交不修改 `src/autoteacher_m0/`、`security/`、`bridge/`、`config/g*`、`scripts/g4*`、LiveGate；A 线不改 M1 | `git diff --name-only 3e7afee..HEAD` + 保护前缀 grep | **235 files** changed；保护路径 **0 命中**（NO_PROTECTED_HITS） | `DETERMINISTIC` + `OWNER_REPORTED`；Reviewer 重跑 |
+| X-01 | M1 提交不修改 `src/autoteacher_m0/`、`security/`、`bridge/`、`config/g*`、`scripts/g4*`、LiveGate；A 线不改 M1 | `git diff --name-only 3e7afee..HEAD` + 保护前缀 grep；`git diff --name-only main...HEAD` | **268 files（268 A/0 M/0 D）vs main；209 files vs M1-A**；保护路径 **0 命中** | `DETERMINISTIC` + `OWNER_REPORTED`；Reviewer 重跑 |
 | X-02 | 无真实 Key/外部网络/付费请求；LiveGate 仍 BLOCKED | AST 扫描 `m1_teacher/ tests/m1_teacher/ scripts/m1b/`；socket 阻断 demo/cli 测试 | 网络 import **0**；`autoteacher_m0` 仅隔离断言/注释（0 import）；无 Key/Provider；LiveGate 未变 | `DETERMINISTIC` + `OWNER_REPORTED`；Reviewer 重跑 |
 
 ## 8. 证据包（最终树）
@@ -150,7 +163,7 @@ B5 统一 E2E：`pytest test_b5_e2e.py -q` → **11 passed in 13.04s**。
 | `e2e_b5_*.jsonl` | `cf` / `interview` / `cross_domain` / `freshness`；final hashes 见 §9 |
 | `e2e_b5_summary.json` | 固定 artifact_manifest（`implementation_commit=c420d19…`，`generated_at=2026-11-20T00:00:00Z`，`base_sha=3e7afee…`）；final hash 见 §9 |
 
-最终树 collector entries（`status` 为执行状态，非产品 PASS）：`B5-01-full-suite`（938 passed / 103.43s）、`B1-05-os-sandbox-gate`（938 passed / 103.10s，0 skipped）、`B4-01-02-03-e2e`（18 passed：B4 E2E 9 + durability 9）、`B5-01-e2e`（11 passed）、`B1-05-certification`（33 passed / 112 hidden）、`B2-01-02-03-crash`（35 passed）、`B5-01-demo-double-run`（identical True）、`B4-01-demo-double-run`（identical True）、`X-01-scope-diff`、`X-02-network-scan`、`B5-01-evidence-artifacts`（全部 EXECUTED_PASS；旧 16 条保留）。
+最终树 collector entries（P1-2 重新生成后以新条目为准；`status` 为执行状态，非产品 PASS）：`B5-01-full-suite`（939 passed）、`B1-05-os-sandbox-gate`（939 passed，0 skipped）、`B4-01-02-03-e2e`（18 passed：B4 E2E 9 + durability 9）、`B5-01-e2e`（11 passed）、`B1-05-certification`（33 passed / 112 hidden）、`B2-01-02-03-crash`（35 passed）、`B5-01-demo-double-run`（identical True）、`B4-01-demo-double-run`（identical True）、`X-01-scope-diff`、`X-02-network-scan`、`B5-01-evidence-artifacts`（全部 EXECUTED_PASS；旧 16 条保留）。
 
 ## 9. 证据类与最终哈希
 
@@ -162,7 +175,7 @@ B5 统一 E2E：`pytest test_b5_e2e.py -q` → **11 passed in 13.04s**。
 | `e2e_b5_interview.jsonl` | `8f3a16fc51771288c855fa94ab4cec978cf82c0864dd2aedf033c525d2f8452d` |
 | `e2e_b5_summary.json` | `b6e67eb71d4d1f9d4c20fe82a62e9b2eb620735be933746c33cee6a694f8fad4` |
 | B5 demo stdout（27 行） | `4d0e0c851f4ff4d745127932aa62fcfabeca47da2f7d23ae434cae1ab300a2fc` |
-| B4 demo `--json` stdout（511 行） | `6b7bb66e36a38bd640d5b47d206d8fee24a446df9b42dbe76d20dd8cc50bef83` |
+| B4 demo `--json` stdout（513 行 / 15,340 bytes） | `b3231658a4ac12a49cd2ac57f4a3e8d9719fbf7476ca36a54e4d8f9eea72d905` |
 | `audit-index.jsonl` / `audit-index.json` | `4b9a0d0e013a5b78f39f3c604cf5dfe6c0a25346f5ef5562cd4381857e06dbec` / `05b4b9ebbed76cdef862cf638283a6a8fb65a2830cc4c6faccf7042d424d883c` |
 
 证据类标注：CF/interview/JD/freshness 输入与模拟结果 = `MOCK`；状态机/回放/哈希/门禁 = `DETERMINISTIC`；**学习效果/真实 Provider/网络/Live = `NOT_VERIFIED`/`NOT_RUN`**；本报告不含 `HUMAN_REVIEWED` 结论（由独立 Reviewer 出具）。
@@ -191,8 +204,8 @@ B5 统一 E2E：`pytest test_b5_e2e.py -q` → **11 passed in 13.04s**。
 cd /root/m1b/pr5
 export TMPDIR=$(mktemp -d)
 PY="/root/Autonomous Teacher/.venv/bin/python"
-"$PY" -m pytest tests/m1_teacher -q                                   # 938 passed
-M1B_REQUIRE_OS_SANDBOX=1 "$PY" -m pytest tests/m1_teacher -q -rs      # 938 passed, 0 skipped
+"$PY" -m pytest tests/m1_teacher -q                                   # 939 passed
+M1B_REQUIRE_OS_SANDBOX=1 "$PY" -m pytest tests/m1_teacher -q -rs      # 939 passed, 0 skipped
 "$PY" -m pytest tests/m1_teacher/test_b5_e2e.py -q                    # 11 passed
 "$PY" -m pytest tests/m1_teacher/test_b4_e2e.py tests/m1_teacher/test_b4_durability_replay.py -q
 "$PY" -m pytest tests/m1_teacher/test_judge_correctness.py -q         # 112/112 certification
@@ -212,8 +225,9 @@ sha256sum docs/m1b_evidence/e2e_b5_*.jsonl docs/m1b_evidence/e2e_b5_summary.json
 | 最终集成树 merge commit（PR4 final 合入 PR5） | `861d147d…`（`git rev-parse 861d147`；父：`1de6ae6d3714ab815c47022e4c2cceee107db979` PR4 final + PR5 `e3394ae`） |
 | PR5 B5 实现提交 | `c420d19390d87e0d3faa3f716c7b2a3904c36891`（e2e_b5 改为 teacher-visible learner script；artifact manifest `implementation_commit`） |
 | **PR5 最终 commit SHA** | **本报告所在 commit 完成后回填**（`git rev-parse b-next/pr5-e2e-eval`；由 Lead/报告记录） |
-| 最终树 `pytest tests/m1_teacher -q` | **938 passed in 102.76s**（clean TMPDIR） |
-| 最终树 strict `M1B_REQUIRE_OS_SANDBOX=1 … -q -rs` | **938 passed in 102.95s；0 skipped** |
+| 最终树 `pytest tests/m1_teacher -q` | **939 passed in 102.72s**（clean TMPDIR，worktree） |
+| 最终树 strict `M1B_REQUIRE_OS_SANDBOX=1 … -q -rs` | **939 passed；0 skipped** |
+| **clean archive（无 `.git`）** | **939 passed**（P1-1 修复后；见 §3.4） |
 | 定向 | B5 11 / B4 9 / B4 durability 9 / certification 33（112/112） / crash 35 / collector 14 |
 | B5 demo/evidence 双跑 | stdout sha256 `4d0e0c85…`（27 行）；5 个 evidence 文件 byte-identical（hashes §9） |
 | `audit-index.jsonl`（append-only：旧 16 条前缀 sha256 保持 `11a9f5c3…` 不变 + 11 条 final 条目，共 27 条） | `4b9a0d0e013a5b78f39f3c604cf5dfe6c0a25346f5ef5562cd4381857e06dbec` |
