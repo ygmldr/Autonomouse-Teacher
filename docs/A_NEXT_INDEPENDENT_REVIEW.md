@@ -1121,3 +1121,171 @@ $ v2 计数：23 PASS / 19 PARTIAL / 10 NOT_RUN / 3 UNVERIFIED / 4 NO_DIRECT / 6
 $ 事故抽查：g4f=0 files；g4=13246 files(c/ only)；g4r=2982 files；3 个 symlink 自指悬空；
   backup tar sha256=11172f02…；v1 Packet 不存在；rootfs=25491e45… / deps=e07729d7…
 ```
+
+
+---
+
+## 13. 阶段 2 batch-3：A-PR1/A2 实现独立复核（`c7eb74e`）— 2026-11-20T20:29Z–21:35Z
+
+### 13.1 对象与范围
+
+| 项 | Reviewer 实测 |
+|---|---|
+| 分支/HEAD | `feat/a-next-run-admission` @ **`c7eb74e1c2192d3b3732e780e019456d4a47aa3f`** |
+| 提交链 | `e6f3aa6`(A1) → `d7bbf3b`(ADR) → `07eccb9`(impl) → `6556967`(errata) → `ff44ef6`(R-25) → `69c2932`(报告) → `c7eb74e`(R-07 真文件用例+合体核对)；`git merge-base --is-ancestor e6f3aa6 HEAD` = **true** |
+| A1 文件 | `git diff e6f3aa6..HEAD -- src/.../authorization.py` = **0 行**（A2 未改 A1） |
+| 新增/修改 | `src/.../bridge/run_admission.py`（1255 行新）、`controller.py` M（run_admission 接线 + required 模式）、`scripts/a_next/admission/{trusted_launcher,l2_admission_cases}.py`、`tests/integration/a_next_admission/**`、docs |
+| 受保护文件 | `gates.py`/`run_live.sh`/`dsh_adapter.py`/`cli.py`/`live_controller.py` 相对 fd1d3a6 **零 diff**；`config/` 零 diff |
+
+### 13.2 Reviewer 独立运行（全部亲自执行）
+
+```text
+tests/integration/a_next_admission            -> 73 passed in 90.14s   (exit 0)
+tests/integration/a_next_auth + tests/g4r_packet -> 50 passed, 1 skipped in 92.98s  (39+11; skip=packet v1 未在本树)
+tests/integration/g4_a                        -> 223 passed in 145.23s (exit 0)
+tests/integration/g4_f5 + g4_f2               -> 41 passed, 1 skipped in 14.84s (12+29+1)
+tests/unit + tests/security                   -> 402 passed, 1 failed in 87.18s
+pytest --collect-only -q                      -> 1532 tests collected (exit 0)
+ruff check run_admission/controller/tests/a_next_admission/scripts  -> All checks passed
+```
+
+**唯一失败的安全测试独立分类（EXISTING / ENVIRONMENT，非 A1/A2 引入）**：
+`tests/security/test_scan_git_secrets.py::test_repository_worktree_and_history_is_clean` 报 history finding：
+`commit be92c3f70604` / `path fixtures/m1_teacher/judge/sentinels/sentinels.json:101` /
+`kind env-key-assignment` / `masked SENTINEL_SECRET_TOKEN=SENTIN…`。Reviewer 在 **main@3e7afee**、
+**基线 fd1d3a6 worktree**、A2 worktree **三处完全复现同一 finding**（A2 报告 `artifacts/a-next/run-admission/20261120T201321Z/baseline-fd1d3a6-secret-scan.json` 与我的复现一致）。
+⇒ 这是 **B 线 m1_teacher fixtures 共享 git 历史的 pre-existing scanner finding**；与 A1/A2 改动无关、
+非回归，不定级为 A2 FAIL；需在矩阵/handoff 记为 `EXISTING/ENVIRONMENT` 并由人类/B 线处置（本报告不修改历史）。
+
+### 13.3 实现审阅（关键点）
+
+- **Consume 恰一次 + C2 TOCTOU**：`_begin_run_admission_impl` 先 `load_execution_authorization(pre_start)` →
+  复制前文件 sha → `consume_execution_authorization(pre_reserve)`（内部再次完整验证）→ post-consume 断言
+  `use.authorization_id==authorization.authorization_id`、`use.run_epoch==identity.run_epoch`、
+  use record 文件名==`sha256(id)+".json"`；不符/文件在 load↔consume↔consume 后变化 →
+  `RUN_ADMISSION_AUTHORIZATION_DRIFT`，`consumed=UNKNOWN` fail-closed 不发送。测试 3 个（id/epoch/file-change）在 73 passed 内。
+- **C3 required 模式**：`controller.main` 在 **任何 socket mkdir/Broker/Fake 之前**校验
+  `run_admission_required`：required-but-missing→exit 6、inactive/foreign→exit 7；Reviewer 自建最小配置
+  独立实测：**exit 6、socket/attempt_db 均未创建**；非 bool 配置→`CONFIG_INVALID` SystemExit。
+  默认 `run_admission=None` 分支与冻结行为一致（`test_default_path_without_run_admission_is_unchanged` + F2/g4_a 全绿）。
+- **C4 crash-after-consume**：同 Run 重启→`AUTHORIZATION_REPLAYED`→`RUN_ADMISSION_ALREADY_CONSUMED`；
+  use record 不清理/不改写；报告 §7 有人工对账说明（无自动重发）。
+- **C5 结构证明**：controller 全文仅 **1 处** `begin_dispatch(`、**1 处** `consume_dispatch(`，
+  且位于唯一 `_broker_reserve()` 之前；`test_c5_one_token_per_payload_payload_count` 断言
+  `_consumed_ordinals=={1}`；frozen Admission `max_attempts=1`（报告已声明未来若加重试须重评）。
+- **C6 拒绝矩阵/零账本**：测试含 R-01..R-26 覆盖（伪造签名/未知 key/过期/撤销/漂移/预算/期限/日志满/
+  durability unknown/token 复制/跨 Run/过期/ordinal 越界等）；`test_r19_token_denial_creates_zero_ledger_traces`
+  断言 requests/reservations/attempts/fake=0；launcher subprocess deny 断言 Broker socket/attempt DB 未创建。
+- **C7 no-key/no-Live**：受保护文件零 diff；静态测试确认新代码无 socket/requests/urllib/http/
+  deepseek_harness/os.environ/API_KEY；LiveGate=BLOCKED、CLI `smoke --live`=exit 3、run_live 未改；默认路径回归全绿。
+- **C8 L2 边界**：`A2-01..A2-03` 明确 **NOT_RUN**（报告 §6/§10）；`l2_admission_cases.py` 仅 host synthetic 验证，
+  真实 OCI 属 A-PR3 窗口。
+- **A1↔A2 R-07 真实文件用例**（4 个，73 passed 内）：真实 consume 后 body id 改为外来 id → `RUN_ADMISSION_RECORD_INVALID`
+  （consumed=NO，非 REPLAYED/EPOCH_MISMATCH）、body id 与存储名不符→INVALID、非法 `consumed_utc`→INVALID、
+  未篡改记录→`ALREADY_CONSUMED`（对照）；final 记录不被 A2 清理。
+- **审计 allowlist**：无 Key/原始 prompt/messages/tool args/session 文本；call_id 仅 SHA-256；`attempt_db_touched=false`、
+  `historical_holds_modified=false`（测试 `test_audit_records_are_allowlisted_and_content_free`）。
+
+### 13.4 发现
+
+- **P3-A2-1**：per-dispatch token 在 revocation/identity claim/Broker 之前消费；被拒绝的 payload 也会消耗
+  ordinal（fail-closed 设计使然，但“effective_max_calls 计的是 dispatch 尝试而非成功发送”未在报告 §7 明说）。
+  建议文档补一句 + 测试保留现状（安全上无升级面，属可用性/预算语义说明）。
+- **P3-A2-2**：`_map_consume_reasons` 以拼接字符串子串匹配分类（DURABILITY_UNKNOWN→REPLAYED→EPOCH→INVALID→…）；
+  当前 reason 集封闭、顺序正确，但未来 reason 增加时易脆；建议改为精确集合映射（非阻断）。
+- **P2-A2-1（分类登记项）**：上述 pre-existing security history finding 必须在矩阵/handoff 显式记为
+  `EXISTING/ENVIRONMENT（m1_teacher 历史 fixtures；基线/ main 可复现；非 A1/A2）`，不得写成 A2 回归或静默忽略；
+  人类/B 线处置（扫描器规则或历史清理）另立工作项。
+
+### 13.5 裁定
+
+| 项 | 结论 |
+|---|---|
+| **A-PR1/A2 实现（c7eb74e）** | **PASS（条件）** |
+| 是否允许集成 | **是**（A1 先冻结→A2 已 rebase；无 runtime/config 变更；默认路径逐字节不变） |
+| 条件 | ① 矩阵/handoff 登记 pre-existing security finding 为 EXISTING/ENVIRONMENT；② A2-01..03 保持 **NOT_RUN**（A-PR3 窗口前不得写 L2 PASS）；③ G4-H1 前必须把 `run_admission_required` 升级为唯一生产启动路径（报告 §8 BLOCKER，人类 Gate）；④ 集成 HEAD 上由 Reviewer 复跑 a_next_admission/auth + F2/F5/g4_a 全套；⑤ P3 措辞/映射改进（可选） |
+| 门状态 | `LiveGate=BLOCKED`、G4-H=NOT_AUTHORIZED、G5=BLOCKED、G6=NOT_RUN、M0=DECISION_PENDING 不变；`B03/E5-P04=UNVERIFIED`；P2-01 已由 A1 修复（待合入验收），P2-02 由本 PR 提供 opt-in 接线、**生产强制仍未完成** |
+
+---
+
+## 14. 阶段 2 batch-3：A4 R-REV6 L2 Owner 证据 host 级独立审核（`95a020b`）— 2026-11-20T20:29Z–21:40Z
+
+### 14.1 对象
+
+| 项 | Reviewer 实测 |
+|---|---|
+| 报告分支/HEAD | `test/a-next-rrev6` @ **`95a020b27ccf05ae3cd504d8c138bc279706fee2`**（parent `d083c54` run HEAD） |
+| 证据根 | `worktrees/a-next-rrev6/artifacts/a_next/rrev6/l2/run-20261120T202039Z/`（13 个 case 目录 + R6-13 audit-only；14 case 状态） |
+| 变更范围 | 仅新增 docs/scripts/tests（报告 + `scripts/a_next/rrev6/*` + `tests/a_next_rrev6/test_prep_contract.py`）；`src/`/`config/` 零 diff；**冻结矩阵 CSV/Review 未被修改**（`git diff fd1d3a6..HEAD -- …` 空） |
+| 报告性质 | 明确写“这是 Owner 证据，不是 Reviewer 独立复跑；R-REV6 PASS 仍以独立 Reviewer 自行复跑为准”——**未冒充 Reviewer**（抽查确认） |
+
+### 14.2 Reviewer host 级独立审计（自建脚本 `/tmp/a4_audit2.py`，全部只读）
+
+```text
+6 个顶层文件 sha256 全部匹配 Lead 给值（t0/t1/summary/audit/matrix/evidence-index）
+T0=T1: rootfs=25491e45…、deps=e07729d7…（canonical=true；t0/t1 均记录恢复 provenance note）
+containers_after=[]（t1/summary）；podman ps -a 现为空
+Stage：manifest sha=34b3db73…；Reviewer 独立 tar 重算 stage tree=2b9edab8…、trusted=dbf3ca36…、
+        candidate=b2c73100… 全匹配；base_sha=d083c54…；adapter builtJs=2cb42461…
+summary/audit：14/14 PASS（R6-01..R6-13 + R6-04B），0 partial/not_run
+evidence-index：114 个文件条目逐一 sha256/bytes 校验通过（`receipts` 键路径见 §14.4）
+digest joins：prepared==claim.request_digest = 11 行；payload==receipt.raw_sha256 = 9 receipt；
+              prepared!=payload 恒成立；0 mismatch
+关键 case：R6-01/02/03 receipts=1/2/2；R6-05 0 dispatch/0 reserve/0 attempt/0 receipt；
+          R6-09/10 reservation PENDING、0 attempt；R6-11 Broker=FAILED + attempt WORST_CASE_HELD + receipt=1
+uid-map/peercred 存在；报告 limitation（R6-04 DSH replay、R6-09 SIGKILL pre-attempt、R6-11 terminal
+FAILED）与证据一致
+```
+
+### 14.3 结论范围（重要）
+
+- 本审计是 **host 级对 Owner L2 证据的独立核验**（文件哈希/T0-T1/Stage 身份/digest 绑定/终态分类），
+  **不是** Reviewer 自己重跑 OCI L2。因此：
+  - **A4/R-REV6 总裁定 = PARTIAL**：Owner L2 证据 host 级可信（PASS 级证据质量），但
+    **Reviewer 独立 OCI 复跑 = NOT_RUN**；`A4-01..A4-03` 在矩阵中保持 **NOT_RUN**（按 Lead 规则，
+    只按 Reviewer 独立复跑结果定状态）。
+  - 建议 Lead 在集成后给一个 **最小独立 OCI 窗口**（≥3 case：R6-01 baseline、R6-04B 字节级 replay、
+    R6-05 pre-Reserve 或 R6-11 fake-crash），Reviewer 用同一脚本按 SHA 独立复跑；通过后 R-REV6 才能升级。
+  - 本报告**不**写 R-REV6 PASS、不改变任何门。
+
+### 14.4 发现
+
+- **P2-A4-1（证据索引路径 typo）**：`evidence-index.json` 用 `receipts` 键，实际目录为 `receipt/`
+  （Reviewer 按映射校验 114 个文件 sha 全部通过；若按索引字面路径访问会 miss）。应修索引生成器或报告注明
+  `receipts`→`receipt/` 映射，否则“逐文件 sha 见 evidence-index”无法按字面复核。
+- **P3-A4-2（索引覆盖措辞）**：索引覆盖每 case 的 9 类核心证据（case-runner/db snapshot/receipts/
+  dispatch-window/lifecycle/sqlite 等），**不覆盖** cleanup/env/peercred/mountinfo/logs/commands 等辅助文件；
+  报告“逐文件 sha 见 evidence-index”应收窄为“核心证据文件”。
+- **P3-A4-3（case 计数措辞）**：报告“13 case + R6-04B”与实际目录（12 个容器 case + R6-04B = 13 个 case 目录，
+  R6-13 为 audit-only 无目录）+ summary 14 条状态存在口径混合；建议统一写明“14 个 case 状态（13 个容器 case 目录）”。
+- 其余：限制说明诚实（R6-04 真实 DSH 层 replay 限制、R6-09 SIGKILL 落 pre-attempt、R6-11 Fake crash
+  但 Broker FAILED 终态权威），approval/token 语义未见夸大。
+
+### 14.5 裁定
+
+| 项 | 结论 |
+|---|---|
+| A4 Owner L2 证据（host 级复核） | **PASS（证据质量/一致性）** |
+| R-REV6（独立 L2） | **NOT_RUN（Reviewer 未重跑 OCI）⇒ A4/R-REV6 = PARTIAL** |
+| A4-01..A4-03 矩阵 | 保持 **NOT_RUN**（直到 Reviewer 独立 OCI 复跑） |
+| 是否允许集成 | 允许 docs/scripts/tests 集成（无 runtime 变更）；但不得以本证据宣称 R-REV6/L2 PASS |
+| 条件 | ① 修 evidence-index `receipts` 路径/措辞；② Lead 批准最小独立 OCI 窗口后 Reviewer 复跑 ≥3 case；③ 任何 L2 证据继续标注 rootfs/deps 恢复 provenance；④ 矩阵 A4-01..03 不得提前升级 |
+
+---
+
+## 附录 H：batch-3（A2/A4）命令与输出
+
+```text
+A2: git -C a-next-run-admission rev-parse HEAD -> c7eb74e1…；merge-base --is-ancestor e6f3aa6 HEAD=true
+    pytest tests/integration/a_next_admission -q -> 73 passed / 90.14s
+    pytest tests/integration/a_next_auth tests/g4r_packet -q -> 50 passed, 1 skipped
+    pytest tests/integration/g4_a -q -> 223 passed / 145.23s
+    pytest tests/integration/g4_f5 tests/integration/g4_f2 -q -> 41 passed, 1 skipped
+    pytest tests/unit tests/security -q -> 402 passed, 1 failed（history scanner EXISTING，见 §13.2）
+    pytest --collect-only -q -> 1532 collected；ruff -> All checks passed
+    Reviewer required-mode probe -> exit 6, socket/attempt_db not created；非 bool -> CONFIG_INVALID
+    controller: begin_dispatch=1、consume_dispatch=1、_broker_reserve 在其后
+A4: 6 顶层文件 sha 匹配；stage tree 独立 tar 重算匹配（2b9edab8/dbf3ca36/b2c73100）；
+    digest joins prepared=11/payload=9、0 mismatch；R6-05/R6-09/R6-10/R6-11 终态如 §14.2；
+    evidence-index 114 文件校验通过（receipts 路径 typo 见 §14.4）；podman ps -a 空；冻结 CSV 未改
+```
