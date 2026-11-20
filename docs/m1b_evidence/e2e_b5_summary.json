@@ -2,7 +2,7 @@
   "artifact_manifest": {
     "base_sha": "3e7afee077845a071cd364e93ab209cac20b2d5f",
     "generated_at": "2026-11-20T00:00:00Z",
-    "implementation_commit": "e2b6e85d8939b2411b2b6c6cc26538014c6f57e3",
+    "implementation_commit": "c420d19390d87e0d3faa3f716c7b2a3904c36891",
     "manifest_version": "m1b.b5.evidence.manifest.v1",
     "note": "fixed artifact manifest: no wall clock and no live git HEAD are read; the same content tree regenerates byte-identical evidence"
   },
@@ -357,8 +357,8 @@
     "pause_turn": 4,
     "paused_phase": "PAUSED",
     "resumed_phase": "REVIEW",
-    "seq_after_interview": 52,
-    "seq_before_pause": 34,
+    "seq_after_interview": 54,
+    "seq_before_pause": 36,
     "seq_contiguous": true,
     "session_count": 2,
     "session_ids": [
@@ -498,7 +498,8 @@
       "RESPONSE_SUBMITTED",
       "SESSION_PAUSED",
       "SESSION_RESUMED",
-      "SESSION_STARTED"
+      "SESSION_STARTED",
+      "TURN_ADVANCED"
     ],
     "verify_rebuild": true
   },
@@ -509,10 +510,10 @@
     "e2e_b5_interview.jsonl"
   ],
   "evidence_hashes": {
-    "e2e_b5_cf.jsonl": "8de98500bb69582bf932dceb25d4938a10ad991c72ccd2dbf18a94a2d5a20626",
-    "e2e_b5_cross_domain.jsonl": "7c8c5b14f26ae75aba465b94a24bcb5623c01498dd720f710efc60a57f452bef",
-    "e2e_b5_freshness.jsonl": "efa33f18516f55529df0086acb57e1b5ddae0414bf611516c55ddc5a11fd2608",
-    "e2e_b5_interview.jsonl": "44b1a07199936efcd6acd15707c89885645d82ce04f713cb12bdbf0f05604f36"
+    "e2e_b5_cf.jsonl": "526f9dfdc63b2b0781db7e3b11abba6cbb870616f0d5368679d93309f19f0cf1",
+    "e2e_b5_cross_domain.jsonl": "c02723ec42e8ec76f3806719ffc6eb81fa38b677623cb982fd519e2eee35925c",
+    "e2e_b5_freshness.jsonl": "8a25de6e641313327e24f886abb1577105faae973da129f9ad49336b2a890332",
+    "e2e_b5_interview.jsonl": "8f3a16fc51771288c855fa94ab4cec978cf82c0864dd2aedf033c525d2f8452d"
   },
   "fixed_timestamp": "2026-11-20T00:00:00Z",
   "freshness": {
@@ -677,22 +678,22 @@
       "jd_id": "jd:rec",
       "new_session": {
         "event_count": 12,
-        "journal_sha256": "e6b644bbf542dd70d93012638e85a05bacd056893c60e590092a00534e5f43f3",
-        "pending_item_id": "interview.item.q-rec-001",
+        "journal_sha256": "4a2526b3583df312a9a71a4a5c637d443f5562c3d47ba9b60a2df9939b31c180",
+        "pending_item_id": "interview.item.q-ml-001",
         "phase": "ASSESS",
         "turn_index": 2
       },
       "new_version": "v2",
       "old_session_after": {
         "event_count": 27,
-        "journal_sha256": "554c1153108a925c69e39736990687ab5656781a034103b3bd5ec93960e747fa",
+        "journal_sha256": "c372421798cce3169d2231ff902f07e254f1e606d43f4c1bbe5f687da6bf153a",
         "pending_item_id": null,
         "phase": "REVIEW",
         "turn_index": 5
       },
       "old_session_before": {
         "event_count": 27,
-        "journal_sha256": "554c1153108a925c69e39736990687ab5656781a034103b3bd5ec93960e747fa",
+        "journal_sha256": "c372421798cce3169d2231ff902f07e254f1e606d43f4c1bbe5f687da6bf153a",
         "pending_item_id": null,
         "phase": "REVIEW",
         "turn_index": 5
@@ -721,14 +722,14 @@
             "jd_ref": "jd:rec@v1",
             "jd_version": "v1",
             "learner_id": "b5.interview.learner_a",
-            "objective_id": "obj.interview.recommendation_ctr.mastery",
+            "objective_id": "obj.interview.ml_fundamentals.mastery",
             "observations": [
               {
                 "action_kind": "SOCRATIC_QUESTION",
                 "action_reason": "INTERVIEW_MAIN_QUESTION",
                 "failure_reason": "PARTIAL:INTERVIEW_RUBRIC_OPEN_ANSWER",
                 "phase_before": "ASSESS",
-                "score": 0.5047,
+                "score": 0.6683,
                 "status": "PARTIAL",
                 "step": 0,
                 "turn": 0
@@ -738,7 +739,7 @@
                 "action_reason": "INTERVIEW_PROBE_HYPOTHESIS",
                 "failure_reason": "PARTIAL:INTERVIEW_RUBRIC_OPEN_ANSWER",
                 "phase_before": "ASSESS",
-                "score": 0.5047,
+                "score": 0.6683,
                 "status": "PARTIAL",
                 "step": 1,
                 "turn": 1
@@ -748,7 +749,7 @@
                 "action_reason": "INTERVIEW_PROBE_COMPLEXITY",
                 "failure_reason": "PARTIAL:INTERVIEW_RUBRIC_OPEN_ANSWER",
                 "phase_before": "ASSESS",
-                "score": 0.5047,
+                "score": 0.6683,
                 "status": "PARTIAL",
                 "step": 2,
                 "turn": 2
@@ -758,7 +759,7 @@
                 "action_reason": "INTERVIEW_PROBE_EXPERIMENT_DESIGN",
                 "failure_reason": "PARTIAL:INTERVIEW_RUBRIC_OPEN_ANSWER",
                 "phase_before": "ASSESS",
-                "score": 0.5047,
+                "score": 0.6683,
                 "status": "PARTIAL",
                 "step": 3,
                 "turn": 3
@@ -768,7 +769,7 @@
                 "action_reason": "INTERVIEW_PROBE_ONLINE_TRIAGE",
                 "failure_reason": "PARTIAL:INTERVIEW_RUBRIC_OPEN_ANSWER",
                 "phase_before": "ASSESS",
-                "score": 0.5047,
+                "score": 0.6683,
                 "status": "PARTIAL",
                 "step": 4,
                 "turn": 4
@@ -780,7 +781,7 @@
               "INTERVIEW_PROBE_EXPERIMENT_DESIGN",
               "INTERVIEW_PROBE_ONLINE_TRIAGE"
             ],
-            "question_id": "interview.item.q-rec-001",
+            "question_id": "interview.item.q-ml-001",
             "rubric_audit_dimensions": [
               "engineering_feasibility",
               "evidence_sufficiency",
@@ -795,41 +796,41 @@
           {
             "clarification_count": 0,
             "event_count": 12,
-            "final_pending_item_id": "interview.item.q-rec-001",
+            "final_pending_item_id": "interview.item.q-ml-001",
             "final_phase": "ASSESS",
             "final_turn": 2,
-            "hint_levels": [],
+            "hint_levels": [
+              1
+            ],
             "jd_id": "jd:rec",
             "jd_ref": "jd:rec@v2",
             "jd_version": "v2",
             "learner_id": "b5.interview.learner_a",
-            "objective_id": "obj.interview.recommendation_ctr.mastery",
+            "objective_id": "obj.interview.ml_fundamentals.mastery",
             "observations": [
               {
                 "action_kind": "SOCRATIC_QUESTION",
                 "action_reason": "INTERVIEW_MAIN_QUESTION",
-                "failure_reason": "PARTIAL:INTERVIEW_RUBRIC_OPEN_ANSWER",
+                "failure_reason": "INCORRECT:INTERVIEW_RUBRIC",
                 "phase_before": "ASSESS",
-                "score": 0.5047,
-                "status": "PARTIAL",
+                "score": 0.119,
+                "status": "INCORRECT",
                 "step": 0,
                 "turn": 0
               },
               {
-                "action_kind": "SOCRATIC_QUESTION",
-                "action_reason": "INTERVIEW_PROBE_HYPOTHESIS",
-                "failure_reason": "PARTIAL:INTERVIEW_RUBRIC_OPEN_ANSWER",
+                "action_kind": "HINT",
+                "action_reason": "INTERVIEW_HINT_LEVEL_1",
+                "failure_reason": "INCORRECT:INTERVIEW_RUBRIC",
                 "phase_before": "ASSESS",
-                "score": 0.5047,
-                "status": "PARTIAL",
+                "score": 0.119,
+                "status": "INCORRECT",
                 "step": 1,
                 "turn": 1
               }
             ],
-            "probe_sequence": [
-              "INTERVIEW_PROBE_HYPOTHESIS"
-            ],
-            "question_id": "interview.item.q-rec-001",
+            "probe_sequence": [],
+            "question_id": "interview.item.q-ml-001",
             "rubric_audit_dimensions": [
               "engineering_feasibility",
               "evidence_sufficiency",
@@ -867,7 +868,7 @@
                 "action_reason": "INTERVIEW_MAIN_QUESTION",
                 "failure_reason": "NEEDS_REVIEW:PROJECT_FACTS_REQUIRED",
                 "phase_before": "ASSESS",
-                "score": 0.5475,
+                "score": 0.234,
                 "status": "NEEDS_REVIEW",
                 "step": 0,
                 "turn": 0
@@ -877,7 +878,7 @@
                 "action_reason": "PROJECT_FACTS_REQUIRED",
                 "failure_reason": "INCORRECT:INTERVIEW_RUBRIC",
                 "phase_before": "ASSESS",
-                "score": 0.175,
+                "score": 0.309,
                 "status": "INCORRECT",
                 "step": 1,
                 "turn": 1
@@ -887,7 +888,7 @@
                 "action_reason": "INTERVIEW_HINT_LEVEL_1",
                 "failure_reason": "PARTIAL:INTERVIEW_RUBRIC_OPEN_ANSWER",
                 "phase_before": "ASSESS",
-                "score": 0.6558,
+                "score": 0.825,
                 "status": "PARTIAL",
                 "step": 2,
                 "turn": 2
@@ -897,7 +898,7 @@
                 "action_reason": "INTERVIEW_PROBE_CONCEPT",
                 "failure_reason": "PARTIAL:INTERVIEW_RUBRIC_OPEN_ANSWER",
                 "phase_before": "ASSESS",
-                "score": 0.6558,
+                "score": 0.825,
                 "status": "PARTIAL",
                 "step": 3,
                 "turn": 3
@@ -907,7 +908,7 @@
                 "action_reason": "INTERVIEW_PROBE_HYPOTHESIS",
                 "failure_reason": "PARTIAL:INTERVIEW_RUBRIC_OPEN_ANSWER",
                 "phase_before": "ASSESS",
-                "score": 0.6558,
+                "score": 0.825,
                 "status": "PARTIAL",
                 "step": 4,
                 "turn": 4
@@ -917,7 +918,7 @@
                 "action_reason": "INTERVIEW_PROBE_COMPLEXITY",
                 "failure_reason": "PARTIAL:INTERVIEW_RUBRIC_OPEN_ANSWER",
                 "phase_before": "ASSESS",
-                "score": 0.6558,
+                "score": 0.825,
                 "status": "PARTIAL",
                 "step": 5,
                 "turn": 5
@@ -927,7 +928,7 @@
                 "action_reason": "INTERVIEW_PROBE_EXPERIMENT_DESIGN",
                 "failure_reason": "PARTIAL:INTERVIEW_RUBRIC_OPEN_ANSWER",
                 "phase_before": "ASSESS",
-                "score": 0.6558,
+                "score": 0.825,
                 "status": "PARTIAL",
                 "step": 6,
                 "turn": 6
@@ -937,7 +938,7 @@
                 "action_reason": "INTERVIEW_PROBE_ONLINE_TRIAGE",
                 "failure_reason": "PARTIAL:INTERVIEW_RUBRIC_OPEN_ANSWER",
                 "phase_before": "ASSESS",
-                "score": 0.6558,
+                "score": 0.825,
                 "status": "PARTIAL",
                 "step": 7,
                 "turn": 7
@@ -973,9 +974,7 @@
         "experiment_design",
         "online_triage"
       ],
-      "b5.interview.learner_a::b5.interview.a.jd_v2": [
-        "hypothesis"
-      ],
+      "b5.interview.learner_a::b5.interview.a.jd_v2": [],
       "b5.interview.learner_b::b5.interview.b.jd_v2": [
         "concept",
         "hypothesis",
@@ -995,7 +994,7 @@
     "event_table": "canonical history_events (per-learner seq) + sessions table",
     "learners": [
       {
-        "event_count": 86,
+        "event_count": 89,
         "event_types": [
           "ACTION_TAKEN",
           "ASSESSED",
@@ -1006,7 +1005,8 @@
           "RESPONSE_SUBMITTED",
           "SESSION_PAUSED",
           "SESSION_RESUMED",
-          "SESSION_STARTED"
+          "SESSION_STARTED",
+          "TURN_ADVANCED"
         ],
         "learner_id": "b5.cross_domain.learner",
         "seq_contiguous": true,
@@ -1071,10 +1071,10 @@
         "snapshot": {
           "completed_item_count": 1,
           "masteries": {
-            "interview.node.recommendation_ctr": {
+            "interview.node.ml_fundamentals": {
               "confidence": 0.983315,
               "evidence_count": 10,
-              "value": 0.47623
+              "value": 0.412897
             }
           },
           "revision": 10
@@ -1109,7 +1109,7 @@
         "verify_rebuild": true
       },
       {
-        "event_count": 73,
+        "event_count": 75,
         "event_types": [
           "ACTION_TAKEN",
           "ASSESSED",
@@ -1120,7 +1120,8 @@
           "RESPONSE_SUBMITTED",
           "SESSION_PAUSED",
           "SESSION_RESUMED",
-          "SESSION_STARTED"
+          "SESSION_STARTED",
+          "TURN_ADVANCED"
         ],
         "learner_id": "m1a.learner.student_a",
         "seq_contiguous": true,
@@ -1164,7 +1165,7 @@
         "verify_rebuild": true
       },
       {
-        "event_count": 62,
+        "event_count": 65,
         "event_types": [
           "ACTION_TAKEN",
           "ASSESSED",
@@ -1175,7 +1176,8 @@
           "RESPONSE_SUBMITTED",
           "SESSION_PAUSED",
           "SESSION_RESUMED",
-          "SESSION_STARTED"
+          "SESSION_STARTED",
+          "TURN_ADVANCED"
         ],
         "learner_id": "m1a.learner.student_b",
         "seq_contiguous": true,
