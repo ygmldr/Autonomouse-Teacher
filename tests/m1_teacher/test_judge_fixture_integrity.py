@@ -149,8 +149,10 @@ ALLOWED_ATTACK_KEYS = {
     "code",
     "expected_blocked",
     "expected_classification",
+    "expected_observation",
     "synthetic_test_only",
 }
+REQUIRED_ATTACK_KEYS = ALLOWED_ATTACK_KEYS - {"expected_observation"}
 REQUIRED_ATTACK_FAMILIES = frozenset(
     {
         "stack_frame_probe",
@@ -160,9 +162,18 @@ REQUIRED_ATTACK_FAMILIES = frozenset(
         "fork_subprocess",
         "infinite_loop",
         "forged_protocol_output",
-        "write_runner_source",
+        "write_runner_source_ro_bind",
+        "write_runner_source_ephemeral_tmpfs",
         "exit_code_tamper",
         "exception_override",
+    }
+)
+#: Explicit realisable observations for templates that are not "blocked" by the
+#: read-only worker bind but still must never yield a PASS or a host effect.
+ALLOWED_ATTACK_OBSERVATIONS = frozenset(
+    {
+        "write_denied_readonly_worker_bind",
+        "ephemeral_write_no_host_effect",
     }
 )
 SENTINEL_VALUE_RE = re.compile(r"^SENTINEL_[A-Za-z0-9_]+$")
@@ -628,9 +639,17 @@ def test_attack_templates_cover_required_trust_boundary_families():
 
     families = set()
     classifications = set()
+    blocked_count = 0
+    unblocked_count = 0
     for attack in attacks:
         attack_id = attack["attack_id"]
-        _assert_exact_keys(attack, ALLOWED_ATTACK_KEYS, f"attack {attack_id}")
+        assert isinstance(attack, dict)
+        assert not (set(attack) - ALLOWED_ATTACK_KEYS), (
+            f"attack {attack_id}: unknown field(s) in strict schema"
+        )
+        assert not (REQUIRED_ATTACK_KEYS - set(attack)), (
+            f"attack {attack_id}: missing required field(s)"
+        )
         assert isinstance(attack["description"], str) and attack["description"].strip()
         code = attack["code"]
         assert isinstance(code, str) and code.strip()
@@ -638,16 +657,36 @@ def test_attack_templates_cover_required_trust_boundary_families():
         assert _present(code, "SYNTHETIC_TEST_ONLY"), (
             f"{attack_id}: attack template must be marked SYNTHETIC_TEST_ONLY"
         )
-        assert attack["expected_blocked"] is True
+        assert isinstance(attack["expected_blocked"], bool)
         assert attack["synthetic_test_only"] is True
-        assert attack["expected_classification"] in {"WA", "RE", "TLE"}, (
-            f"{attack_id}: a blocked attack must never be expected to PASS"
-        )
+        classification = attack["expected_classification"]
+        assert classification in {"WA", "RE", "TLE", "PASS"}
+        if attack["expected_blocked"]:
+            blocked_count += 1
+            assert classification in {"WA", "RE", "TLE"}, (
+                f"{attack_id}: a blocked attack must never be expected to PASS"
+            )
+        else:
+            # Explicitly documented as *not* blocked (e.g. writes that land in
+            # the sandbox's ephemeral root tmpfs): the trusted verdict must still
+            # never be PASS and the realised observation must be declared.
+            unblocked_count += 1
+            assert classification != "PASS", (
+                f"{attack_id}: an unblocked attack must never be expected to PASS"
+            )
+            observation = attack["expected_observation"]
+            assert isinstance(observation, str) and observation in ALLOWED_ATTACK_OBSERVATIONS
+        if "expected_observation" in attack:
+            assert attack["expected_observation"] in ALLOWED_ATTACK_OBSERVATIONS
         families.add(attack["attack_family"])
-        classifications.add(attack["expected_classification"])
+        classifications.add(classification)
 
     assert families == REQUIRED_ATTACK_FAMILIES
     assert classifications == {"WA", "RE", "TLE"}
+    assert blocked_count >= 9
+    assert unblocked_count == 1, (
+        "exactly one attack (ephemeral sandbox tmpfs write) may be explicitly unblocked"
+    )
 
 
 # ---------------------------------------------------------------------------

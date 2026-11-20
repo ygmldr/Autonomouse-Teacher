@@ -124,6 +124,7 @@ fixtures/m1_teacher/judge/
       "code": "# SYNTHETIC_TEST_ONLY\n…",
       "expected_blocked": true,
       "expected_classification": "WA",
+      "expected_observation": "write_denied_readonly_worker_bind",
       "synthetic_test_only": true
     }
   ]
@@ -132,8 +133,11 @@ fixtures/m1_teacher/judge/
 
 - 三个 sentinel 值均为合成占位值（`SENTINEL_*` + 固定十六进制后缀，不含任何真实秘密），彼此唯一。
 - `host_sentinel_relative_path` 为**相对路径**；宿主 sentinel 文件在 OS 隔离测试时由测试外壳在**宿主机临时目录**创建，**绝不写入仓库**。
-- `attack_templates` 覆盖 10 类信任边界探测：`stack_frame_probe`、`argv_result_forgery`、`host_sentinel_read`、`socket_connect`、`fork_subprocess`、`infinite_loop`、`forged_protocol_output`、`write_runner_source`、`exit_code_tamper`、`exception_override`。
-- 每个模板都必须标记 `SYNTHETIC_TEST_ONLY`、`synthetic_test_only: true`、`expected_blocked: true`，且 `expected_classification ∈ {WA, RE, TLE}`（**绝不允许 PASS**）。
+- `attack_templates` 覆盖 11 类信任边界探测：`stack_frame_probe`、`argv_result_forgery`、`host_sentinel_read`、`socket_connect`、`fork_subprocess`、`infinite_loop`、`forged_protocol_output`、`write_runner_source_ro_bind`、`write_runner_source_ephemeral_tmpfs`、`exit_code_tamper`、`exception_override`。
+- 每个模板都必须标记 `SYNTHETIC_TEST_ONLY` 与 `synthetic_test_only: true`，且 `expected_classification` 永不为 `PASS`。
+- `expected_blocked: true` 的模板要求判题侧拒绝或失败关闭，`expected_classification ∈ {WA, RE, TLE}`；`expected_observation` 可选，用于记录真实观测名。
+- **唯一例外** `write_runner_source_ephemeral_tmpfs` 显式 `expected_blocked: false`：模板写沙箱内相对路径 `../runner.py`，该路径落在 bwrap 私有 root tmpfs（随沙箱销毁、无法触达宿主），因此允许写成功并观测为 `COMPLETED`；但 `expected_classification = WA`（绝不为 PASS）、`expected_observation = "ephemeral_write_no_host_effect"`，且负例测试必须断言宿主无效果（宿主 sentinel/文件未被修改、无残留进程/临时目录）。
+- **已阻断例外** `write_runner_source_ro_bind` 写 `/worker/solution.py` 或 `/worker/worker_runner.py`：该目录是只读 bind 挂载，写入被拒绝并观测为 RE，`expected_observation = "write_denied_readonly_worker_bind"`。
 - 模板代码只做本地、无害的边界探测（如读取不存在文件、连接保留的 `.invalid` 合成主机名并捕获失败），**不包含真实外联、真实凭据、个人信息或真实攻击载荷**；仅可在隔离 Worker/测试容器中执行。
 
 ## 使用与安全规则
