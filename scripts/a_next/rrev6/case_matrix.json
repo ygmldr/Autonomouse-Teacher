@@ -1,0 +1,196 @@
+{
+  "schema": "m0.a_next.rrev6.case-matrix.v1",
+  "phase": "A-PR3 / R-REV6",
+  "owner": "a-g4r-recovery (Implementer-Test)",
+  "evidence_level_target": "L2-REAL-DSH-FAKE",
+  "baseline": {
+    "worktree": "/root/Autonomous Teacher/worktrees/a-next-rrev6",
+    "branch": "test/a-next-rrev6",
+    "base_sha": "fd1d3a6d101f17e6a86d7c43f06c630326e3e3af",
+    "stage_rule": "build a NEW G4-C stage at the run commit; never reuse stage-stage-2026111* bytes as R-REV6 evidence",
+    "rootfs_rule": "frozen rootfs only ever read; stage build and every container use a fresh writable per-case copy; T0/T1 frozen hash equality enforced by the runner gate",
+    "network_rule": "--network none; 0 HTTP/TCP; synthetic Fake only; no Key; LiveGate BLOCKED",
+    "window_rule": "single-writer exclusive OCI window approved by Lead; runner refuses to start if containers exist, dirty worktree, non-canonical rootfs/deps, or existing output directory"
+  },
+  "evidence_contract": {
+    "per_case_required": [
+      "case_id, status, utc_start/utc_end, exit_code",
+      "git_sha (run HEAD), stage_base_sha, stage_manifest_sha256, stage_tree_sha256",
+      "rootfs_sha256 T0 (frozen), rootfs_work_copy_sha256 (per case), frozen_rootfs_T1_unchanged",
+      "deps_sha256, dsh_sdk_version, dsh_runtime_sha256, adapter_built_js_sha256",
+      "loaded trusted/candidate module/blob SHA list (peercred/trusted-modules.json)",
+      "uid_map/peercred for trusted and candidate containers",
+      "request-lifecycle.jsonl, dispatch-window.jsonl, g4c-send-journal.jsonl (read-only copies)",
+      "attempt DB + broker DB read-only snapshots + ledger snapshot JSON",
+      "reservations/claims/receipts/settlements raw rows (joined by call_id/reservation_id)",
+      "fake counter (received-count.json) and every rcpt-*.json",
+      "run epoch (admission_id/run_id/auth_epoch), 0 real_model_calls, 0 real_external_http_calls, provider_keys_seen=0",
+      "checks[] with expected vs observed and explicit limitation/NOT_RUN reasons"
+    ],
+    "digest_bindings": [
+      {"name": "prepared_digest==claim.request_digest", "note": "business/prepared digest binds the trusted prepared request to the Broker Claim"},
+      {"name": "payload_digest==receipt.raw_sha256", "note": "the exact Fake payload bytes bind to the Fake receipt"},
+      {"name": "prepared_digest != payload_digest", "note": "these are different digests by construction; never asserted equal"},
+      {"name": "attempt.call_id/reservation_id uniqueness per business identity", "note": "same business request replay creates no second attempt/reservation/receipt"},
+      {"name": "held == reserved for PENDING", "note": "conservative hold is never released or converted to FREE without an authoritative Broker terminal state"},
+      {"name": "settled exactly once per reservation", "note": "Broker OK/FAILED is terminal and not re-settled or reversed"}
+    ]
+  },
+  "window": {
+    "requested_duration_minutes": 30,
+    "expected_duration_minutes": 12,
+    "steps": [
+      "T0 preflight: frozen main rootfs/deps canonical hash, git clean, containers empty, disk >= 2.5 GiB",
+      "create frozen rootfs work copy + verify canonical hash; build Stage at run HEAD with rootfs rebound to the work copy (adapter build container) + validate_stage_g4",
+      "run R6-01..R6-13 sequentially, fresh rootfs work copy per case, fresh evidence dir, containers must be empty between cases",
+      "T1 postflight: frozen rootfs/deps hash equality with T0, stage manifest/tree hash recorded, containers_after=[], evidence index + sha256 manifest",
+      "freeze evidence root (read-only), write A_NEXT_RREV6_L2_REPORT.md appendix"
+    ],
+    "abort_conditions": [
+      "frozen rootfs/deps hash drift (T0 != T1) => STOP, keep evidence, report drift",
+      "any real Key/HTTP/TCP/provider call observed => STOP",
+      "duplicate Fake/settlement, PENDING released as FREE, unapproved tool reachable => STOP",
+      "container cleanup failure or leftover podman state => STOP"
+    ]
+  },
+  "cases": [
+    {
+      "case_id": "R6-01",
+      "goal": "real DSH Echo: one provider dispatch, one receipt, one settlement",
+      "covers": ["A4-01", "R-REV6"],
+      "method": "launch candidate mode=dsh scenario=echo against fresh stage; synthetic prompt G6_ECHO_<nonce>",
+      "injection": "none",
+      "injection_stability": "STABLE",
+      "expected": {"dispatches": 1, "fake": 1, "reservations": 1, "settlements": 1, "attempt_state": "SETTLED", "dsh_finish": "completed"},
+      "checks": ["prepared_digest==claim.request_digest", "payload_digest==receipt.raw_sha256", "fake_counter==receipts", "broker OK cost archived once", "usage present in claim/receipt/settlement"]
+    },
+    {
+      "case_id": "R6-02",
+      "goal": "real DSH Tool: two legal provider dispatches in one run are both accepted",
+      "covers": ["A4-01", "A4-02-different-legal-steps"],
+      "method": "scenario=tool with approved skill_lookup schema; two provider requests (tool-call round + final text round)",
+      "injection": "none",
+      "injection_stability": "STABLE",
+      "expected": {"dispatches": 2, "fake": 2, "reservations": 2, "settlements": 2, "attempt_states": ["SETTLED", "SETTLED"]},
+      "checks": ["two distinct call_id/reservation_id", "no ATTEMPT_ALREADY_STARTED for the second legal step", "both receipts bound", "tool-call/tool-result schema approved"]
+    },
+    {
+      "case_id": "R6-03",
+      "goal": "real DSH Resume two-turn: turn1 echo + turn2 resume against the same session store",
+      "covers": ["A4-01", "R-REV6-resume"],
+      "method": "two sequential candidate containers sharing run_dir/candidate-session; turn1 scenario=echo prompt G6_RESUME_ALPHA, turn2 scenario=resume prompt G6_RESUME_BETA",
+      "injection": "none (candidate_entry resume_session path)",
+      "injection_stability": "STABLE",
+      "expected": {"dispatches": 2, "fake": 2, "reservations": 2, "turn2_resume_markers": ">=1", "distinct_business_identities": 2},
+      "checks": ["turn2 resume marker/session lines evidence", "prepared_digest binding for both turns", "no false replay rejection of the legal second turn", "no cross-turn attempt overwrite"]
+    },
+    {
+      "case_id": "R6-04",
+      "goal": "same business request replay is rejected without second dispatch/Fake/settlement",
+      "covers": ["A4-01", "R-REV6-replay"],
+      "method": "after R6-01 state source (or same case run twice): run scenario=echo with the exact same session id + prompt; DSH terminal error expected",
+      "injection": "none (identity replay)",
+      "injection_stability": "STABLE",
+      "expected": {"dispatches_delta": 0, "fake_delta": 0, "reservations_delta": 0, "rejection_code": "ATTEMPT_ALREADY_STARTED", "dsh_terminal": "error"},
+      "checks": ["request-lifecycle/dispatch-window record the rejection", "no new attempt row", "ledger byte-identical to pre-replay snapshot"]
+    },
+    {
+      "case_id": "R6-05",
+      "goal": "pre-Reserve timeout observed at the request layer; nothing reserved or sent",
+      "covers": ["A4-01", "R2-01-regression"],
+      "method": "deadline_ms=800 + test-only delay hook before_reserve 2500ms, real DSH echo request",
+      "injection": "controller test-only delay hook (existing, env gated)",
+      "injection_stability": "STABLE",
+      "expected": {"dispatches": 0, "fake": 0, "reservations": 0, "attempts": 0, "lifecycle_events": ["received", "controller_entered", "deadline_before_controller"], "dsh_terminal": "error"},
+      "checks": ["deadline_before_controller stage=before_reserve, controller_entered=true, reserved=false", "no fabricated dispatch_seq for a never-entered request", "0 ledger delta"]
+    },
+    {
+      "case_id": "R6-06",
+      "goal": "post-Reserve revocation: no Fake send, PENDING/held, first cause preserved after recovery",
+      "covers": ["A4-01", "P2-06", "R-REV3"],
+      "method": "revocation document written at after_reserve_before_send marker; controller gate re-reads revocation; restart recovery pass",
+      "injection": "existing revocation document + test-only delay hook + trusted restart",
+      "injection_stability": "STABLE",
+      "expected": {"fake": 0, "reservations": 1, "broker_state": "PENDING", "attempt_state": "SETTLEMENT_UNCERTAIN", "reason_class": "REVOKED_PRE_SEND", "held": ">0"},
+      "checks": ["reason retains REVOKED_PRE_SEND/RUN_AUTHORIZATION_REVOKED after reconcile", "recovery diagnostics record the receipt observation separately", "replay rejected; no settle/fail; no FREE"]
+    },
+    {
+      "case_id": "R6-07",
+      "goal": "post-send timeout: Fake received bytes, deadline before result, conservative held",
+      "covers": ["A4-01", "R-REV3"],
+      "method": "scenario=stream (receipt then stall), deadline_ms=800, trusted restart recovery",
+      "injection": "Fake stall fixture + deadline (existing)",
+      "injection_stability": "STABLE",
+      "expected": {"fake": 1, "receipts": 1, "broker_state": "PENDING", "attempt_state": "SETTLEMENT_UNCERTAIN", "held": ">0", "resend": false},
+      "checks": ["payload_digest==receipt.raw_sha256 for the one receipt", "no second receipt/Fake after replay", "recovery keeps PENDING/held; no premature settle/fail"]
+    },
+    {
+      "case_id": "R6-08",
+      "goal": "Controller crash mid-request: no duplicate dispatch; recovery conservative; replay no-op",
+      "covers": ["A4-02", "F4-06-partial"],
+      "method": "trusted controller crash hook after_attempt_start_before_fake_send (os._exit) then real restart/reconcile; replay same identity",
+      "injection": "existing trusted crash hook (env gated)",
+      "injection_stability": "STABLE",
+      "expected": {"fake": 0, "attempt_state": "SETTLEMENT_UNCERTAIN", "reason": "NO_RECEIPT_AFTER_CRASH", "broker_state": "PENDING", "replay": "no new attempt/fake"},
+      "checks": ["recovery exit 3 ADMISSION_REPLAYED after reconcile", "one attempt row, no second Fake/settlement", "held>0"]
+    },
+    {
+      "case_id": "R6-09",
+      "goal": "Controller hard stop / socket lost mid-request (SIGKILL fragment, not just hook)",
+      "covers": ["A4-02", "F5-R6-partial"],
+      "method": "kill trusted container with SIGKILL at after_reserve_before_send marker; candidate DSH observes stream loss; restart recovery",
+      "injection": "host podman kill + delay marker (test-side only, no src hook)",
+      "injection_stability": "CONDITIONAL",
+      "expected": {"fake": "0 or 1 depending on wire boundary", "attempt_state": "SETTLEMENT_UNCERTAIN or RESPONSE_OBSERVED", "broker_state": "PENDING", "replay": "rejected/no-op"},
+      "checks": ["candidate terminal error observed", "no duplicate dispatch/settlement after restart", "held>0; evidence records the exact wire window", "limitation: not a full nanosecond SIGKILL sweep (F5-R6)"]
+    },
+    {
+      "case_id": "R6-10",
+      "goal": "Candidate crash while Controller remains alive: no duplicate dispatch, conservative cost",
+      "covers": ["A4-02", "R-REV6-candidate-crash"],
+      "method": "real DSH candidate killed with SIGKILL at after_reserve_before_send marker (deadline 800ms so the worker aborts pre-send); controller keeps serving; replay from a fresh candidate",
+      "injection": "host podman kill of the candidate container at the test delay marker",
+      "injection_stability": "CONDITIONAL",
+      "expected": {"fake": 0, "reservations": 1, "broker_state": "PENDING", "held": ">0", "attempts": 0, "replay": "rejected; controller alive"},
+      "checks": ["trusted container still running after candidate death", "no duplicate dispatch or settlement", "held>0 and never FREE", "candidate exit code recorded as crash"],
+      "limitations": ["test-only delay widens a real pre-send window; no production hook", "a second variant with deadline 30000 is recorded separately (Fake may already be sent) and judged exactly-once, not held"]
+    },
+    {
+      "case_id": "R6-11",
+      "goal": "Fake crash mid-request: conservative uncertain hold, no double settle, recovery preserves",
+      "covers": ["A4-03", "R-REV3"],
+      "method": "kill fake_provider.py child inside the trusted container at after_reserve_before_send marker; then involve Fake send; restart recovery",
+      "injection": "host podman exec /proc SIGKILL of the Fake child (test-side only)",
+      "injection_stability": "CONDITIONAL",
+      "expected": {"attempt_state": "SETTLEMENT_UNCERTAIN", "reason_class": "FAKE_IO_ERROR", "broker_state": "PENDING", "held": ">0", "fake_send": 0},
+      "checks": ["no sync/settle double-write", "recovery diagnostics record the reconciliation observation", "replay refused; no second Fake"]
+    },
+    {
+      "case_id": "R6-12",
+      "goal": "Broker down/restart conservation: PENDING reservation held, no release, no double charge",
+      "covers": ["A4-03", "R-REV6-broker"],
+      "method": "kill broker subprocess at after_reserve_before_send marker (before Claim); restart trusted (broker respawn on same DB); reconcile",
+      "injection": "existing kill-broker step + trusted restart",
+      "injection_stability": "STABLE",
+      "expected": {"fake": 0, "reservations": 1, "broker_state": "PENDING", "held": ">0", "settlements": 0, "intent_state": "HELD_UNCERTAIN"},
+      "checks": ["Broker DB single reservation row, no settle/fail row", "reconcile reads restored Broker status PENDING, keeps held", "no auto-resend"]
+    },
+    {
+      "case_id": "R6-13",
+      "goal": "usage/hash reconciliation over all real-DSH cases: authentic digest joins, no cross-digest conflation",
+      "covers": ["A4-01", "R-REV6-usage-hash"],
+      "method": "post-hoc audit over R6-01..R6-12 read-only evidence snapshots",
+      "injection": "none (audit only)",
+      "injection_stability": "STABLE",
+      "expected": {"binding_failures": 0, "double_settlements": 0, "held_reserved_mismatches": 0, "fake_counter_mismatches": 0},
+      "checks": ["prepared_digest==claim.request_digest", "payload_digest==receipt.raw_sha256", "prepared_digest != payload_digest (never conflated)", "usage fields join claim/receipt/settlement", "fake counter == receipt count", "PENDING held == reserved cost"]
+    }
+  ],
+  "not_run_predictions": [
+    {"id": "R6-NR1", "item": "real Provider/API/billing usage", "reason": "no-key scope; forbidden by A-NEXT instructions"},
+    {"id": "R6-NR2", "item": "authoritative runtime tool-registry snapshot", "reason": "A-PR2/Registry scope; B03/E5-P04 stays UNVERIFIED; not claimed here"},
+    {"id": "R6-NR3", "item": "exhaustive external SIGKILL/power-loss window sweep", "reason": "no controllable hook; F5-R6 limitation is preserved; only the listed deterministic windows run"},
+    {"id": "R6-NR4", "item": "session resume across a Controller restart (same DSH session replayed to a second controller)", "reason": "admission is single-use and controller restart exits ADMISSION_REPLAYED by design; semantics require a new Run admission (A-PR1) and are not claimed here"},
+    {"id": "R6-NR5", "item": "real dual-host / cross-machine isolation", "reason": "single PVE host; environment-limited, reported as such"}
+  ]
+}
