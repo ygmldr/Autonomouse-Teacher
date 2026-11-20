@@ -166,7 +166,6 @@ def test_repository_worktree_and_history_is_clean() -> None:
 
 
 def test_positive_detectors() -> None:
-    material = _synthetic_material()
     for text, expected in _positive_cases():
         kinds = _kinds(text)
         assert expected in kinds, f"missing {expected} for {text[:48]!r}"
