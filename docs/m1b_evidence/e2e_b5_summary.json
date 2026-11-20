@@ -1,0 +1,1215 @@
+{
+  "artifact_manifest": {
+    "base_sha": "3e7afee077845a071cd364e93ab209cac20b2d5f",
+    "generated_at": "2026-11-20T00:00:00Z",
+    "implementation_commit": "e2b6e85d8939b2411b2b6c6cc26538014c6f57e3",
+    "manifest_version": "m1b.b5.evidence.manifest.v1",
+    "note": "fixed artifact manifest: no wall clock and no live git HEAD are read; the same content tree regenerates byte-identical evidence"
+  },
+  "boundary": {
+    "evidence_classes": "MOCK + DETERMINISTIC; real teaching effect NOT_VERIFIED",
+    "hidden_scoring": "SCORER_ONLY (rubric audit exposes dimension names + spec digests only)",
+    "network": "NONE",
+    "provider_or_live_gate": "NONE",
+    "real_resume_or_jd": "NONE (synthetic interview/JD fixtures only)",
+    "scope": "offline synthetic only, not real teaching effect"
+  },
+  "cf": {
+    "learners": [
+      {
+        "assessment_status_counts": {
+          "CORRECT": 7,
+          "INCORRECT": 1
+        },
+        "event_count": 55,
+        "first_action": {
+          "action_id": "action:0379d277a04e8edd",
+          "action_kind": "DIAGNOSE",
+          "item_id": "item.bs.mcq.007",
+          "node_ids": [
+            "cf.complexity.log"
+          ],
+          "phase": "DIAGNOSE",
+          "reason_code": "DIAGNOSTIC_ITEM",
+          "reason_detail": "TARGET_EVIDENCE_GAP: cf.complexity.log is below mastery threshold 0.50 or insufficiently observed; a response to item item.bs.mcq.007 would distinguish 'not yet learned' from 'learned but not yet evidenced'.",
+          "turn_index": 0
+        },
+        "initial_plan_steps": [
+          {
+            "action_kind": "EXPLAIN",
+            "item_id": null,
+            "node_ids": [
+              "cf.search.binary"
+            ],
+            "ordinal": 0,
+            "phase": "TEACH",
+            "reason_code": "TEACH_TARGET_NODE",
+            "reason_detail": "target cf.search.binary mastery=0.30 < objective min_mastery=0.70 with evidence_count=2; teach the concept before asking for practice."
+          },
+          {
+            "action_kind": "PRACTICE",
+            "item_id": "item.bs.mcq.004",
+            "node_ids": [
+              "cf.search.binary"
+            ],
+            "ordinal": 1,
+            "phase": "PRACTICE",
+            "reason_code": "PRACTICE_TARGET_NODE",
+            "reason_detail": "practice target cf.search.binary with teacher-visible item item.bs.mcq.004 right after teaching to apply the concept."
+          },
+          {
+            "action_kind": "DIAGNOSE",
+            "item_id": "item.bs.code.001",
+            "node_ids": [
+              "cf.search.binary"
+            ],
+            "ordinal": 2,
+            "phase": "ASSESS",
+            "reason_code": "ASSESS_PROGRESS",
+            "reason_detail": "assess target cf.search.binary with item item.bs.code.001; observed evidence updates mastery and error counts."
+          },
+          {
+            "action_kind": "EXPLAIN",
+            "item_id": null,
+            "node_ids": [
+              "cf.search.boundary"
+            ],
+            "ordinal": 3,
+            "phase": "TEACH",
+            "reason_code": "TEACH_TARGET_NODE",
+            "reason_detail": "target cf.search.boundary mastery=0.00 < objective min_mastery=0.70 with evidence_count=1; teach the concept before asking for practice."
+          },
+          {
+            "action_kind": "PRACTICE",
+            "item_id": "item.bs.mcq.005",
+            "node_ids": [
+              "cf.search.boundary"
+            ],
+            "ordinal": 4,
+            "phase": "PRACTICE",
+            "reason_code": "PRACTICE_TARGET_NODE",
+            "reason_detail": "practice target cf.search.boundary with teacher-visible item item.bs.mcq.005 right after teaching to apply the concept."
+          },
+          {
+            "action_kind": "DIAGNOSE",
+            "item_id": "item.bs.mcq.005",
+            "node_ids": [
+              "cf.search.boundary"
+            ],
+            "ordinal": 5,
+            "phase": "ASSESS",
+            "reason_code": "ASSESS_PROGRESS",
+            "reason_detail": "assess target cf.search.boundary with item item.bs.mcq.005; observed evidence updates mastery and error counts."
+          },
+          {
+            "action_kind": "EXPLAIN",
+            "item_id": null,
+            "node_ids": [
+              "cf.search.lower_upper"
+            ],
+            "ordinal": 6,
+            "phase": "TEACH",
+            "reason_code": "TEACH_TARGET_NODE",
+            "reason_detail": "target cf.search.lower_upper mastery=0.00 < objective min_mastery=0.70 with evidence_count=0; teach the concept before asking for practice."
+          },
+          {
+            "action_kind": "PRACTICE",
+            "item_id": "item.bs.mcq.006",
+            "node_ids": [
+              "cf.search.lower_upper"
+            ],
+            "ordinal": 7,
+            "phase": "PRACTICE",
+            "reason_code": "PRACTICE_TARGET_NODE",
+            "reason_detail": "practice target cf.search.lower_upper with teacher-visible item item.bs.mcq.006 right after teaching to apply the concept."
+          }
+        ],
+        "learner_id": "m1a.learner.student_a",
+        "mastery_after": {
+          "cf.array.basics": 0.3,
+          "cf.complexity.log": 0.2,
+          "cf.search.binary": 0.543571,
+          "cf.search.boundary": 0.0,
+          "cf.search.linear": 0.3,
+          "cf.sort.sortedness": 0.3
+        },
+        "phase_sequence": [
+          "DIAGNOSE",
+          "DIAGNOSE",
+          "DIAGNOSE",
+          "ASSESS",
+          "UPDATE",
+          "REVIEW",
+          "DIAGNOSE",
+          "DIAGNOSE",
+          "ASSESS",
+          "UPDATE",
+          "REVIEW",
+          "REVIEW",
+          "TEACH",
+          "PAUSED",
+          "REVIEW",
+          "PRACTICE",
+          "ASSESS",
+          "UPDATE",
+          "REVIEW",
+          "PRACTICE",
+          "ASSESS",
+          "UPDATE",
+          "REVIEW",
+          "PRACTICE",
+          "ASSESS",
+          "UPDATE",
+          "REVIEW",
+          "PRACTICE",
+          "ASSESS",
+          "UPDATE",
+          "REVIEW",
+          "PRACTICE",
+          "ASSESS",
+          "UPDATE",
+          "REVIEW",
+          "PRACTICE",
+          "ASSESS",
+          "UPDATE",
+          "REVIEW"
+        ],
+        "session_id": "session:m1a.learner.student_a:goal.m1a.learner.student_a.obj.cf.binary_search.mastery",
+        "student_fixture": "student_a",
+        "verify_rebuild": true
+      },
+      {
+        "assessment_status_counts": {
+          "INCORRECT": 3,
+          "NEEDS_REVIEW": 4
+        },
+        "event_count": 50,
+        "first_action": {
+          "action_id": "action:d123580e284bc19c",
+          "action_kind": "DIAGNOSE",
+          "item_id": "item.bs.mcq.002",
+          "node_ids": [
+            "cf.sort.sortedness"
+          ],
+          "phase": "DIAGNOSE",
+          "reason_code": "DIAGNOSTIC_ITEM",
+          "reason_detail": "HARD_PREREQUISITE_GAP: cf.sort.sortedness is below mastery threshold 0.50 or insufficiently observed; a response to item item.bs.mcq.002 would distinguish 'not yet learned' from 'learned but not yet evidenced'.",
+          "turn_index": 0
+        },
+        "initial_plan_steps": [
+          {
+            "action_kind": "RETEACH",
+            "item_id": null,
+            "node_ids": [
+              "cf.sort.sortedness"
+            ],
+            "ordinal": 0,
+            "phase": "TEACH",
+            "reason_code": "REMEDIATE_HARD_PREREQUISITE",
+            "reason_detail": "HARD prerequisite cf.sort.sortedness mastery=0.00 is below 0.25; it blocks objective target(s) ['cf.search.binary', 'cf.search.boundary', 'cf.search.lower_upper']; reteach it before target teaching."
+          },
+          {
+            "action_kind": "PRACTICE",
+            "item_id": "item.bs.mcq.002",
+            "node_ids": [
+              "cf.sort.sortedness"
+            ],
+            "ordinal": 1,
+            "phase": "PRACTICE",
+            "reason_code": "PRACTICE_HARD_PREREQUISITE",
+            "reason_detail": "practice HARD prerequisite cf.sort.sortedness with teacher-visible item item.bs.mcq.002 to verify the remedial teaching before moving on."
+          },
+          {
+            "action_kind": "RETEACH",
+            "item_id": null,
+            "node_ids": [
+              "cf.search.binary"
+            ],
+            "ordinal": 2,
+            "phase": "TEACH",
+            "reason_code": "REMEDIATE_HARD_PREREQUISITE",
+            "reason_detail": "HARD prerequisite cf.search.binary mastery=0.00 is below 0.25; it blocks objective target(s) ['cf.search.boundary', 'cf.search.lower_upper']; reteach it before target teaching."
+          },
+          {
+            "action_kind": "PRACTICE",
+            "item_id": "item.bs.mcq.004",
+            "node_ids": [
+              "cf.search.binary"
+            ],
+            "ordinal": 3,
+            "phase": "PRACTICE",
+            "reason_code": "PRACTICE_HARD_PREREQUISITE",
+            "reason_detail": "practice HARD prerequisite cf.search.binary with teacher-visible item item.bs.mcq.004 to verify the remedial teaching before moving on."
+          },
+          {
+            "action_kind": "EXPLAIN",
+            "item_id": null,
+            "node_ids": [
+              "cf.search.boundary"
+            ],
+            "ordinal": 4,
+            "phase": "TEACH",
+            "reason_code": "TEACH_TARGET_NODE",
+            "reason_detail": "target cf.search.boundary mastery=0.00 < objective min_mastery=0.70 with evidence_count=0; teach the concept before asking for practice."
+          },
+          {
+            "action_kind": "PRACTICE",
+            "item_id": "item.bs.mcq.005",
+            "node_ids": [
+              "cf.search.boundary"
+            ],
+            "ordinal": 5,
+            "phase": "PRACTICE",
+            "reason_code": "PRACTICE_TARGET_NODE",
+            "reason_detail": "practice target cf.search.boundary with teacher-visible item item.bs.mcq.005 right after teaching to apply the concept."
+          },
+          {
+            "action_kind": "DIAGNOSE",
+            "item_id": "item.bs.code.003",
+            "node_ids": [
+              "cf.search.boundary"
+            ],
+            "ordinal": 6,
+            "phase": "ASSESS",
+            "reason_code": "ASSESS_PROGRESS",
+            "reason_detail": "assess target cf.search.boundary with item item.bs.code.003; observed evidence updates mastery and error counts."
+          },
+          {
+            "action_kind": "EXPLAIN",
+            "item_id": null,
+            "node_ids": [
+              "cf.search.lower_upper"
+            ],
+            "ordinal": 7,
+            "phase": "TEACH",
+            "reason_code": "TEACH_TARGET_NODE",
+            "reason_detail": "target cf.search.lower_upper mastery=0.00 < objective min_mastery=0.70 with evidence_count=0; teach the concept before asking for practice."
+          }
+        ],
+        "learner_id": "m1a.learner.student_b",
+        "mastery_after": {
+          "cf.array.basics": 0.3,
+          "cf.search.binary": 0.0,
+          "cf.search.linear": 0.3,
+          "cf.sort.sortedness": 0.0
+        },
+        "phase_sequence": [
+          "DIAGNOSE",
+          "DIAGNOSE",
+          "DIAGNOSE",
+          "ASSESS",
+          "UPDATE",
+          "REVIEW",
+          "REVIEW",
+          "DIAGNOSE",
+          "DIAGNOSE",
+          "ASSESS",
+          "UPDATE",
+          "REVIEW",
+          "ASSESS",
+          "ASSESS",
+          "UPDATE",
+          "REVIEW",
+          "PAUSED",
+          "REVIEW",
+          "TEACH",
+          "PRACTICE",
+          "ASSESS",
+          "UPDATE",
+          "REVIEW",
+          "REVIEW",
+          "ASSESS",
+          "ASSESS",
+          "UPDATE",
+          "REVIEW",
+          "ASSESS",
+          "ASSESS",
+          "UPDATE",
+          "REVIEW",
+          "ASSESS",
+          "ASSESS",
+          "UPDATE",
+          "REVIEW"
+        ],
+        "session_id": "session:m1a.learner.student_b:goal.m1a.learner.student_b.obj.cf.binary_search.mastery",
+        "student_fixture": "student_b",
+        "verify_rebuild": true
+      }
+    ],
+    "paths_differ": true,
+    "shared_journal": "one canonical SQLite database: per-learner event/seq log + session table"
+  },
+  "classification": {
+    "DETERMINISTIC": "state machine, ids/seq, planner policy, rubric arithmetic, replay",
+    "MOCK": "synthetic CF students, interview answers, JD/resume and knowledge fixtures",
+    "NOT_VERIFIED": "real teaching effect, real resume/JD, real provider or Live"
+  },
+  "cross_domain": {
+    "cf_session_id": "b5.cross.cf.session",
+    "final_cf_phase": "REVIEW",
+    "final_cf_turn": 10,
+    "interview_clarifications": 1,
+    "interview_jd_version": "v2",
+    "interview_probe_sequence": [],
+    "interview_session_id": "b5.cross.interview.session",
+    "interview_stop_after": 3,
+    "learner_id": "b5.cross_domain.learner",
+    "pause_turn": 4,
+    "paused_phase": "PAUSED",
+    "resumed_phase": "REVIEW",
+    "seq_after_interview": 52,
+    "seq_before_pause": 34,
+    "seq_contiguous": true,
+    "session_count": 2,
+    "session_ids": [
+      "b5.cross.cf.session",
+      "b5.cross.interview.session"
+    ],
+    "snapshot_after_interview": {
+      "completed_item_count": 10,
+      "masteries": {
+        "cf.array.basics": {
+          "confidence": 0.75,
+          "evidence_count": 2,
+          "value": 0.3
+        },
+        "cf.complexity.log": {
+          "confidence": 0.5,
+          "evidence_count": 1,
+          "value": 0.2
+        },
+        "cf.search.binary": {
+          "confidence": 0.75,
+          "evidence_count": 2,
+          "value": 0.3
+        },
+        "cf.search.boundary": {
+          "confidence": 0.4375,
+          "evidence_count": 2,
+          "value": 0.0
+        },
+        "cf.search.linear": {
+          "confidence": 0.75,
+          "evidence_count": 2,
+          "value": 0.3
+        },
+        "cf.sort.sortedness": {
+          "confidence": 0.75,
+          "evidence_count": 2,
+          "value": 0.3
+        },
+        "interview.node.engineering_metrics": {
+          "confidence": 0.4375,
+          "evidence_count": 2,
+          "value": 0.05
+        }
+      },
+      "revision": 13
+    },
+    "snapshot_before_pause": {
+      "completed_item_count": 9,
+      "masteries": {
+        "cf.array.basics": {
+          "confidence": 0.75,
+          "evidence_count": 2,
+          "value": 0.3
+        },
+        "cf.complexity.log": {
+          "confidence": 0.5,
+          "evidence_count": 1,
+          "value": 0.2
+        },
+        "cf.search.binary": {
+          "confidence": 0.75,
+          "evidence_count": 2,
+          "value": 0.3
+        },
+        "cf.search.boundary": {
+          "confidence": 0.4375,
+          "evidence_count": 2,
+          "value": 0.0
+        },
+        "cf.search.linear": {
+          "confidence": 0.75,
+          "evidence_count": 2,
+          "value": 0.3
+        },
+        "cf.sort.sortedness": {
+          "confidence": 0.75,
+          "evidence_count": 2,
+          "value": 0.3
+        }
+      },
+      "revision": 11
+    },
+    "snapshot_changed_after_interview": true,
+    "snapshot_final": {
+      "completed_item_count": 10,
+      "masteries": {
+        "cf.array.basics": {
+          "confidence": 0.75,
+          "evidence_count": 2,
+          "value": 0.3
+        },
+        "cf.complexity.log": {
+          "confidence": 0.5,
+          "evidence_count": 1,
+          "value": 0.2
+        },
+        "cf.search.binary": {
+          "confidence": 0.992188,
+          "evidence_count": 7,
+          "value": 0.518571
+        },
+        "cf.search.boundary": {
+          "confidence": 0.4375,
+          "evidence_count": 2,
+          "value": 0.0
+        },
+        "cf.search.linear": {
+          "confidence": 0.75,
+          "evidence_count": 2,
+          "value": 0.3
+        },
+        "cf.sort.sortedness": {
+          "confidence": 0.75,
+          "evidence_count": 2,
+          "value": 0.3
+        },
+        "interview.node.engineering_metrics": {
+          "confidence": 0.4375,
+          "evidence_count": 2,
+          "value": 0.05
+        }
+      },
+      "revision": 18
+    },
+    "unified_domains": [
+      "cf_binary_search",
+      "interview_coach"
+    ],
+    "unified_event_types": [
+      "ACTION_TAKEN",
+      "ASSESSED",
+      "ASSESSMENT_PREPARED",
+      "DIAGNOSIS_COMPLETED",
+      "MASTERY_UPDATED",
+      "PLAN_CREATED",
+      "RESPONSE_SUBMITTED",
+      "SESSION_PAUSED",
+      "SESSION_RESUMED",
+      "SESSION_STARTED"
+    ],
+    "verify_rebuild": true
+  },
+  "evidence_files": [
+    "e2e_b5_cf.jsonl",
+    "e2e_b5_cross_domain.jsonl",
+    "e2e_b5_freshness.jsonl",
+    "e2e_b5_interview.jsonl"
+  ],
+  "evidence_hashes": {
+    "e2e_b5_cf.jsonl": "8de98500bb69582bf932dceb25d4938a10ad991c72ccd2dbf18a94a2d5a20626",
+    "e2e_b5_cross_domain.jsonl": "7c8c5b14f26ae75aba465b94a24bcb5623c01498dd720f710efc60a57f452bef",
+    "e2e_b5_freshness.jsonl": "efa33f18516f55529df0086acb57e1b5ddae0414bf611516c55ddc5a11fd2608",
+    "e2e_b5_interview.jsonl": "44b1a07199936efcd6acd15707c89885645d82ce04f713cb12bdbf0f05604f36"
+  },
+  "fixed_timestamp": "2026-11-20T00:00:00Z",
+  "freshness": {
+    "blocked_jd": [
+      {
+        "error_code": "FRESHNESS_JD_GATE_BLOCKED",
+        "events_written": 0,
+        "jd_id": "jd:rec",
+        "map_code": "MAP-E10_JD_EXPIRED_OR_CONFLICT",
+        "now": "2027-05-01T00:00:00Z",
+        "reason_code": "RECHECK_JD_EXPIRED",
+        "record": "blocked_jd",
+        "rejected": true,
+        "scenario_id": "jd-rec-expired",
+        "section": "freshness"
+      },
+      {
+        "error_code": "FRESHNESS_JD_GATE_BLOCKED",
+        "events_written": 0,
+        "jd_id": "jd:rec",
+        "map_code": "MAP-E10_JD_EXPIRED_OR_CONFLICT",
+        "now": "2026-05-01T00:00:00Z",
+        "reason_code": "RECHECK_JD_NOT_YET_ACTIVE",
+        "record": "blocked_jd",
+        "rejected": true,
+        "scenario_id": "jd-rec-not-yet-active",
+        "section": "freshness"
+      },
+      {
+        "error_code": "FRESHNESS_JD_GATE_BLOCKED",
+        "events_written": 0,
+        "jd_id": "jd:demo-overlap",
+        "map_code": "MAP-E10_JD_EXPIRED_OR_CONFLICT",
+        "now": "2026-10-01T00:00:00Z",
+        "reason_code": "RECHECK_JD_CONFLICT",
+        "record": "blocked_jd",
+        "rejected": true,
+        "scenario_id": "jd-overlap-conflict",
+        "section": "freshness"
+      }
+    ],
+    "blocked_knowledge": [
+      {
+        "change_kind": "RECHECK",
+        "details_map_code": "MAP-E09_KNOWLEDGE_CONFLICT_BLOCKED",
+        "error_code": "FRESHNESS_KNOWLEDGE_GATE_BLOCKED",
+        "events_written": 0,
+        "map_code": "MAP-E09_KNOWLEDGE_CONFLICT_BLOCKED",
+        "reason_code": "RECHECK_UNAUTHORITATIVE_SOURCE",
+        "record": "blocked_knowledge",
+        "rejected": true,
+        "scenario_id": "k-recheck-community-001",
+        "section": "freshness",
+        "source_id": "community:cold-007"
+      },
+      {
+        "change_kind": "RECHECK",
+        "details_map_code": "MAP-E09_KNOWLEDGE_CONFLICT_BLOCKED",
+        "error_code": "FRESHNESS_KNOWLEDGE_GATE_BLOCKED",
+        "events_written": 0,
+        "map_code": "MAP-E09_KNOWLEDGE_CONFLICT_BLOCKED",
+        "reason_code": "RECHECK_CONFLICT",
+        "record": "blocked_knowledge",
+        "rejected": true,
+        "scenario_id": "k-recheck-conflict-001",
+        "section": "freshness",
+        "source_id": "community:post-009"
+      },
+      {
+        "change_kind": "RECHECK",
+        "details_map_code": "MAP-E08_KNOWLEDGE_RECHECK_BLOCKED",
+        "error_code": "FRESHNESS_KNOWLEDGE_GATE_BLOCKED",
+        "events_written": 0,
+        "map_code": "MAP-E08_KNOWLEDGE_RECHECK_BLOCKED",
+        "reason_code": "RECHECK_EXPIRED",
+        "record": "blocked_knowledge",
+        "rejected": true,
+        "scenario_id": "k-recheck-expired-001",
+        "section": "freshness",
+        "source_id": "doc:cal-001"
+      },
+      {
+        "change_kind": "RECHECK",
+        "details_map_code": "MAP-E08_KNOWLEDGE_RECHECK_BLOCKED",
+        "error_code": "FRESHNESS_KNOWLEDGE_GATE_BLOCKED",
+        "events_written": 0,
+        "map_code": "MAP-E08_KNOWLEDGE_RECHECK_BLOCKED",
+        "reason_code": "RECHECK_FUTURE_DATED",
+        "record": "blocked_knowledge",
+        "rejected": true,
+        "scenario_id": "k-recheck-futuredate-001",
+        "section": "freshness",
+        "source_id": "doc:leak-001"
+      },
+      {
+        "change_kind": "RECHECK",
+        "details_map_code": "MAP-E08_KNOWLEDGE_RECHECK_BLOCKED",
+        "error_code": "FRESHNESS_KNOWLEDGE_GATE_BLOCKED",
+        "events_written": 0,
+        "map_code": "MAP-E08_KNOWLEDGE_RECHECK_BLOCKED",
+        "reason_code": "RECHECK_OLDER_SOURCE",
+        "record": "blocked_knowledge",
+        "rejected": true,
+        "scenario_id": "k-recheck-older-001",
+        "section": "freshness",
+        "source_id": "mirror:mtl-001"
+      }
+    ],
+    "decision_counts": {
+      "KEEP": 2,
+      "RECHECK": 5,
+      "UPDATE": 2
+    },
+    "eligible_updates": [
+      {
+        "change_kind": "UPDATE",
+        "curriculum_eligible": true,
+        "events_written": 4,
+        "learner_id": "b5.freshness.eligible.0",
+        "reason_code": "UPDATE_VERIFIED_AUTHORITATIVE",
+        "record": "eligible_update",
+        "scenario_id": "k-update-001",
+        "section": "freshness",
+        "source_id": "doc:auc-001"
+      },
+      {
+        "change_kind": "UPDATE",
+        "curriculum_eligible": true,
+        "events_written": 4,
+        "learner_id": "b5.freshness.eligible.1",
+        "reason_code": "UPDATE_VERIFIED_AUTHORITATIVE",
+        "record": "eligible_update",
+        "scenario_id": "k-update-002",
+        "section": "freshness",
+        "source_id": "paper:ns-001"
+      }
+    ],
+    "gate_enforced": true,
+    "silent_imports": 0
+  },
+  "interview": {
+    "full_solution_emitted": false,
+    "jd_change": {
+      "affects_new_plans": true,
+      "affects_running_sessions": false,
+      "delta": {
+        "added_requirements": [
+          "具备 LLM 排序探索经验者优先",
+          "掌握向量召回与 ANN 检索"
+        ],
+        "added_skills": [
+          "ann_retrieval",
+          "vector_recall"
+        ],
+        "removed_requirements": [
+          "掌握 AUC/GAUC 等离线评估"
+        ],
+        "removed_skills": [
+          "feature_engineering"
+        ]
+      },
+      "jd_id": "jd:rec",
+      "new_session": {
+        "event_count": 12,
+        "journal_sha256": "e6b644bbf542dd70d93012638e85a05bacd056893c60e590092a00534e5f43f3",
+        "pending_item_id": "interview.item.q-rec-001",
+        "phase": "ASSESS",
+        "turn_index": 2
+      },
+      "new_version": "v2",
+      "old_session_after": {
+        "event_count": 27,
+        "journal_sha256": "554c1153108a925c69e39736990687ab5656781a034103b3bd5ec93960e747fa",
+        "pending_item_id": null,
+        "phase": "REVIEW",
+        "turn_index": 5
+      },
+      "old_session_before": {
+        "event_count": 27,
+        "journal_sha256": "554c1153108a925c69e39736990687ab5656781a034103b3bd5ec93960e747fa",
+        "pending_item_id": null,
+        "phase": "REVIEW",
+        "turn_index": 5
+      },
+      "old_version": "v1",
+      "reason_code": "JD_CHANGE_NEW_PLANS_ONLY"
+    },
+    "jd_versions": [
+      "v1",
+      "v2",
+      "v2"
+    ],
+    "learners": [
+      {
+        "learner_id": "b5.interview.learner_a",
+        "learner_state": "seeded_evidence (3 CORRECT synthetic observations)",
+        "sessions": [
+          {
+            "clarification_count": 0,
+            "event_count": 27,
+            "final_pending_item_id": null,
+            "final_phase": "REVIEW",
+            "final_turn": 5,
+            "hint_levels": [],
+            "jd_id": "jd:rec",
+            "jd_ref": "jd:rec@v1",
+            "jd_version": "v1",
+            "learner_id": "b5.interview.learner_a",
+            "objective_id": "obj.interview.recommendation_ctr.mastery",
+            "observations": [
+              {
+                "action_kind": "SOCRATIC_QUESTION",
+                "action_reason": "INTERVIEW_MAIN_QUESTION",
+                "failure_reason": "PARTIAL:INTERVIEW_RUBRIC_OPEN_ANSWER",
+                "phase_before": "ASSESS",
+                "score": 0.5047,
+                "status": "PARTIAL",
+                "step": 0,
+                "turn": 0
+              },
+              {
+                "action_kind": "SOCRATIC_QUESTION",
+                "action_reason": "INTERVIEW_PROBE_HYPOTHESIS",
+                "failure_reason": "PARTIAL:INTERVIEW_RUBRIC_OPEN_ANSWER",
+                "phase_before": "ASSESS",
+                "score": 0.5047,
+                "status": "PARTIAL",
+                "step": 1,
+                "turn": 1
+              },
+              {
+                "action_kind": "SOCRATIC_QUESTION",
+                "action_reason": "INTERVIEW_PROBE_COMPLEXITY",
+                "failure_reason": "PARTIAL:INTERVIEW_RUBRIC_OPEN_ANSWER",
+                "phase_before": "ASSESS",
+                "score": 0.5047,
+                "status": "PARTIAL",
+                "step": 2,
+                "turn": 2
+              },
+              {
+                "action_kind": "SOCRATIC_QUESTION",
+                "action_reason": "INTERVIEW_PROBE_EXPERIMENT_DESIGN",
+                "failure_reason": "PARTIAL:INTERVIEW_RUBRIC_OPEN_ANSWER",
+                "phase_before": "ASSESS",
+                "score": 0.5047,
+                "status": "PARTIAL",
+                "step": 3,
+                "turn": 3
+              },
+              {
+                "action_kind": "SOCRATIC_QUESTION",
+                "action_reason": "INTERVIEW_PROBE_ONLINE_TRIAGE",
+                "failure_reason": "PARTIAL:INTERVIEW_RUBRIC_OPEN_ANSWER",
+                "phase_before": "ASSESS",
+                "score": 0.5047,
+                "status": "PARTIAL",
+                "step": 4,
+                "turn": 4
+              }
+            ],
+            "probe_sequence": [
+              "INTERVIEW_PROBE_HYPOTHESIS",
+              "INTERVIEW_PROBE_COMPLEXITY",
+              "INTERVIEW_PROBE_EXPERIMENT_DESIGN",
+              "INTERVIEW_PROBE_ONLINE_TRIAGE"
+            ],
+            "question_id": "interview.item.q-rec-001",
+            "rubric_audit_dimensions": [
+              "engineering_feasibility",
+              "evidence_sufficiency",
+              "explanation_clarity",
+              "factual_correctness"
+            ],
+            "rubric_spec_digests": 1,
+            "seed_correct_evidence": 3,
+            "session_id": "b5.interview.a.jd_v1",
+            "verify_rebuild": true
+          },
+          {
+            "clarification_count": 0,
+            "event_count": 12,
+            "final_pending_item_id": "interview.item.q-rec-001",
+            "final_phase": "ASSESS",
+            "final_turn": 2,
+            "hint_levels": [],
+            "jd_id": "jd:rec",
+            "jd_ref": "jd:rec@v2",
+            "jd_version": "v2",
+            "learner_id": "b5.interview.learner_a",
+            "objective_id": "obj.interview.recommendation_ctr.mastery",
+            "observations": [
+              {
+                "action_kind": "SOCRATIC_QUESTION",
+                "action_reason": "INTERVIEW_MAIN_QUESTION",
+                "failure_reason": "PARTIAL:INTERVIEW_RUBRIC_OPEN_ANSWER",
+                "phase_before": "ASSESS",
+                "score": 0.5047,
+                "status": "PARTIAL",
+                "step": 0,
+                "turn": 0
+              },
+              {
+                "action_kind": "SOCRATIC_QUESTION",
+                "action_reason": "INTERVIEW_PROBE_HYPOTHESIS",
+                "failure_reason": "PARTIAL:INTERVIEW_RUBRIC_OPEN_ANSWER",
+                "phase_before": "ASSESS",
+                "score": 0.5047,
+                "status": "PARTIAL",
+                "step": 1,
+                "turn": 1
+              }
+            ],
+            "probe_sequence": [
+              "INTERVIEW_PROBE_HYPOTHESIS"
+            ],
+            "question_id": "interview.item.q-rec-001",
+            "rubric_audit_dimensions": [
+              "engineering_feasibility",
+              "evidence_sufficiency",
+              "explanation_clarity",
+              "factual_correctness"
+            ],
+            "rubric_spec_digests": 1,
+            "seed_correct_evidence": 0,
+            "session_id": "b5.interview.a.jd_v2",
+            "verify_rebuild": true
+          }
+        ]
+      },
+      {
+        "learner_id": "b5.interview.learner_b",
+        "learner_state": "novice (no prior interview evidence)",
+        "sessions": [
+          {
+            "clarification_count": 1,
+            "event_count": 42,
+            "final_pending_item_id": null,
+            "final_phase": "REVIEW",
+            "final_turn": 8,
+            "hint_levels": [
+              1
+            ],
+            "jd_id": "jd:rec",
+            "jd_ref": "jd:rec@v2",
+            "jd_version": "v2",
+            "learner_id": "b5.interview.learner_b",
+            "objective_id": "obj.interview.engineering_metrics.mastery",
+            "observations": [
+              {
+                "action_kind": "SOCRATIC_QUESTION",
+                "action_reason": "INTERVIEW_MAIN_QUESTION",
+                "failure_reason": "NEEDS_REVIEW:PROJECT_FACTS_REQUIRED",
+                "phase_before": "ASSESS",
+                "score": 0.5475,
+                "status": "NEEDS_REVIEW",
+                "step": 0,
+                "turn": 0
+              },
+              {
+                "action_kind": "ASK_CLARIFICATION",
+                "action_reason": "PROJECT_FACTS_REQUIRED",
+                "failure_reason": "INCORRECT:INTERVIEW_RUBRIC",
+                "phase_before": "ASSESS",
+                "score": 0.175,
+                "status": "INCORRECT",
+                "step": 1,
+                "turn": 1
+              },
+              {
+                "action_kind": "HINT",
+                "action_reason": "INTERVIEW_HINT_LEVEL_1",
+                "failure_reason": "PARTIAL:INTERVIEW_RUBRIC_OPEN_ANSWER",
+                "phase_before": "ASSESS",
+                "score": 0.6558,
+                "status": "PARTIAL",
+                "step": 2,
+                "turn": 2
+              },
+              {
+                "action_kind": "SOCRATIC_QUESTION",
+                "action_reason": "INTERVIEW_PROBE_CONCEPT",
+                "failure_reason": "PARTIAL:INTERVIEW_RUBRIC_OPEN_ANSWER",
+                "phase_before": "ASSESS",
+                "score": 0.6558,
+                "status": "PARTIAL",
+                "step": 3,
+                "turn": 3
+              },
+              {
+                "action_kind": "SOCRATIC_QUESTION",
+                "action_reason": "INTERVIEW_PROBE_HYPOTHESIS",
+                "failure_reason": "PARTIAL:INTERVIEW_RUBRIC_OPEN_ANSWER",
+                "phase_before": "ASSESS",
+                "score": 0.6558,
+                "status": "PARTIAL",
+                "step": 4,
+                "turn": 4
+              },
+              {
+                "action_kind": "SOCRATIC_QUESTION",
+                "action_reason": "INTERVIEW_PROBE_COMPLEXITY",
+                "failure_reason": "PARTIAL:INTERVIEW_RUBRIC_OPEN_ANSWER",
+                "phase_before": "ASSESS",
+                "score": 0.6558,
+                "status": "PARTIAL",
+                "step": 5,
+                "turn": 5
+              },
+              {
+                "action_kind": "SOCRATIC_QUESTION",
+                "action_reason": "INTERVIEW_PROBE_EXPERIMENT_DESIGN",
+                "failure_reason": "PARTIAL:INTERVIEW_RUBRIC_OPEN_ANSWER",
+                "phase_before": "ASSESS",
+                "score": 0.6558,
+                "status": "PARTIAL",
+                "step": 6,
+                "turn": 6
+              },
+              {
+                "action_kind": "SOCRATIC_QUESTION",
+                "action_reason": "INTERVIEW_PROBE_ONLINE_TRIAGE",
+                "failure_reason": "PARTIAL:INTERVIEW_RUBRIC_OPEN_ANSWER",
+                "phase_before": "ASSESS",
+                "score": 0.6558,
+                "status": "PARTIAL",
+                "step": 7,
+                "turn": 7
+              }
+            ],
+            "probe_sequence": [
+              "INTERVIEW_PROBE_CONCEPT",
+              "INTERVIEW_PROBE_HYPOTHESIS",
+              "INTERVIEW_PROBE_COMPLEXITY",
+              "INTERVIEW_PROBE_EXPERIMENT_DESIGN",
+              "INTERVIEW_PROBE_ONLINE_TRIAGE"
+            ],
+            "question_id": "interview.item.q-eng-001",
+            "rubric_audit_dimensions": [
+              "engineering_feasibility",
+              "evidence_sufficiency",
+              "explanation_clarity",
+              "factual_correctness"
+            ],
+            "rubric_spec_digests": 1,
+            "seed_correct_evidence": 0,
+            "session_id": "b5.interview.b.jd_v2",
+            "verify_rebuild": true
+          }
+        ]
+      }
+    ],
+    "paths_differ": true,
+    "probe_stages_seen": {
+      "b5.interview.learner_a::b5.interview.a.jd_v1": [
+        "hypothesis",
+        "complexity",
+        "experiment_design",
+        "online_triage"
+      ],
+      "b5.interview.learner_a::b5.interview.a.jd_v2": [
+        "hypothesis"
+      ],
+      "b5.interview.learner_b::b5.interview.b.jd_v2": [
+        "concept",
+        "hypothesis",
+        "complexity",
+        "experiment_design",
+        "online_triage"
+      ]
+    },
+    "shared_journal": "one canonical SQLite database: same event table as the CF section"
+  },
+  "max_turns": 10,
+  "pause_after_turns": 4,
+  "schema": "m1b.b5.e2e.v1",
+  "summary_schema": "m1b.b5.summary.v1",
+  "unified_journal": {
+    "all_verify_rebuild": true,
+    "event_table": "canonical history_events (per-learner seq) + sessions table",
+    "learners": [
+      {
+        "event_count": 86,
+        "event_types": [
+          "ACTION_TAKEN",
+          "ASSESSED",
+          "ASSESSMENT_PREPARED",
+          "DIAGNOSIS_COMPLETED",
+          "MASTERY_UPDATED",
+          "PLAN_CREATED",
+          "RESPONSE_SUBMITTED",
+          "SESSION_PAUSED",
+          "SESSION_RESUMED",
+          "SESSION_STARTED"
+        ],
+        "learner_id": "b5.cross_domain.learner",
+        "seq_contiguous": true,
+        "session_count": 2,
+        "snapshot": {
+          "completed_item_count": 10,
+          "masteries": {
+            "cf.array.basics": {
+              "confidence": 0.75,
+              "evidence_count": 2,
+              "value": 0.3
+            },
+            "cf.complexity.log": {
+              "confidence": 0.5,
+              "evidence_count": 1,
+              "value": 0.2
+            },
+            "cf.search.binary": {
+              "confidence": 0.992188,
+              "evidence_count": 7,
+              "value": 0.518571
+            },
+            "cf.search.boundary": {
+              "confidence": 0.4375,
+              "evidence_count": 2,
+              "value": 0.0
+            },
+            "cf.search.linear": {
+              "confidence": 0.75,
+              "evidence_count": 2,
+              "value": 0.3
+            },
+            "cf.sort.sortedness": {
+              "confidence": 0.75,
+              "evidence_count": 2,
+              "value": 0.3
+            },
+            "interview.node.engineering_metrics": {
+              "confidence": 0.4375,
+              "evidence_count": 2,
+              "value": 0.05
+            }
+          },
+          "revision": 18
+        },
+        "verify_rebuild": true
+      },
+      {
+        "event_count": 45,
+        "event_types": [
+          "ACTION_TAKEN",
+          "ASSESSED",
+          "ASSESSMENT_PREPARED",
+          "MASTERY_UPDATED",
+          "PLAN_CREATED",
+          "RESPONSE_SUBMITTED",
+          "SESSION_STARTED"
+        ],
+        "learner_id": "b5.interview.learner_a",
+        "seq_contiguous": true,
+        "session_count": 2,
+        "snapshot": {
+          "completed_item_count": 1,
+          "masteries": {
+            "interview.node.recommendation_ctr": {
+              "confidence": 0.983315,
+              "evidence_count": 10,
+              "value": 0.47623
+            }
+          },
+          "revision": 10
+        },
+        "verify_rebuild": true
+      },
+      {
+        "event_count": 42,
+        "event_types": [
+          "ACTION_TAKEN",
+          "ASSESSED",
+          "ASSESSMENT_PREPARED",
+          "MASTERY_UPDATED",
+          "PLAN_CREATED",
+          "RESPONSE_SUBMITTED",
+          "SESSION_STARTED"
+        ],
+        "learner_id": "b5.interview.learner_b",
+        "seq_contiguous": true,
+        "session_count": 1,
+        "snapshot": {
+          "completed_item_count": 1,
+          "masteries": {
+            "interview.node.engineering_metrics": {
+              "confidence": 0.866516,
+              "evidence_count": 7,
+              "value": 0.159286
+            }
+          },
+          "revision": 7
+        },
+        "verify_rebuild": true
+      },
+      {
+        "event_count": 73,
+        "event_types": [
+          "ACTION_TAKEN",
+          "ASSESSED",
+          "ASSESSMENT_PREPARED",
+          "DIAGNOSIS_COMPLETED",
+          "MASTERY_UPDATED",
+          "PLAN_CREATED",
+          "RESPONSE_SUBMITTED",
+          "SESSION_PAUSED",
+          "SESSION_RESUMED",
+          "SESSION_STARTED"
+        ],
+        "learner_id": "m1a.learner.student_a",
+        "seq_contiguous": true,
+        "session_count": 1,
+        "snapshot": {
+          "completed_item_count": 9,
+          "masteries": {
+            "cf.array.basics": {
+              "confidence": 0.75,
+              "evidence_count": 2,
+              "value": 0.3
+            },
+            "cf.complexity.log": {
+              "confidence": 0.5,
+              "evidence_count": 1,
+              "value": 0.2
+            },
+            "cf.search.binary": {
+              "confidence": 0.996094,
+              "evidence_count": 8,
+              "value": 0.543571
+            },
+            "cf.search.boundary": {
+              "confidence": 0.4375,
+              "evidence_count": 2,
+              "value": 0.0
+            },
+            "cf.search.linear": {
+              "confidence": 0.75,
+              "evidence_count": 2,
+              "value": 0.3
+            },
+            "cf.sort.sortedness": {
+              "confidence": 0.75,
+              "evidence_count": 2,
+              "value": 0.3
+            }
+          },
+          "revision": 17
+        },
+        "verify_rebuild": true
+      },
+      {
+        "event_count": 62,
+        "event_types": [
+          "ACTION_TAKEN",
+          "ASSESSED",
+          "ASSESSMENT_PREPARED",
+          "DIAGNOSIS_COMPLETED",
+          "MASTERY_UPDATED",
+          "PLAN_CREATED",
+          "RESPONSE_SUBMITTED",
+          "SESSION_PAUSED",
+          "SESSION_RESUMED",
+          "SESSION_STARTED"
+        ],
+        "learner_id": "m1a.learner.student_b",
+        "seq_contiguous": true,
+        "session_count": 1,
+        "snapshot": {
+          "completed_item_count": 6,
+          "masteries": {
+            "cf.array.basics": {
+              "confidence": 0.75,
+              "evidence_count": 2,
+              "value": 0.3
+            },
+            "cf.search.binary": {
+              "confidence": 0.578125,
+              "evidence_count": 3,
+              "value": 0.0
+            },
+            "cf.search.linear": {
+              "confidence": 0.75,
+              "evidence_count": 2,
+              "value": 0.3
+            },
+            "cf.sort.sortedness": {
+              "confidence": 0.4375,
+              "evidence_count": 2,
+              "value": 0.0
+            }
+          },
+          "revision": 9
+        },
+        "verify_rebuild": true
+      }
+    ],
+    "one_sqlite_file": true,
+    "schema": "m1b.b5.unified_journal.v1"
+  }
+}
