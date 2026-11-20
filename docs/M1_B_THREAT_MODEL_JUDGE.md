@@ -1,7 +1,7 @@
 # M1-B / B-PR1 — Judge 信任边界威胁模型与 Worker 隔离协议
 
 - 文档编号：`M1_B_THREAT_MODEL_JUDGE` / B-PR1 设计前置
-- 状态：**DESIGN_ONLY**（设计 + 可复现 `LOCAL_PROBE`；**未实现、未验收**）
+- 状态：**DESIGN + IMPLEMENTED_LOCAL_VERIFIED**（设计规格；PR1 已实现并在本机通过本地测试；独立验收前真实用户 CODE 仍 BLOCKED）
 - 版本：v0.2（2026-11-20，UTC；PR1 实现回填修订：P1-01/P1-08/P2-05/P2-06 关闭）
 - 作者：B-NEXT / B-PR1 Judge 安全边界设计负责人（Implementer 前置设计）
 - 工作树：`/root/m1b/tm`，分支 `b-next/pr1-threat-model`，基线 `4706250643fd42d48d69ddad7159e011955fa9fd`
@@ -17,7 +17,8 @@
 
 | 等级 | 本文用法 |
 | --- | --- |
-| `DESIGN_ONLY` | 仅设计/规格/冻结协议，未实现，`NOT_RUN` |
+| `DESIGN_ONLY` | 仅设计/规格/冻结协议的历史标记（本文 v0.1） |
+| `IMPLEMENTED_LOCAL_VERIFIED` | PR1 已实现并通过本机本地测试；独立安全 Reviewer 复跑/人类批准前不得当作最终 PASS |
 | `LOCAL_PROBE` | 本机真实运行的一次性探针（脚本在 `/tmp/m1b_probe`，不提交；仅合成数据；命令与输出摘要见附录 A） |
 | `SOURCE_INSPECTED` | 对指定 SHA 的源码逐行静态核对（`file:line` 引用） |
 | `NOT_RUN` | 尚未执行，不得视为通过 |
@@ -40,7 +41,7 @@
 2. **冻结边界**：可信端 `TrustedJudgeSupervisor` 独占 hidden expected、scoring spec/config、比较器与最终 verdict；不可信端 `UntrustedExecutionWorker` 只接收**单个 case 的输入 + 目标函数名**（**绝不含 expected**），只返回**观测 actual/异常/状态**，**不含任何 verdict/passed 字段**；OS 层用 `bwrap` 独立 user/pid/net/ipc/uts namespaces + 非 root uid + read-only 最小 rootfs + 私有 tmpfs + rlimits + supervisor wall-clock。
 3. **本机 OS 边界已实测可用**：`bwrap 0.9.0`，`--unshare-all --die-with-parent --clearenv` + `ro-bind /usr /lib /lib64 /bin` + `--proc --dev --tmpfs /tmp` 可运行 python3；实测 uid/gid=65534、pid=2、host `/root`/`/etc`/`/home`/`/var/lib` 不可见、host sentinel `FileNotFoundError`、`/usr` 只读、`/tmp` 私有可写、`/proc/net/dev` **只有 lo**、`socket.if_nameindex()==['lo']`；rlimits（AS/CPU/FSIZE/NOFILE）与进程组清理实测生效。**不发起任何外网连接**。
 4. **默认策略**：对外/开放路径默认 `UNTRUSTED_CODE_EXECUTION_BLOCKED`（不执行 learner code，返回结构化 blocked，mastery 不变）；仅显式 `trusted_fixture_test_only` 的合成内部测试入口允许执行自编 fixtures；MCQ/静态短答案不受影响。
-5. **验收状态**：B1-01..B1-06 全部仍为 `NOT_RUN`（`DESIGN_ONLY` + `LOCAL_PROBE`）。PR1 实现必须新增本文 §9 指定测试与证据，然后由独立 Reviewer 静态预审 + 动态验收；人类批准前不得开放真实用户 CODE。
+5. **验收状态**：PR1 已实现（见 `docs/M1_B_JUDGE_IMPLEMENTATION.md`）；B1-01/02/03/06 为 `IMPLEMENTED_LOCAL_VERIFIED`，B1-04/B1-05 在独立评审后为 `PARTIAL`（P1-2 宿主非 root principal 未满足；P1-1 默认超时误分类已修复、待复评）。独立 Reviewer 复跑 + 人类批准前不得开放真实用户 CODE。
 
 **最高风险 Top 5（给 Reviewer）**
 1. 若 PR1 只"加沙箱"但不把 expected 从 worker 内存/协议中移除，调用栈泄漏与协议伪造仍然成立（必须先冻结 §3 协议）。
@@ -197,7 +198,7 @@
 
 ---
 
-## 3. 冻结 Worker 协议 `m1b.judge.worker.v1`（DESIGN_ONLY）
+## 3. 冻结 Worker 协议 `m1b.judge.worker.v1`（DESIGN + IMPLEMENTED）
 
 > 设计原则：**worker 只知道"要执行什么"，不知道"正确答案是什么"；只报告"观测到什么"，不报告"是否通过"。**
 > 一个 worker 进程只处理一个 case（一次请求），进程退出即销毁；不跨 case 持久化，避免 expected/状态累积。
@@ -327,21 +328,21 @@
 设计要求（PR1 实现）：
 
 1. worker_runner 启动时先把协议通道 `dup` 到专用 fd（如 fd 3）并设置 `close-on-exec`；随后把 fd 1/2 重定向到 `/dev/null` 或"有界 drain"（最多保留 `stdout_limit/stderr_limit` 字节后丢弃），在调用 learner 代码前后保持重定向。
-2. learner 的 `print`/`sys.stdout.write` 不能写进协议通道；即使 learner 直接 `os.write(3, forged_json)`，其内容也只可能是"另一个 JSON 行"，supervisor 只取**第一行**并做严格 schema 校验；伪造若不满足 schema → `JUDGE_INFRA_ERROR`，若满足 schema 也拿不到 expected（worker 内无 expected），只能得到 WA/RE，不能 PASS。
+2. learner 的 `print`/`sys.stdout.write` 不能写进协议通道；即使 learner 直接 `os.write(3, forged_json)`，其内容也只能是额外字节/行；按冻结实现，worker 端要求**恰好一行**协议 JSON，**多行直接拒绝**（`WorkerProtocolError` → `JUDGE_INFRA_ERROR`），不做“取第一行”的宽松解析；伪造若满足 schema 也拿不到 expected（worker 内无 expected），只能得到 WA/RE，不能 PASS。
 3. worker_runner 写完唯一一行 response 后立即 `os._exit(0)`，跳过 learner 可注册的 `atexit`/`finally`/`__del__`（LOCAL_PROBE 已证明旧实现因 atexit 覆写 result 文件而 PASS）。
-4. supervisor 读取有界：最大 16 KiB；只看第一行；多余字节丢弃；若首行不完整/超限/非法 UTF-8 → INFRA。
+4. supervisor 读取有界：response 上限 **128 KiB**（`protocol.py MAX_RESPONSE_BYTES`），**拒绝多行**（`parse_worker_response` 要求恰好一行非空 JSON），超限/多行/非法 UTF-8/未知字段 → `JUDGE_INFRA_ERROR`（实现已按 P2-1 同步）。
 5. PR1 测试必须覆盖：learner 打印 `{"passed":true}`、`os.write(fd3, …)`、`atexit` 伪造、`sys.exit/os._exit` 篡改退出码 —— 均不得 PASS。
 
 ### 4.4 身份、文件系统、网络、生命周期的强制清单
 
 | 维度 | 冻结要求 | LOCAL_PROBE 证据（附录 A.2） |
 | --- | --- | --- |
-| 用户/身份 | userns + `--uid 65534 --gid 65534`；无 setuid/caps；不 bind `/etc/sudoers`、不 bind host root | `uid=65534, gid=65534`；root entries 仅 `bin/dev/lib/lib64/usr/tmp/proc`+worker |
+| 用户/身份 | userns + `--uid 65534 --gid 65534`；无 setuid/caps；不 bind `/etc/sudoers`、不 bind host root。**P1-2**：宿主 principal 必须非 root（目标部署专用非 root 服务账号，或单独评审 setuid bwrap）；namespace uid 65534 不等于宿主非 root | 本机 bwrap 以 root 运行：`/proc/self/uid_map=65534 0 1`，`security_profile()["non_root_principal_verified"]=False`、`profile=LOCAL_ONLY`；`uid_map` 与宿主 euid 由 canary 记录。**B1-04 本地不满足，仅 LOCAL_ONLY，不得声称已满足** |
 | 文件系统 | ro `/usr /lib /lib64 /bin`；ro worker dir；私有 tmpfs `/tmp`（size 限制）；**不 bind** `/root /home /etc /var /tmp` 宿主路径 | `/root`、`/etc`、`/home`、`/var/lib`、host sentinel 全部不可见/`FileNotFoundError`；`/usr` 写入 `OSError`；`/tmp` 可写 |
 | 网络 | `--unshare-net`（无接口，仅 lo）；不提供 `/etc/resolv.conf`、无 DNS | `/proc/net/dev` 只有 lo；`socket.if_nameindex()==['lo']` |
 | PID/IPC/UTS | `--unshare-pid --unshare-ipc --unshare-uts`；bwrap reaper + `--die-with-parent` | `pid=2`、hostname=`m1b-worker` |
-| 生命周期 | 每 case 一进程；超时/异常均 kill 进程组；reap；fail-closed | 1.0s 超时 → SIGKILL 进程组，leftover=[] |
-| 沙箱可用性 | supervisor 启动/每次调用前 canary 自检（uid、/root 不可见、/proc/net/dev 只有 lo、/usr 只读、python3 可跑、host sentinel 不可见）；任一失败 → **BLOCKED** | 本机 canary 探针通过；不可用路径为设计断言（PR1 测试用 fake bwrap 失败路径） |
+| 生命周期 | 每 case 一进程；超时/异常均 kill 进程组；reap；fail-closed。**P1-1**：RLIMIT_CPU 按 `max(10, ceil(wall)+2)` 动态设置，wall timer 为主判据 | 1.0s 超时 → SIGKILL 进程组，leftover=[]；2.0s 死循环 → STUDENT_TLE；宿主 root/uid_map 见 P1-2 |
+| 沙箱可用性 | supervisor 启动/每次调用前 canary 自检（uid、/root 不可见、/proc/net/dev 只有 lo、/usr 只读、python3 可跑、host sentinel 不可见、uid_map/python_version 记录）；任一失败 → **BLOCKED**。安全 CI 用 `M1B_REQUIRE_OS_SANDBOX=1` 强制不得 skip（P1-3） | 本机 canary 探针通过；不可用路径为设计断言（PR1 测试用 fake bwrap 失败路径）；安全 CI 期望 0 skipped |
 
 **禁止的降级**：bwrap 不可用、userns 被禁、rlimit 设置失败、canary 失败、`/worker` 只读挂载失败、python3 不可执行 → 一律 `UNTRUSTED_CODE_EXECUTION_BLOCKED`；**绝不回退**到裸 `subprocess.run(sys.executable ...)`（即现有 A/B 行为），**绝不**跳过 isolation 继续判分。
 
@@ -349,12 +350,12 @@
 
 - bwrap 隔离不是内核 0day/侧信道防护；仅作为"判题信任边界"。
 - `RLIMIT_NPROC` 对 uid 65534 在不同内核/映射下计数语义可能不同，需在目标部署环境验证；未完成前把 NPROC 作为**纵深防御**（pidns + wall timeout + 进程组 kill 是主控制），并在 PR1 记录实测。
-- 本机以 root 运行 bwrap；目标部署若要求非 root 宿主服务，需要 setuid bwrap 或 user namespaces 策略，需在部署验收中单独确认（`NOT_RUN`）。
+- **P1-2**：本机以 root 运行 bwrap（uid_map `65534 0 1`）；目标部署必须使用非 root 服务账号（或单独评审的 setuid bwrap），并由 `security_profile()`/canary 校验宿主 euid≠0、uid_map 不映射到 0；本地为 `LOCAL_ONLY`，B1-04 非 root principal 仍 `NOT_RUN`。
 - cgroup v2 内存/pid 限额可作为增强项，本设计不强依赖（bwrap 0.9 + rlimit 已覆盖基线）。
 
 ---
 
-## 5. 默认策略与集成点（DESIGN_ONLY）
+## 5. 默认策略与集成点（DESIGN + IMPLEMENTED）
 
 ### 5.1 能力策略（冻结建议）
 
@@ -366,7 +367,7 @@
 
 - **MCQ / 静态 SHORT_ANSWER**：不执行 code、不需要 worker，保持现有行为（A `scorer.py:469-491`, `649+`；B 无 CODE 路径的复用逻辑同样不涉及 worker）。默认 blocked 只影响 CODE。
 - **P1-01（已关闭）**：`trusted_fixture_only` **只能**来自可信构造/部署配置——即 `DeterministicScorer(...)` / `TrustedJudgeSupervisor(...)` 的构造参数（由仓库测试/CI 或受控部署代码显式传入），**绝不可**来自 AssessmentJob、请求体、响应体、`AssessmentItem` 字段、`result_id`、环境变量或任何调用方自报数据。数据路径无法改变策略；PR1 回归测试 `tests/m1_teacher/test_judge_supervisor.py::test_policy_cannot_be_enabled_from_caller_data_paths` 覆盖 item/response/result_id/env 绕过尝试，并断言 worker 从未被调用。
-- **TRUSTED_FIXTURE_TEST_ONLY 的边界**：只能由代码内显式参数/环境变量开启（例如 `execution_policy="trusted_fixture_test_only"`），且必须伴随 `fixtures_root` 指向仓库合成 fixture；**不可**由 learner 输入/请求体/LLM 文本开启。该模式不是安全策略，仅用于离线合成测试与 PR1 证据。
+- **TRUSTED_FIXTURE_TEST_ONLY 的边界（P1-4 已修正）**：**只能**由可信构造/部署参数开启（`DeterministicScorer(..., trusted_fixture_only=True)` / `TrustedJudgeSupervisor(..., trusted_fixture_only=True)`），且必须由仓库测试/CI 使用自编 synthetic fixtures；**不可**由代码内环境变量、learner 输入、请求体、LLM 文本、AssessmentJob 或任何调用方自报数据开启。实现不读取任何环境变量开关。该模式不是安全策略，仅用于离线合成测试与 PR1 证据。
 
 ### 5.2 返回结构（blocked 与 infra error 的区分）
 
@@ -421,7 +422,7 @@
 
 ---
 
-## 7. 正确性与可用性矩阵（B1-05；DESIGN_ONLY + 现有 trusted-fixture 基线）
+## 7. 正确性与可用性矩阵（B1-05；PR1 已实现，独立评审后 PARTIAL）
 
 > 这些"正确性"必须在 **B1-02/03/04 协议 + OS 沙箱**下重新验证；当前只把两线既有 trusted-fixture 测试作为基线证据（LOCAL_PROBE 重跑 B 线 judge 测试：31 passed，附录 A.5），**不构成安全验收**。
 
@@ -518,7 +519,7 @@ PR1 必须新增端到端扫描测试（建议 `tests/.../test_judge_leakage_sca
 
 ### 10.1 非目标（本 PR 明确不做）
 
-- 不实现 PR1 代码（本文件 `DESIGN_ONLY`；后续由 Implementer-Judge + Implementer-OS 按本文档实现，Reviewer-Security 独立静态预审后动工）。
+- 本文件不是实现记录（PR1 实现见 `docs/M1_B_JUDGE_IMPLEMENTATION.md`）；不重复维护 worker/sandbox 代码，也不替代独立安全验收。
 - 不做真实网络/真实 Provider/真实 Key、不访问真实招聘网站/简历；不运行真实恶意代码；负例只在安全测试容器中使用 synthetic sentinel。
 - 不修改 M0 保护路径（`src/autoteacher_m0/`、security/bridge、`config/g*`、`scripts/g4*`、LiveGate/费用账本）；不复用 A 线真实 Provider 信任/密钥路径。
 - 不把 OS 沙箱当作"学习效度"或"评分不可被恶意输入破坏"的证明；不声称真实用户 CODE 可开放。
@@ -534,6 +535,10 @@ PR1 必须新增端到端扫描测试（建议 `tests/.../test_judge_leakage_sca
 - 受限 judge 日志仍可能被运维人员查看；建议加密/最小保留/hash-only。
 - 真实用户 CODE 开放 = 新工作项：需要人类批准、部署环境验收、另一次独立验收（不在本 PR）。
 - `LOCAL_PROBE` 只在本机（Linux 6.17 + bwrap 0.9）执行；目标 CI/生产环境是否允许 userns/bwrap 尚未验证（`NOT_RUN`）。
+- **P2-6（已记录，残余风险）**：learner 代码可通过 `sys.modules["__main__"]._PROTOCOL_FD` 与栈帧读取 request_id 后伪造一行合法 observation（含 INFRA/RAISED）；因 worker 内无 expected，伪造最多造成 `WA/RE/INFRA_ERROR`，**不能造成 PASS**，且属于 fail-closed 可接受面。长期可把 learner 执行放入独立子进程/协议 fd 不继承/learner 不可读 nonce 进一步降低。
+- **P2-8（已记录，低风险）**：沙箱内 `/proc/1/cmdline` 可能暴露宿主 worker 临时目录路径（`/tmp/m1b_judge_worker_*`）；该目录未挂载、不可访问且不含 expected，接受为低风险。
+- **P2-7（部分缓解）**：P1-1 修复新增 wall/CPU 超时分类的单测；`RLIMIT_NPROC=32` 的套件级 fork 压力测试仍未加入（需要受控安全测试环境，避免对宿主造成压力），以独立探针/部署验收为主。
+- **P2-3（部分缓解）**：worker 运行现固定传入 `PYTHONHASHSEED=0`/`PYTHONDONTWRITEBYTECODE=1`；解释器路径固定为 `/usr/bin/python3`，但尚无版本 pin 校验（跨部署版本一致性未验证）。
 
 ### 10.3 待独立 Reviewer 静态预审的问题（请逐条给意见）
 
@@ -709,3 +714,4 @@ worker 只读目录 `/tmp/m1b_probe/sandbox_worker`，`worker_runner.py` 实现 
 | --- | --- | --- |
 | v0.1 | 2026-11-20 | 初版 DESIGN_ONLY：资产/信任域、A/B 根因证据、冻结 worker 协议 v1、bwrap OS 规格与 LOCAL_PROBE、默认 BLOCKED 策略、负例矩阵、正确性/泄漏规格、B1-01..06 验收映射、非目标与 Reviewer 清单 |
 | v0.2 | 2026-11-20 | PR1 实现回填：P1-08 CLOSED（`--size` 必须在 `--tmpfs` 前，给出实测 exit 1/exit 0 与 sandbox.py 同步证据）；P1-01 CLOSED（opt-in 仅构造/部署配置，不可由数据路径/请求/env 绕过）；P2-05 修正 request_id 正则示例；P2-06 统一协议通道为专用 fd（dup(1)）+ fd1/2 重定向 + `os._exit(0)` 表述 |
+| v0.3 | 2026-11-20 | 独立评审 PASS_WITH_ACTIONS 回填：P1-4 CLOSED（删除“环境变量可开启 trusted fixture”，统一仅可信构造/部署参数）；P2-1（§4.3 上限 128 KiB、拒绝多行）；P2-2（状态改为 DESIGN + IMPLEMENTED_LOCAL_VERIFIED）；P1-1/P1-2 说明同步（CPU/wall TLE 与 host 非 root principal LOCAL_ONLY） |

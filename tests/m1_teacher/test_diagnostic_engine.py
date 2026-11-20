@@ -404,9 +404,15 @@ def test_behaviour_unchanged_without_hidden_scoring_directory(
     copy_graph = KnowledgeGraph(
         copy_adapter.knowledge_nodes(), copy_adapter.prerequisite_edges()
     )
-    assert (
-        copy_adapter.objectives()[0].to_dict() == objective.to_dict()
-    )
+    # ``created_at`` is load-time wall-clock metadata, not behaviour; comparing
+    # it across two fixture loads is a pre-existing full-suite timing flake.
+    copy_objective = copy_adapter.objectives()[0].to_dict()
+    original_objective = objective.to_dict()
+    assert {
+        key: value for key, value in copy_objective.items() if key != "created_at"
+    } == {
+        key: value for key, value in original_objective.items() if key != "created_at"
+    }
     original = DiagnosticEngine(adapter, graph).select_next_item(
         make_goal(objective), objective, evidenced_snapshot(**{"cf.search.boundary": (0.2, 1, 0.3)})
     )

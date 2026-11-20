@@ -17,6 +17,7 @@ fallback** to a bare ``subprocess.run``: callers must map this to
 from __future__ import annotations
 
 import json
+import math
 import os
 import resource
 import selectors
@@ -26,6 +27,7 @@ import subprocess
 import tempfile
 import time
 from dataclasses import dataclass
+from functools import partial
 from pathlib import Path
 from typing import Mapping, Sequence
 
@@ -62,7 +64,13 @@ DEFAULT_RUN_GRACE_S = 0.5
 #: ``worker_runner.py``: on the host, ``RLIMIT_NPROC`` counts processes of the
 #: host uid and a tight value would break bwrap itself (verified on this host).
 RLIMIT_AS_BYTES = 256 * 1024 * 1024
-RLIMIT_CPU_SECONDS = 2
+#: CPU-time rlimit must never fire before the supervisor wall clock (review
+#: P1-1): it is set per run to ``max(10, ceil(wall_s) + 2)``, so the wall timer
+#: (which classifies TLE) fires first.  A positive ``128+SIGKILL`` /
+#: ``128+SIGXCPU`` / ``124`` exit is still classified as a student timeout by
+#: :meth:`UntrustedExecutionWorker._interpret` as a defensive backstop.
+RLIMIT_CPU_MIN_SECONDS = 10
+RLIMIT_CPU_GRACE_SECONDS = 2
 RLIMIT_FSIZE_BYTES = 1024 * 1024
 RLIMIT_NOFILE = 64
 RLIMIT_NPROC_HOST_FLOOR = 4096
@@ -92,7 +100,13 @@ def _check():
         "host_sentinel_visible": os.path.exists(
             os.environ.get("M1B_SANDBOX_PROBE_SENTINEL", "/nonexistent-probe-sentinel")
         ),
+        "python_version": sys.version.split()[0],
     }
+    try:
+        with open("/proc/self/uid_map", "r", encoding="utf-8") as handle:
+            result["uid_map"] = " ".join(handle.read().split())
+    except OSError:
+        result["uid_map"] = ""
     try:
         result["interfaces"] = sorted(name for _index, name in socket.if_nameindex())
     except OSError:
@@ -208,6 +222,7 @@ class BwrapSandbox:
         )
         self._available: bool | None = None
         self._probe_failure: str | None = None
+        self._probe_payload: dict[str, object] | None = None
 
     # -- availability ---------------------------------------------------------
 
@@ -232,7 +247,77 @@ class BwrapSandbox:
     def refresh_availability(self) -> bool:
         self._available = None
         self._probe_failure = None
+        self._probe_payload = None
         return self.available()
+
+    # -- security profile (review P1-2) ------------------------------------
+
+    @staticmethod
+    def _non_root_principal_verified(host_euid: int, uid_map: str) -> bool:
+        """True iff the host principal and every uid-map target are non-root.
+
+        ``/proc/self/uid_map`` lines are ``inside outside length``; on a root
+        host bwrap commonly maps inside 65534 to host uid 0 (``65534 0 1``),
+        which must **not** count as a non-root principal.
+        """
+
+        if host_euid == 0:
+            return False
+        outside_uids: list[int] = []
+        for line in uid_map.splitlines():
+            parts = line.split()
+            if len(parts) >= 3:
+                try:
+                    outside_uids.append(int(parts[1]))
+                except ValueError:
+                    continue
+        return bool(outside_uids) and all(uid != 0 for uid in outside_uids)
+
+    def security_profile(self) -> dict[str, object]:
+        """Report whether this run has a real non-root host principal.
+
+        The local worktree runs bwrap as **root** on this host, so inside-uid
+        65534 may map to host uid 0 (``/proc/self/uid_map`` = ``65534 0 1``).
+        Namespace uid 65534 is therefore **not** proof of an independent
+        non-root OS principal.  The profile records host euid, uid_map and a
+        ``non_root_principal_verified`` flag.  B1-04 must be verified on a
+        deployment running as a non-root service account (or a separately
+        reviewed setuid bwrap setup); the local result is ``LOCAL_ONLY``.
+        """
+
+        available = bool(self.available())
+        payload = self._probe_payload or {}
+        uid_map = str(payload.get("uid_map") or "")
+        host_euid = os.geteuid()
+        mapped_host_uids: list[int] = []
+        for line in uid_map.splitlines():
+            parts = line.split()
+            if len(parts) >= 3:
+                try:
+                    mapped_host_uids.append(int(parts[1]))
+                except ValueError:
+                    continue
+        non_root_verified = bool(
+            available
+            and self._non_root_principal_verified(host_euid, uid_map)
+        )
+        return {
+            "profile": "NON_ROOT_PRINCIPAL" if non_root_verified else "LOCAL_ONLY",
+            "host_euid": host_euid,
+            "host_is_root": host_euid == 0,
+            "sandbox_uid": self._uid,
+            "sandbox_gid": self._gid,
+            "uid_map": uid_map,
+            "mapped_host_uids": mapped_host_uids,
+            "sandbox_python_version": str(payload.get("python_version") or ""),
+            "non_root_principal_verified": non_root_verified,
+            "sandbox_available": available,
+            "limitation": (
+                "local bwrap runs as root; sandbox uid 65534 may map to host uid 0. "
+                "B1-04 requires a target deployment running as a non-root principal "
+                "(or separately reviewed setuid bwrap) and is NOT satisfied locally."
+            ),
+        }
 
     def _probe(self) -> None:
         try:
@@ -281,6 +366,7 @@ class BwrapSandbox:
             if not isinstance(payload, dict):
                 raise SandboxUnavailable("canary self-check produced an unexpected payload")
             self._verify_probe_payload(payload)
+            self._probe_payload = dict(payload)
         finally:
             shutil.rmtree(work_dir, ignore_errors=True)
             shutil.rmtree(sentinel_dir, ignore_errors=True)
@@ -400,10 +486,19 @@ class BwrapSandbox:
             raise SandboxLaunchError("stdin_data must be bytes or str")
         return self._spawn(directory, argv, timeout_s=float(timeout_s), stdin_data=data, extra_env=extra_env)
 
-    def _apply_host_limits(self) -> None:  # pragma: no cover - runs in the child
+    @staticmethod
+    def _cpu_limit_for_timeout(timeout_s: float) -> int:
+        """CPU rlimit for one run; keeps the wall timeout as the primary limit."""
+
+        return max(
+            RLIMIT_CPU_MIN_SECONDS,
+            int(math.ceil(max(0.0, float(timeout_s)))) + RLIMIT_CPU_GRACE_SECONDS,
+        )
+
+    def _apply_host_limits(self, cpu_seconds: int) -> None:  # pragma: no cover - child
         for limit, soft, hard in (
             (resource.RLIMIT_AS, RLIMIT_AS_BYTES, RLIMIT_AS_BYTES),
-            (resource.RLIMIT_CPU, RLIMIT_CPU_SECONDS, RLIMIT_CPU_SECONDS),
+            (resource.RLIMIT_CPU, cpu_seconds, cpu_seconds),
             (resource.RLIMIT_FSIZE, RLIMIT_FSIZE_BYTES, RLIMIT_FSIZE_BYTES),
             (resource.RLIMIT_NOFILE, RLIMIT_NOFILE, RLIMIT_NOFILE),
             (resource.RLIMIT_NPROC, self._host_nproc_limit, self._host_nproc_limit),
@@ -421,6 +516,7 @@ class BwrapSandbox:
         extra_env: Mapping[str, str] | None = None,
     ) -> SandboxResult:
         command = self.command(work_dir, argv, extra_env=extra_env)
+        cpu_limit = self._cpu_limit_for_timeout(timeout_s)
         started = time.monotonic()
         try:
             process = subprocess.Popen(
@@ -431,7 +527,7 @@ class BwrapSandbox:
                 bufsize=0,
                 env={},
                 start_new_session=True,
-                preexec_fn=self._apply_host_limits,
+                preexec_fn=partial(self._apply_host_limits, cpu_limit),
             )
         except (OSError, subprocess.SubprocessError) as exc:
             raise SandboxLaunchError(f"cannot launch bwrap: {type(exc).__name__}") from exc
