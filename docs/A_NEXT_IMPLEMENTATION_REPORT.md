@@ -114,4 +114,6 @@
 - OCI 有效 run 的执行树为 `c687738`；其后 #8.2（fc935bd，仅 scripts/tests/docs）合并到 `4d7c282`，**OCI 未在最终 HEAD 复跑**（窗口/时间）→ 最终 HEAD 的 OCI = NOT_RUN（限制记录）。
 - A-NEXT 测试 OCI 可移植性未解决（需后续把 host 工具假设改为纯 Python 或容器内工具；不得静默扩大 deselect）。
 
+- **最终 docs-only commit**：`5766c33cc9516245025395a8e432e232af27e797`（本文件所在提交；其父 `4d7c282` 为代码+合并 HEAD）。Host 全量在 `1dfb24c`（1626 tests）上运行；最终树 `--collect-only` = 1644（#8.2 新增 18 个 rrev6 runner fail-closed tests），`tests/a_next_rrev6` 28 passed；**最终 HEAD 的 Host 全量 NOT_RUN**（仅 docs/scripts/tests 增量，已记录为限制）。
+
 > 本报告不是 PASS、不是授权；最终裁定由 Independent Reviewer 从冻结 SHA 独立复现后给出。**未 push。**
