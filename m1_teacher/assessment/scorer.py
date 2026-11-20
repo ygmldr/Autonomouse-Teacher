@@ -15,11 +15,12 @@ Evidence rules (fail-closed)
   answers, syntax errors, runtime exceptions, timeouts and missing functions in
   learner code are graded as ``INCORRECT``/``PARTIAL`` with a *generic*
   ``failure_reason`` (counts / error class only, never hidden test content).
-* ``EVAL_ERROR`` is reserved for **scoring infrastructure** failures: missing or
-  corrupted scoring spec, path-escape in ``scoring_spec_ref``, temporary-dir or
-  subprocess launch failure, malformed runner output.  An ``EVAL_ERROR`` is
-  never evidence about the learner and must never lower mastery or record an
-  error (the session engine enforces that separation).
+* ``EVAL_ERROR`` is reserved for **scoring infrastructure / policy** failures:
+  missing or corrupted scoring spec, path-escape in ``scoring_spec_ref``,
+  worker protocol violations, unavailable OS sandbox, or the default
+  ``UNTRUSTED_CODE_EXECUTION_BLOCKED`` policy.  An ``EVAL_ERROR`` is never
+  evidence about the learner and must never lower mastery or record an error
+  (the session engine enforces that separation).
 * ``NEEDS_REVIEW`` is used for open-ended ``SHORT_ANSWER`` responses whose
   semantic evidence cannot be verified deterministically.  A semantic rubric
   can award at most ``PARTIAL`` credit; a plain string match can never yield
@@ -27,12 +28,19 @@ Evidence rules (fail-closed)
 
 Isolation
 ---------
-``CODE`` items are executed in an isolated child process
-(``sys.executable -I -B``) inside a fresh temporary directory with a hard
-wall-clock timeout, a minimal environment and the hidden tests passed through
-stdin (never written to the working directory).  This is a local
-correctness/determinism boundary, **not** an OS security sandbox; it is only
-used for synthetic, self-authored fixtures in offline evaluation.
+``CODE`` items never execute learner code in the teacher process.  The scorer
+only builds the trusted test list (``args``/``expected`` from the hidden
+scoring spec) and delegates execution to
+:class:`~m1_teacher.assessment.judge.supervisor.TrustedJudgeSupervisor`, which
+compares the untrusted worker's observed actual value against its own expected
+value.  By default learner CODE is **not executed at all**: the result is a
+fail-closed ``EVAL_ERROR`` with ``failure_reason``
+``UNTRUSTED_CODE_EXECUTION_BLOCKED`` and the learner state must not change.
+Only the explicit synthetic CI opt-in ``trusted_fixture_only=True`` enables the
+worker path; if the worker/OS sandbox is unavailable it also fails closed with
+the same blocked classification and *never* falls back to an in-process or bare
+subprocess runner.  MCQ / SHORT_ANSWER grading does not use a worker and is
+unaffected by the policy.
 
 Determinism
 -----------
@@ -46,12 +54,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
-import shutil
-import signal
-import subprocess
-import sys
-import tempfile
 from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
@@ -62,6 +64,16 @@ from ..contracts.types import (
     AssessmentItem,
     AssessmentResult,
     now_utc,
+)
+from .judge.supervisor import (
+    STATUS_JUDGE_INFRA_ERROR,
+    STATUS_JUDGE_SANDBOX_UNAVAILABLE,
+    STATUS_PASS,
+    STATUS_RE,
+    STATUS_TLE,
+    STATUS_UNTRUSTED_CODE_EXECUTION_BLOCKED,
+    JudgeVerdict,
+    TrustedJudgeSupervisor,
 )
 
 __all__ = [
@@ -109,82 +121,24 @@ class _ScorerInfrastructureError(Exception):
         super().__init__(code)
 
 
-# Runner executed inside the isolated child process for CODE items.  It reads
-# the hidden test payload from stdin and writes only pass/fail flags; expected
-# values and hidden test bodies are never echoed back to the teacher side.
-_CODE_RUNNER_SOURCE = r'''
-import importlib.util
-import json
-import sys
+#: Marker raised when CODE execution is disabled by policy (no learner code ran).
+UNTRUSTED_CODE_EXECUTION_BLOCKED = STATUS_UNTRUSTED_CODE_EXECUTION_BLOCKED
 
 
-def canonical(value):
-    try:
-        return json.dumps(value, ensure_ascii=False, sort_keys=True, allow_nan=False)
-    except (TypeError, ValueError):
-        return None
+class _AssessmentBlocked(Exception):
+    """Internal marker: CODE execution is disabled / sandbox unavailable."""
+
+    def __init__(self, reason: str) -> None:
+        self.reason = reason
+        super().__init__(reason)
 
 
-def write_result(path, payload):
-    with open(path, "w", encoding="utf-8") as handle:
-        json.dump(payload, handle, ensure_ascii=False, sort_keys=True)
+class _JudgeInfrastructureFailure(Exception):
+    """Internal marker: trusted judge could not obtain a trustworthy observation."""
 
-
-def main():
-    result_path = sys.argv[1]
-    try:
-        payload = json.loads(sys.stdin.read())
-    except Exception:
-        write_result(result_path, {"status": "fatal", "fatal_error": "runner_error", "cases": []})
-        return 0
-    tests = payload.get("tests") or []
-    function_name = payload.get("function_name") or ""
-    result = {"status": "fatal", "fatal_error": None, "cases": []}
-    try:
-        spec = importlib.util.spec_from_file_location("m1a_learner_solution", "solution.py")
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-    except SyntaxError:
-        result["fatal_error"] = "syntax_error"
-        write_result(result_path, result)
-        return 0
-    except BaseException:
-        result["fatal_error"] = "import_error"
-        write_result(result_path, result)
-        return 0
-    function = getattr(module, function_name, None)
-    if not callable(function):
-        result["fatal_error"] = "missing_function"
-        write_result(result_path, result)
-        return 0
-    result["status"] = "ok"
-    for case in tests:
-        args = case.get("args")
-        expected = case.get("expected")
-        entry = {"passed": False, "exception": None, "actual": None}
-        try:
-            call_args = list(args) if isinstance(args, list) else []
-            actual = function(*call_args)
-        except BaseException as exc:
-            entry["exception"] = type(exc).__name__
-        else:
-            actual_json = canonical(actual)
-            expected_json = canonical(expected)
-            entry["passed"] = (
-                actual_json is not None
-                and expected_json is not None
-                and actual_json == expected_json
-            )
-            entry["actual"] = None
-        result["cases"].append(entry)
-        write_result(result_path, result)
-    write_result(result_path, result)
-    return 0
-
-
-if __name__ == "__main__":
-    sys.exit(main())
-'''
+    def __init__(self, reason: str) -> None:
+        self.reason = reason
+        super().__init__(reason)
 
 
 @runtime_checkable
@@ -224,6 +178,8 @@ class DeterministicScorer:
         timeout_s: float = _DEFAULT_TIMEOUT_S,
         scorer_id: str = SCORER_ID_DEFAULT,
         clock: Callable[[], str] | None = None,
+        trusted_fixture_only: bool = False,
+        judge_worker: Any = None,
     ) -> None:
         if fixtures_root is None:
             from ..domains.cf_binary_search import default_fixtures_root
@@ -241,10 +197,23 @@ class DeterministicScorer:
         scorer_id = _require_nonempty_str(scorer_id, "DeterministicScorer(scorer_id)")
         if clock is not None and not callable(clock):
             raise ValidationError("DeterministicScorer(clock): expected a callable or None")
+        if not isinstance(trusted_fixture_only, bool):
+            raise ValidationError(
+                "DeterministicScorer(trusted_fixture_only): expected a bool"
+            )
+        if judge_worker is not None and not callable(getattr(judge_worker, "run_case", None)):
+            raise ValidationError(
+                "DeterministicScorer(judge_worker=...): expected an object with run_case()"
+            )
         self._fixtures_root = root
         self._timeout_s = timeout
         self._scorer_id = scorer_id
         self._clock: Callable[[], str] = clock if clock is not None else now_utc
+        # Learner CODE execution is fail-closed by default.  The synthetic CI
+        # opt-in only enables the trusted-supervisor -> untrusted-worker path.
+        self._trusted_fixture_only = trusted_fixture_only
+        self._judge_worker = judge_worker
+        self._supervisor: TrustedJudgeSupervisor | None = None
 
     # -- properties --------------------------------------------------------
     @property
@@ -258,6 +227,23 @@ class DeterministicScorer:
     @property
     def timeout_s(self) -> float:
         return self._timeout_s
+
+    @property
+    def trusted_fixture_only(self) -> bool:
+        return self._trusted_fixture_only
+
+    @property
+    def judge_worker(self) -> Any:
+        return self._judge_worker
+
+    def _get_supervisor(self) -> TrustedJudgeSupervisor:
+        if self._supervisor is None:
+            self._supervisor = TrustedJudgeSupervisor(
+                self._judge_worker,
+                timeout_s=self._timeout_s,
+                trusted_fixture_only=True,
+            )
+        return self._supervisor
 
     # -- public API --------------------------------------------------------
     def score(
@@ -282,6 +268,28 @@ class DeterministicScorer:
             spec, spec_digest = self._load_spec(item)
             status, score, reason = self._score_with_spec(
                 item, spec, response, max_score
+            )
+        except _AssessmentBlocked as exc:
+            return self._result(
+                item,
+                learner_id,
+                rid,
+                max_score,
+                "EVAL_ERROR",
+                None,
+                exc.reason,
+                [f"item:{item.item_id}"],
+            )
+        except _JudgeInfrastructureFailure as exc:
+            return self._result(
+                item,
+                learner_id,
+                rid,
+                max_score,
+                "EVAL_ERROR",
+                None,
+                exc.reason,
+                [f"item:{item.item_id}"],
             )
         except _ScorerInfrastructureError as exc:
             return self._result(
@@ -497,6 +505,9 @@ class DeterministicScorer:
         response: Any,
         max_score: float,
     ) -> tuple[str, float | None, str]:
+        # Fail closed *before* any learner-code execution path is considered.
+        if not self._trusted_fixture_only:
+            raise _AssessmentBlocked(STATUS_UNTRUSTED_CODE_EXECUTION_BLOCKED)
         function_name = spec.get("function_name")
         tests = spec.get("tests")
         if type(function_name) is not str or not function_name.strip():
@@ -505,7 +516,11 @@ class DeterministicScorer:
             raise _ScorerInfrastructureError("SPEC_CODE_TESTS_INVALID")
         normalized_tests: list[dict[str, Any]] = []
         for case in tests:
-            if type(case) is not dict or type(case.get("args")) is not list or "expected" not in case:
+            if (
+                type(case) is not dict
+                or type(case.get("args")) is not list
+                or "expected" not in case
+            ):
                 raise _ScorerInfrastructureError("SPEC_CODE_TESTS_INVALID")
             normalized_tests.append({"args": case["args"], "expected": case["expected"]})
         if type(response) is not str or not response.strip():
@@ -514,136 +529,58 @@ class DeterministicScorer:
         if type(spec_timeout) not in (int, float) or not spec_timeout > 0:
             raise _ScorerInfrastructureError("SPEC_CODE_TIMEOUT_INVALID")
         timeout = max(0.1, min(float(self._timeout_s), float(spec_timeout)))
-        outcome = self._run_learner_code(response, function_name, normalized_tests, timeout)
-        return self._classify_code_outcome(outcome, len(normalized_tests), max_score)
-
-    @staticmethod
-    def _minimal_env() -> dict[str, str]:
-        env = {
-            "PATH": os.environ.get("PATH", "/usr/local/bin:/usr/bin:/bin"),
-            "PYTHONIOENCODING": "utf-8",
-            "PYTHONHASHSEED": "0",
-            "PYTHONDONTWRITEBYTECODE": "1",
-            "PYTHONNOUSERSITE": "1",
-        }
-        for key in ("LANG", "LC_ALL", "TMPDIR"):
-            if key in os.environ:
-                env[key] = os.environ[key]
-        return env
-
-    def _run_learner_code(
-        self,
-        code: str,
-        function_name: str,
-        tests: list[dict[str, Any]],
-        timeout: float,
-    ) -> dict[str, Any]:
         try:
-            work_dir = tempfile.mkdtemp(prefix="m1a_scorer_")
-        except OSError:
-            raise _ScorerInfrastructureError("TEMP_DIR_FAILED") from None
-        try:
-            solution_path = os.path.join(work_dir, "solution.py")
-            runner_path = os.path.join(work_dir, "runner.py")
-            result_path = os.path.join(work_dir, "result.json")
-            try:
-                with open(solution_path, "w", encoding="utf-8", newline="\n") as handle:
-                    handle.write(code)
-                with open(runner_path, "w", encoding="utf-8", newline="\n") as handle:
-                    handle.write(_CODE_RUNNER_SOURCE)
-            except OSError:
-                raise _ScorerInfrastructureError("TEMP_DIR_FAILED") from None
-            payload = json.dumps(
-                {"function_name": function_name, "tests": tests},
-                ensure_ascii=False,
-                sort_keys=True,
-                allow_nan=False,
+            verdict = self._get_supervisor().evaluate(
+                response,
+                function_name,
+                normalized_tests,
+                timeout_s=timeout,
             )
-            try:
-                process = subprocess.Popen(
-                    [sys.executable, "-I", "-B", runner_path, result_path],
-                    cwd=work_dir,
-                    stdin=subprocess.PIPE,
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                    env=self._minimal_env(),
-                    start_new_session=True,
-                    text=True,
-                )
-            except OSError:
-                raise _ScorerInfrastructureError("SUBPROCESS_FAILED") from None
-            timed_out = False
-            try:
-                process.communicate(input=payload, timeout=timeout)
-            except subprocess.TimeoutExpired:
-                timed_out = True
-                self._kill(process)
-                try:
-                    process.communicate(timeout=1.0)
-                except subprocess.TimeoutExpired:  # pragma: no cover - defensive
-                    pass
-            outcome: dict[str, Any] = {"timed_out": timed_out, "returncode": process.returncode}
-            if os.path.exists(result_path):
-                try:
-                    with open(result_path, encoding="utf-8") as handle:
-                        parsed = json.load(handle)
-                except (OSError, json.JSONDecodeError):
-                    parsed = None
-                if isinstance(parsed, dict):
-                    outcome["result"] = parsed
-            return outcome
-        finally:
-            shutil.rmtree(work_dir, ignore_errors=True)
+        except Exception:  # noqa: BLE001 - judge failure must fail closed
+            raise _JudgeInfrastructureFailure("JUDGE_INFRA_ERROR:SUPERVISOR_EXCEPTION") from None
+        return self._map_judge_verdict(verdict, max_score)
 
     @staticmethod
-    def _kill(process: subprocess.Popen) -> None:
-        try:
-            if os.name == "posix":
-                os.killpg(os.getpgid(process.pid), signal.SIGKILL)
-            else:  # pragma: no cover - POSIX is the evaluation target
-                process.kill()
-        except (ProcessLookupError, PermissionError):
-            pass
-
-    @staticmethod
-    def _classify_code_outcome(
-        outcome: Mapping[str, Any], total: int, max_score: float
+    def _map_judge_verdict(
+        verdict: JudgeVerdict, max_score: float
     ) -> tuple[str, float | None, str]:
-        payload = outcome.get("result")
-        cases: list[dict[str, Any]] = []
-        fatal = None
-        if isinstance(payload, dict):
-            raw_cases = payload.get("cases")
-            if type(raw_cases) is list:
-                cases = [case for case in raw_cases if isinstance(case, dict)]
-            if payload.get("status") == "fatal":
-                fatal = payload.get("fatal_error")
-        passed = sum(1 for case in cases if case.get("passed") is True)
-        exceptions = sum(1 for case in cases if case.get("exception") is not None)
-        if fatal == "syntax_error":
-            return "INCORRECT", 0.0, "SYNTAX_ERROR"
-        if fatal == "import_error":
-            return "INCORRECT", 0.0, "RUNTIME_IMPORT_ERROR"
-        if fatal == "missing_function":
-            return "INCORRECT", 0.0, "MISSING_FUNCTION"
-        if fatal is not None:
-            return "INCORRECT", 0.0, "RUNTIME_ERROR"
-        if outcome.get("timed_out") is True:
-            if passed > 0:
-                ratio = passed / total if total else 0.0
-                return "PARTIAL", max_score * ratio, f"TIMEOUT_PARTIAL:{passed}/{total}"
-            return "INCORRECT", 0.0, "TIMEOUT"
-        if payload is None:
-            return "INCORRECT", 0.0, "RUNTIME_EXIT"
-        if passed == total and total > 0:
+        """Map a trusted aggregate verdict to student evidence (no hidden data)."""
+
+        total = max(0, int(verdict.cases_total))
+        passed = max(0, min(total, int(verdict.cases_passed)))
+        failed = total - passed
+        if verdict.infra_error or verdict.status in {
+            STATUS_JUDGE_INFRA_ERROR,
+            STATUS_JUDGE_SANDBOX_UNAVAILABLE,
+            STATUS_UNTRUSTED_CODE_EXECUTION_BLOCKED,
+        }:
+            if verdict.status in {
+                STATUS_JUDGE_SANDBOX_UNAVAILABLE,
+                STATUS_UNTRUSTED_CODE_EXECUTION_BLOCKED,
+            }:
+                raise _AssessmentBlocked(STATUS_UNTRUSTED_CODE_EXECUTION_BLOCKED)
+            code = "UNKNOWN"
+            for failure_code in verdict.failure_codes:
+                if failure_code.startswith("JUDGE_INFRA_ERROR:"):
+                    code = failure_code.split(":", 1)[1]
+                    break
+            raise _JudgeInfrastructureFailure(f"JUDGE_INFRA_ERROR:{code}")
+        if verdict.status == STATUS_PASS and passed == total and total > 0:
             return "CORRECT", max_score, ""
-        if passed == 0:
-            reason = "CASES_FAILED:0/{}".format(total)
-            if exceptions:
-                reason = "RUNTIME_ERROR_CASES:0/{}".format(total)
-            return "INCORRECT", 0.0, reason
-        ratio = passed / total if total else 0.0
-        return "PARTIAL", max_score * ratio, f"CASES_FAILED:{total - passed}/{total}"
+        ratio = (passed / total) if total else 0.0
+        if passed > 0:
+            timeout_failure = verdict.status == STATUS_TLE
+            reason = (
+                f"JUDGE_STUDENT_TLE:{passed}/{total}"
+                if timeout_failure
+                else f"JUDGE_CASES_FAILED:{failed}/{total}"
+            )
+            return "PARTIAL", max_score * ratio, reason
+        if verdict.status == STATUS_TLE:
+            return "INCORRECT", 0.0, "JUDGE_STUDENT_TLE"
+        if verdict.status == STATUS_RE:
+            return "INCORRECT", 0.0, "JUDGE_STUDENT_RE"
+        return "INCORRECT", 0.0, f"JUDGE_CASES_FAILED:0/{total}"
 
     # -- SHORT_ANSWER ------------------------------------------------------
     def _score_short_answer(
