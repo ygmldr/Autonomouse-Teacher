@@ -71,6 +71,13 @@ RLIMIT_AS_BYTES = 256 * 1024 * 1024
 #: :meth:`UntrustedExecutionWorker._interpret` as a defensive backstop.
 RLIMIT_CPU_MIN_SECONDS = 10
 RLIMIT_CPU_GRACE_SECONDS = 2
+
+#: Deployment gate (review P1-2): when set to a truthy value, the sandbox
+#: canary must verify a real non-root host principal; otherwise it fails closed
+#: (``SandboxUnavailable`` -> blocked, no learner code executes).  Unset (the
+#: local synthetic default) keeps ``LOCAL_ONLY`` usable but reports the gap.
+REQUIRE_NONROOT_SANDBOX_ENV = "M1B_REQUIRE_NONROOT_SANDBOX"
+_NONROOT_TRUTHY = frozenset({"1", "true", "yes", "on"})
 RLIMIT_FSIZE_BYTES = 1024 * 1024
 RLIMIT_NOFILE = 64
 RLIMIT_NPROC_HOST_FLOOR = 4096
@@ -144,6 +151,15 @@ def _check():
 
 print(json.dumps(_check(), ensure_ascii=False, sort_keys=True))
 """
+
+
+def require_nonroot_sandbox() -> bool:
+    """True when the deployment demands a verified non-root host principal."""
+
+    return (
+        os.environ.get(REQUIRE_NONROOT_SANDBOX_ENV, "").strip().casefold()
+        in _NONROOT_TRUTHY
+    )
 
 
 class SandboxUnavailable(RuntimeError):
@@ -311,6 +327,10 @@ class BwrapSandbox:
             "mapped_host_uids": mapped_host_uids,
             "sandbox_python_version": str(payload.get("python_version") or ""),
             "non_root_principal_verified": non_root_verified,
+            "non_root_requirement_enforced": require_nonroot_sandbox(),
+            "non_root_requirement_satisfied": bool(
+                non_root_verified or not require_nonroot_sandbox()
+            ),
             "sandbox_available": available,
             "limitation": (
                 "local bwrap runs as root; sandbox uid 65534 may map to host uid 0. "
@@ -367,9 +387,32 @@ class BwrapSandbox:
                 raise SandboxUnavailable("canary self-check produced an unexpected payload")
             self._verify_probe_payload(payload)
             self._probe_payload = dict(payload)
+            self._enforce_nonroot_requirement(payload)
         finally:
             shutil.rmtree(work_dir, ignore_errors=True)
             shutil.rmtree(sentinel_dir, ignore_errors=True)
+
+    def _enforce_nonroot_requirement(self, payload: Mapping[str, object]) -> None:
+        """Fail closed at startup when a non-root principal is required (P1-2).
+
+        The local synthetic default does not set the environment gate and keeps
+        working as ``LOCAL_ONLY``; a deployment that sets
+        ``M1B_REQUIRE_NONROOT_SANDBOX=1`` on a root host (or with a uid_map that
+        maps inside-uid 65534 to host 0) gets ``SandboxUnavailable`` from the
+        canary, so no learner code is ever executed.
+        """
+
+        if not require_nonroot_sandbox():
+            return
+        uid_map = str(payload.get("uid_map") or "")
+        host_euid = os.geteuid()
+        if not self._non_root_principal_verified(host_euid, uid_map):
+            raise SandboxUnavailable(
+                "non-root sandbox required but not verified: "
+                f"host_euid={host_euid}, uid_map={uid_map!r}; refusing to run "
+                "learner code (set M1B_REQUIRE_NONROOT_SANDBOX=0 only for "
+                "local synthetic evaluation)"
+            )
 
     def _verify_probe_payload(self, payload: Mapping[str, object]) -> None:
         if payload.get("uid") != self._uid or payload.get("gid") != self._gid:

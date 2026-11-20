@@ -434,3 +434,52 @@ def test_cpu_limit_never_fires_before_wall_budget():
         cpu_limit = BwrapSandbox._cpu_limit_for_timeout(wall_s)
         assert cpu_limit >= math.ceil(wall_s) + 2 or cpu_limit >= 10
         assert cpu_limit > wall_s
+
+
+# ---------------------------------------------------------------------------
+# Review addendum P1-2: startup fail-closed non-root enforcement
+# ---------------------------------------------------------------------------
+def test_nonroot_requirement_fails_closed_on_root_host(monkeypatch):
+    monkeypatch.setenv("M1B_REQUIRE_NONROOT_SANDBOX", "1")
+    sandbox = BwrapSandbox()
+    assert sandbox.available() is False
+    failure = sandbox.probe_failure_reason() or ""
+    assert "non-root sandbox required but not verified" in failure
+    profile = sandbox.security_profile()
+    assert profile["profile"] == "LOCAL_ONLY"
+    assert profile["non_root_requirement_enforced"] is True
+    assert profile["non_root_requirement_satisfied"] is False
+    assert profile["sandbox_available"] is False
+    # run() must refuse before any learner-code execution.
+    work_dir = Path(tempfile.mkdtemp(prefix="m1b_nonroot_gate_"))
+    try:
+        with pytest.raises(SandboxUnavailable):
+            sandbox.run(work_dir, [WORKER_PYTHON, "/worker/worker_runner.py"], 1.0)
+    finally:
+        shutil.rmtree(work_dir, ignore_errors=True)
+
+
+def test_nonroot_requirement_default_keeps_local_synthetic_available(monkeypatch):
+    monkeypatch.delenv("M1B_REQUIRE_NONROOT_SANDBOX", raising=False)
+    sandbox = BwrapSandbox()
+    require_os_sandbox(sandbox.available())
+    profile = sandbox.security_profile()
+    assert profile["non_root_requirement_enforced"] is False
+    # Not enforced locally, but the local root principal gap is still reported.
+    assert profile["non_root_principal_verified"] is False
+    assert profile["non_root_requirement_satisfied"] is True
+    assert profile["profile"] == "LOCAL_ONLY"
+
+
+def test_nonroot_requirement_passes_when_principal_is_verified(monkeypatch):
+    monkeypatch.setenv("M1B_REQUIRE_NONROOT_SANDBOX", "1")
+    monkeypatch.setattr(
+        BwrapSandbox,
+        "_non_root_principal_verified",
+        staticmethod(lambda host_euid, uid_map: True),
+    )
+    sandbox = BwrapSandbox()
+    assert sandbox.available() is True
+    profile = sandbox.security_profile()
+    assert profile["non_root_requirement_enforced"] is True
+    assert profile["non_root_requirement_satisfied"] is True

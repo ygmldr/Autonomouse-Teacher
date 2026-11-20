@@ -69,3 +69,28 @@ def test_docs_do_not_claim_env_can_enable_trusted_fixture() -> None:
         encoding="utf-8"
     )
     assert "由可信构造/部署参数开启" in threat_model
+
+
+# ---------------------------------------------------------------------------
+# Review addendum P1-3: repository safety-CI entry-point wiring
+# ---------------------------------------------------------------------------
+def test_safety_ci_script_is_present_and_wired() -> None:
+    from pathlib import Path
+
+    script = (
+        Path(__file__).resolve().parents[2] / "scripts" / "m1b" / "run_safety_ci.sh"
+    )
+    assert script.is_file()
+    assert script.stat().st_mode & 0o111, "script must be executable"
+    text = script.read_text(encoding="utf-8")
+    for required in (
+        "set -euo pipefail",
+        "M1B_REQUIRE_OS_SANDBOX=1",
+        "M1B_REQUIRE_NONROOT_SANDBOX",
+        "pytest tests/m1_teacher -q -rs",
+        "--allow-root-synthetic",
+        "skipped",
+    ):
+        assert required in text, required
+    for forbidden in ("curl ", "wget ", "git push", "npm install"):
+        assert forbidden not in text

@@ -347,8 +347,10 @@ def test_to_dict_exposes_only_aggregate_fields() -> None:
         "cases_passed",
         "failure_codes",
         "infra_error",
+        "security_profile",
     }
     assert payload["failure_codes"] == []
+    assert payload["security_profile"] == {}
 
 
 # ---------------------------------------------------------------------------

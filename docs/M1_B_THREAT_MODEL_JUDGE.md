@@ -2,7 +2,7 @@
 
 - 文档编号：`M1_B_THREAT_MODEL_JUDGE` / B-PR1 设计前置
 - 状态：**DESIGN + IMPLEMENTED_LOCAL_VERIFIED**（设计规格；PR1 已实现并在本机通过本地测试；独立验收前真实用户 CODE 仍 BLOCKED）
-- 版本：v0.2（2026-11-20，UTC；PR1 实现回填修订：P1-01/P1-08/P2-05/P2-06 关闭）
+- 版本：v0.4（2026-11-20，UTC；PR1 实现 + 评审/复核附录 P1/P2 回填；P1-2 启动校验与 P1-3 CI 接线见 §4.4/§10.2）
 - 作者：B-NEXT / B-PR1 Judge 安全边界设计负责人（Implementer 前置设计）
 - 工作树：`/root/m1b/tm`，分支 `b-next/pr1-threat-model`，基线 `4706250643fd42d48d69ddad7159e011955fa9fd`
   （`work/m1a-mvp`，即 M1-A PR1–PR5 冻结 HEAD）
@@ -206,7 +206,7 @@
 ### 3.1 版本与传输
 
 - 协议版本常量：`m1b.judge.worker.v1`（request/response 都必须携带；不匹配 → `JUDGE_INFRA_ERROR`）。
-- 传输：supervisor 通过 stdin 发送**单个** UTF-8 JSON 对象（无 BOM、无换行要求），通过**专用协议 fd** 读取**单行** UTF-8 JSON（上限 128 KiB；只取第一行；后续字节丢弃并记录截断，必要时判 INFRA_ERROR）。该 fd 由 worker_runner 在导入 learner 代码前 `os.dup(1)` 得到（通常为 fd 3），随后 fd 1/2 被重定向到 `/dev/null`； learner 的 `print`/`sys.stdout.write` 不能进入协议通道，worker_runner 写完唯一一行响应后立即 `os._exit(0)`（详见 §4.3；与 m1a-fixtures 的 `worker_runner.py` 实现一致）。
+- 传输：supervisor 通过 stdin 发送**单个** UTF-8 JSON 对象（无 BOM、无换行要求），通过**专用协议 fd** 读取**恰好一行** UTF-8 JSON（上限 128 KiB；多行/空行/后续多余字节一律拒绝并判 `JUDGE_INFRA_ERROR`，不做“取第一行”的宽松解析；与 `protocol.parse_worker_response` 实现一致）。该 fd 由 worker_runner 在导入 learner 代码前 `os.dup(1)` 得到（通常为 fd 3），随后 fd 1/2 被重定向到 `/dev/null`； learner 的 `print`/`sys.stdout.write` 不能进入协议通道，worker_runner 写完唯一一行响应后立即 `os._exit(0)`（详见 §4.3；与 m1a-fixtures 的 `worker_runner.py` 实现一致）。
 - **不使用** argv 传入任何路径/expected；**不使用** result 文件；**不使用**共享可写目录。
 - supervisor 侧禁止把 request/response 写入 Teacher 可见日志（仅受限 judge 日志，且只含 request_id/case_index/分类/耗时/资源摘要；不允许 expected/args 原文）。
 
@@ -337,7 +337,7 @@
 
 | 维度 | 冻结要求 | LOCAL_PROBE 证据（附录 A.2） |
 | --- | --- | --- |
-| 用户/身份 | userns + `--uid 65534 --gid 65534`；无 setuid/caps；不 bind `/etc/sudoers`、不 bind host root。**P1-2**：宿主 principal 必须非 root（目标部署专用非 root 服务账号，或单独评审 setuid bwrap）；namespace uid 65534 不等于宿主非 root | 本机 bwrap 以 root 运行：`/proc/self/uid_map=65534 0 1`，`security_profile()["non_root_principal_verified"]=False`、`profile=LOCAL_ONLY`；`uid_map` 与宿主 euid 由 canary 记录。**B1-04 本地不满足，仅 LOCAL_ONLY，不得声称已满足** |
+| 用户/身份 | userns + `--uid 65534 --gid 65534`；无 setuid/caps；不 bind `/etc/sudoers`、不 bind host root。**P1-2（启动校验已实现）**：目标部署必须设置 `M1B_REQUIRE_NONROOT_SANDBOX=1`；此时 canary 校验宿主 euid≠0 且 uid_map 不映射到 0，不满足 → `SandboxUnavailable` → BLOCKED，绝不执行 learner code。默认不设该 env 时本地 synthetic 可用但记录 `LOCAL_ONLY` | 本机 bwrap 以 root 运行：`/proc/self/uid_map=65534 0 1`；默认 profile `non_root_principal_verified=False`、`profile=LOCAL_ONLY`；设置 `M1B_REQUIRE_NONROOT_SANDBOX=1` 时 `available()=False`（fail-closed）。**B1-04 本地仍 `PARTIAL`/`LOCAL_ONLY`，不得声称已满足** |
 | 文件系统 | ro `/usr /lib /lib64 /bin`；ro worker dir；私有 tmpfs `/tmp`（size 限制）；**不 bind** `/root /home /etc /var /tmp` 宿主路径 | `/root`、`/etc`、`/home`、`/var/lib`、host sentinel 全部不可见/`FileNotFoundError`；`/usr` 写入 `OSError`；`/tmp` 可写 |
 | 网络 | `--unshare-net`（无接口，仅 lo）；不提供 `/etc/resolv.conf`、无 DNS | `/proc/net/dev` 只有 lo；`socket.if_nameindex()==['lo']` |
 | PID/IPC/UTS | `--unshare-pid --unshare-ipc --unshare-uts`；bwrap reaper + `--die-with-parent` | `pid=2`、hostname=`m1b-worker` |
@@ -350,7 +350,7 @@
 
 - bwrap 隔离不是内核 0day/侧信道防护；仅作为"判题信任边界"。
 - `RLIMIT_NPROC` 对 uid 65534 在不同内核/映射下计数语义可能不同，需在目标部署环境验证；未完成前把 NPROC 作为**纵深防御**（pidns + wall timeout + 进程组 kill 是主控制），并在 PR1 记录实测。
-- **P1-2**：本机以 root 运行 bwrap（uid_map `65534 0 1`）；目标部署必须使用非 root 服务账号（或单独评审的 setuid bwrap），并由 `security_profile()`/canary 校验宿主 euid≠0、uid_map 不映射到 0；本地为 `LOCAL_ONLY`，B1-04 非 root principal 仍 `NOT_RUN`。
+- **P1-2（启动校验已实现）**：本机以 root 运行 bwrap（uid_map `65534 0 1`），默认 `LOCAL_ONLY`。目标部署必须使用非 root 服务账号（或单独评审的 setuid bwrap）并设置 `M1B_REQUIRE_NONROOT_SANDBOX=1`；canary 在启动时校验宿主 euid≠0、uid_map 不映射到 0，不满足则 fail-closed（`SandboxUnavailable` → BLOCKED，不执行 learner code）。本机设该 env 的负向验证通过；目标部署非 root 验收仍 `NOT_RUN`，B1-04 仍 `PARTIAL`。
 - cgroup v2 内存/pid 限额可作为增强项，本设计不强依赖（bwrap 0.9 + rlimit 已覆盖基线）。
 
 ---
@@ -715,3 +715,4 @@ worker 只读目录 `/tmp/m1b_probe/sandbox_worker`，`worker_runner.py` 实现 
 | v0.1 | 2026-11-20 | 初版 DESIGN_ONLY：资产/信任域、A/B 根因证据、冻结 worker 协议 v1、bwrap OS 规格与 LOCAL_PROBE、默认 BLOCKED 策略、负例矩阵、正确性/泄漏规格、B1-01..06 验收映射、非目标与 Reviewer 清单 |
 | v0.2 | 2026-11-20 | PR1 实现回填：P1-08 CLOSED（`--size` 必须在 `--tmpfs` 前，给出实测 exit 1/exit 0 与 sandbox.py 同步证据）；P1-01 CLOSED（opt-in 仅构造/部署配置，不可由数据路径/请求/env 绕过）；P2-05 修正 request_id 正则示例；P2-06 统一协议通道为专用 fd（dup(1)）+ fd1/2 重定向 + `os._exit(0)` 表述 |
 | v0.3 | 2026-11-20 | 独立评审 PASS_WITH_ACTIONS 回填：P1-4 CLOSED（删除“环境变量可开启 trusted fixture”，统一仅可信构造/部署参数）；P2-1（§4.3 上限 128 KiB、拒绝多行）；P2-2（状态改为 DESIGN + IMPLEMENTED_LOCAL_VERIFIED）；P1-1/P1-2 说明同步（CPU/wall TLE 与 host 非 root principal LOCAL_ONLY） |
+| v0.4 | 2026-11-20 | 复核附录回填：P1-2 启动校验实现（`M1B_REQUIRE_NONROOT_SANDBOX=1` canary fail-closed，默认 LOCAL_ONLY）；P1-3 CI 接线脚本 `scripts/m1b/run_safety_ci.sh`（.github 仍 NOT_CONFIGURED/NOT_RUN）；§3.1 首行规则与实现一致；版本号/changelog 对齐 |
