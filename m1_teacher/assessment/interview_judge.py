@@ -61,6 +61,10 @@ DIMENSIONS: tuple[str, ...] = (
 _HIDDEN_SUBDIR = Path("vertical") / "interview" / "rubrics"
 _ITEM_PREFIX = "interview.item."
 _SPEC_REF_RE = re.compile(r"^scoring/[A-Za-z0-9_.-]+\.json$")
+#: Teacher-visible opaque refs introduced by B-PR4 P2-1; they resolve inside the
+#: scorer-only hidden directory without ever exposing that path to the teacher
+#: side or to persisted teacher-visible records.
+_OPAQUE_SPEC_REF_RE = re.compile(r"^rubric/([A-Za-z0-9_.-]+)\.json$")
 _SENTENCE_SPLIT_RE = re.compile(r"[。！？!?；;\n]+")
 _MAGNITUDE_RE = re.compile(
     r"\d+(?:\.\d+)?\s*(?:ms|毫秒|秒|s|QPS|qps|万|亿|GB|TB|核|台|倍|%|％)"
@@ -400,9 +404,15 @@ class InterviewRubricJudge:
     # -- hidden spec loading ----------------------------------------------
     def _spec_path(self, item: AssessmentItem) -> Path:
         ref = item.scoring_spec_ref
-        if type(ref) is not str or not _SPEC_REF_RE.match(ref):
+        if type(ref) is not str:
             raise _SpecError("INTERVIEW_SPEC_REF_INVALID")
-        candidate = (self._hidden_dir / ref).resolve()
+        opaque = _OPAQUE_SPEC_REF_RE.match(ref)
+        if opaque is not None:
+            candidate = (self._hidden_dir / "scoring" / f"{opaque.group(1)}.json").resolve()
+        elif _SPEC_REF_RE.match(ref):
+            candidate = (self._hidden_dir / ref).resolve()
+        else:
+            raise _SpecError("INTERVIEW_SPEC_REF_INVALID")
         expected_parent = (self._hidden_dir / "scoring").resolve()
         if candidate.parent != expected_parent:
             raise _SpecError("INTERVIEW_SPEC_PATH_ESCAPE")

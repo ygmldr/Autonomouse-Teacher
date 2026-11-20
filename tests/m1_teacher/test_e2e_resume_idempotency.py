@@ -19,6 +19,8 @@ from pathlib import Path
 import pytest
 
 from m1_teacher import demo
+import guard_support
+
 from m1_teacher.assessment.scorer import DeterministicScorer
 from m1_teacher.contracts.errors import ConflictError, UnsupportedOperationError
 from m1_teacher.contracts.types import (
@@ -507,13 +509,12 @@ _HIDDEN_SCORING_READERS = frozenset({"scorer.py", "interview_judge.py"})
 
 
 def test_teacher_code_references_hidden_scoring_only_in_scorer() -> None:
-    offenders: list[str] = []
-    for path in sorted((REPO_ROOT / "m1_teacher").rglob("*.py")):
-        text = path.read_text(encoding="utf-8")
-        # B-PR4 adds a second independent scorer-side module (interview judge);
-        # the hidden-material reader allow-list stays explicit and closed.
-        if "scoring/" in text and path.name not in _HIDDEN_SCORING_READERS:
-            offenders.append(str(path.relative_to(REPO_ROOT)))
+    # B-PR4 P1-2: AST/path-component detection (not a literal substring scan);
+    # the reader allow-list stays exactly {scorer.py, interview_judge.py}.
+    assert _HIDDEN_SCORING_READERS == guard_support.DEFAULT_HIDDEN_READERS
+    offenders = guard_support.scan_hidden_reader_allowlist(
+        REPO_ROOT / "m1_teacher", allowlist=_HIDDEN_SCORING_READERS
+    )
     assert offenders == [], f"teacher modules reference hidden scoring paths: {offenders}"
 
     forbidden_modules = {

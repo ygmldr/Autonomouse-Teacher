@@ -142,6 +142,11 @@ _ITEM_ACTION_PHASES = {
     "ASSESS": PHASE_ASSESS,
     "DIAGNOSE_ITEM": PHASE_ASSESS,
 }
+#: Action kinds that leave an item pending for ``submit_response`` (used only by
+#: the event-sourced session replay; includes the additive B-PR4 vertical kinds).
+_REPLAY_ITEM_KINDS = frozenset(
+    {"DIAGNOSE", "PRACTICE", "REASSESS", "ASSESS", "DIAGNOSE_ITEM", "SOCRATIC_QUESTION", "ASK_CLARIFICATION"}
+)
 _EVAL_ERROR_EVENT_PREFIX = "evt.evalerror."
 _GOAL_COMPLETED_EVENT_PREFIX = "evt.goalcompleted."
 _ATTEMPT_EVENT_PREFIX = "evt.responsesubmitted."
@@ -410,6 +415,9 @@ class TeachingSessionEngine:
         self._scorer: AssessmentScorer = scorer if scorer is not None else DeterministicScorer()
         self._policy = policy if policy is not None else SessionPolicy()
         self._vertical: VerticalPolicy | None = vertical_policy
+        #: Sessions whose vertical plan was restored/validated from the event log
+        #: by this engine instance (the event log remains the source of truth).
+        self._vertical_restored: set[str] = set()
         self._supports_txn = callable(
             getattr(repository, "commit_teaching_turn", None)
         ) and callable(getattr(repository, "session_version", None))
@@ -440,15 +448,15 @@ class TeachingSessionEngine:
             self._practice_items_by_node[node_id] = list(parsed)
 
     # -- additive vertical metadata helpers ---------------------------------
-    def _vertical_session_event_payload(self) -> dict[str, Any]:
+    def _vertical_session_event_payload(self, session_id: str) -> dict[str, Any]:
         if self._vertical is None:
             return {}
-        return dict(self._vertical.session_event_payload())
+        return dict(self._vertical.session_event_payload(session_id))
 
-    def _vertical_plan_event_payload(self) -> dict[str, Any]:
+    def _vertical_plan_event_payload(self, session_id: str) -> dict[str, Any]:
         if self._vertical is None:
             return {}
-        return dict(self._vertical.plan_event_payload())
+        return dict(self._vertical.plan_event_payload(session_id))
 
     # -- properties --------------------------------------------------------
     @property
@@ -532,6 +540,8 @@ class TeachingSessionEngine:
                     f"start_session(): session {session_id!r} already exists for a different "
                     "learner/goal/objective"
                 )
+            self._validate_session_version_compatibility(existing)
+            self._ensure_vertical_plan(existing)
             return existing
 
         if self._vertical is not None:
@@ -566,10 +576,12 @@ class TeachingSessionEngine:
                 "learner_id": learner_id,
                 "goal_id": goal.goal_id,
                 "objective_id": objective.objective_id,
+                "domain_id": self._domain.domain_id,
+                "domain_version": getattr(self._domain, "domain_version", None),
                 "phase": phase,
                 "snapshot_revision": snapshot.revision,
                 "session_policy_version": self._policy.policy_version,
-                **self._vertical_session_event_payload(),
+                **self._vertical_session_event_payload(session_id),
             },
         )
         plan = self._planner.plan(goal, objective, snapshot, history=self._events(learner_id))
@@ -581,9 +593,11 @@ class TeachingSessionEngine:
                 "objective_id": plan.objective_id,
                 "step_count": len(plan.steps),
                 "policy_version": plan.policy_version,
-                **self._vertical_plan_event_payload(),
+                **self._vertical_plan_event_payload(session_id),
             },
         )
+        if self._vertical is not None:
+            self._vertical_restored.add(session_id)
         if complete:
             self._record_goal_completed(state, objective, completion_reason)
             return self._load_session(session_id)
@@ -594,6 +608,8 @@ class TeachingSessionEngine:
         """Return the action for the current turn (idempotent per turn)."""
 
         state = self._load_session(session_id)
+        self._validate_session_version_compatibility(state)
+        self._ensure_vertical_plan(state)
         if state.phase == PHASE_PAUSED:
             raise ConflictError(
                 f"current_action({session_id!r}): session is PAUSED; resume it first"
@@ -610,6 +626,8 @@ class TeachingSessionEngine:
         """Acknowledge a content action (TEACH/HINT/REVIEW) and advance one turn."""
 
         state = self._load_session(session_id)
+        self._validate_session_version_compatibility(state)
+        self._ensure_vertical_plan(state)
         if state.phase == PHASE_PAUSED:
             raise ConflictError(f"advance_session({session_id!r}): session is PAUSED")
         if state.phase == PHASE_COMPLETE:
@@ -619,6 +637,14 @@ class TeachingSessionEngine:
                 f"advance_session({session_id!r}): pending item "
                 f"{state.pending_item_id!r} must be answered with submit_response()"
             )
+        next_state = {
+            "phase": PHASE_REVIEW,
+            "turn_index": state.turn_index + 1,
+            "pending_item_id": None,
+        }
+        # Additive event: records the acknowledged content action so
+        # event-sourced session replay has no ambiguous turn transitions.
+        self._append_event(state, "TURN_ADVANCED", {"next_state": dict(next_state)})
         return self._save_state(
             state,
             phase=PHASE_REVIEW,
@@ -641,6 +667,11 @@ class TeachingSessionEngine:
                 "previous_phase": state.phase,
                 "pending_item_id": state.pending_item_id,
                 "turn_index": state.turn_index,
+                "next_state": {
+                    "phase": PHASE_PAUSED,
+                    "turn_index": state.turn_index,
+                    "pending_item_id": state.pending_item_id,
+                },
             },
         )
         return self._save_state(state, phase=PHASE_PAUSED)
@@ -649,6 +680,8 @@ class TeachingSessionEngine:
         """Resume a paused session, restoring its previous phase and pending item."""
 
         state = self._load_session(session_id)
+        self._validate_session_version_compatibility(state)
+        self._ensure_vertical_plan(state)
         if state.phase != PHASE_PAUSED:
             raise ConflictError(
                 f"resume_session({session_id!r}): session is not PAUSED "
@@ -660,7 +693,18 @@ class TeachingSessionEngine:
                 f"resume_session({session_id!r}): no SESSION_PAUSED event with a valid "
                 "previous phase was found"
             )
-        self._append_event(state, "SESSION_RESUMED", {"phase": previous_phase})
+        self._append_event(
+            state,
+            "SESSION_RESUMED",
+            {
+                "phase": previous_phase,
+                "next_state": {
+                    "phase": previous_phase,
+                    "turn_index": state.turn_index,
+                    "pending_item_id": state.pending_item_id,
+                },
+            },
+        )
         return self._save_state(state, phase=previous_phase)
 
     # -- response handling -------------------------------------------------
@@ -751,6 +795,8 @@ class TeachingSessionEngine:
         """
 
         state = self._load_session(session_id)
+        self._validate_session_version_compatibility(state)
+        self._ensure_vertical_plan(state)
         self._assert_caller_learner(state, caller_learner_id)
         item_id = _require_nonempty_str(
             item_id, "TeachingSessionEngine.submit_response(item_id)"
@@ -838,6 +884,8 @@ class TeachingSessionEngine:
         caller_learner_id: str | None = None,
     ) -> AssessmentResult:
         state = self._load_session(session_id)
+        self._validate_session_version_compatibility(state)
+        self._ensure_vertical_plan(state)
         self._assert_caller_learner(state, caller_learner_id)
         item_id = _require_nonempty_str(
             item_id, "TeachingSessionEngine.submit_response(item_id)"
@@ -1132,16 +1180,18 @@ class TeachingSessionEngine:
                 },
                 created_at=now_utc(),
             )
-            return _TurnTransition(
-                phase=PHASE_REVIEW if exhausted else state.phase,
-                turn_index=next_turn,
-                pending_item_id=None if exhausted else item.item_id,
-                snapshot=None,
-                drafts=(draft,),
-                goal=None,
+            return self._attach_next_state(
+                _TurnTransition(
+                    phase=PHASE_REVIEW if exhausted else state.phase,
+                    turn_index=next_turn,
+                    pending_item_id=None if exhausted else item.item_id,
+                    snapshot=None,
+                    drafts=(draft,),
+                    goal=None,
+                )
             )
         vertical_payload_extra = (
-            self._vertical.assessment_payload_extra(result)
+            self._vertical.assessment_payload_extra(result, session_id=state.session_id)
             if self._vertical is not None
             else None
         )
@@ -1167,13 +1217,15 @@ class TeachingSessionEngine:
                 )
             )
             if override is not None:
-                return _TurnTransition(
-                    phase=override.phase,
-                    turn_index=next_turn,
-                    pending_item_id=override.pending_item_id,
-                    snapshot=updated if mutated else None,
-                    drafts=tuple(drafts),
-                    goal=None,
+                return self._attach_next_state(
+                    _TurnTransition(
+                        phase=override.phase,
+                        turn_index=next_turn,
+                        pending_item_id=override.pending_item_id,
+                        snapshot=updated if mutated else None,
+                        drafts=tuple(drafts),
+                        goal=None,
+                    )
                 )
         phase = PHASE_REVIEW
         goal_update: LearnerGoal | None = None
@@ -1200,14 +1252,40 @@ class TeachingSessionEngine:
                         )
                     )
                 goal_update = replace(self._goal(state), status="COMPLETED")
-        return _TurnTransition(
-            phase=phase,
-            turn_index=next_turn,
-            pending_item_id=None,
-            snapshot=updated if mutated else None,
-            drafts=tuple(drafts),
-            goal=goal_update,
+        return self._attach_next_state(
+            _TurnTransition(
+                phase=phase,
+                turn_index=next_turn,
+                pending_item_id=None,
+                snapshot=updated if mutated else None,
+                drafts=tuple(drafts),
+                goal=goal_update,
+            )
         )
+
+    @staticmethod
+    def _attach_next_state(transition: _TurnTransition) -> _TurnTransition:
+        """Attach the persisted next session state to terminal turn events.
+
+        This is an additive payload extension (event types/payload semantics are
+        unchanged for existing readers) that makes ``replay_session_state``
+        exact: phase/turn/pending after a committed turn are recorded in the
+        same unified event log that produced them.
+        """
+
+        next_state = {
+            "phase": transition.phase,
+            "turn_index": transition.turn_index,
+            "pending_item_id": transition.pending_item_id,
+        }
+        drafts = tuple(
+            replace(draft, payload={**dict(draft.payload), "next_state": dict(next_state)})
+            if draft.event_type
+            in {"ASSESSED", "MASTERY_UPDATED", "ERROR", "GOAL_COMPLETED"}
+            else draft
+            for draft in transition.drafts
+        )
+        return replace(transition, drafts=drafts)
 
     @staticmethod
     def _next_state_from_transition(
@@ -2164,6 +2242,300 @@ class TeachingSessionEngine:
             raise NotFoundError(f"unknown session_id {session_id!r}")
         return state
 
+    # ------------------------------------------------------------------
+    # Version compatibility + event-sourced session replay (B-PR4 P1-3)
+    # ------------------------------------------------------------------
+    def _validate_session_version_compatibility(
+        self,
+        state: SessionState,
+        events: Sequence[HistoryEvent] | None = None,
+    ) -> None:
+        """Fail closed (zero writes) if the recorded session versions are incompatible.
+
+        MAP-E12: the recorded domain_id/domain_version no longer matches this
+        engine's domain (mid-session domain upgrade requires pause + new session).
+        MAP-E13: the recorded event/plan/session/vertical policy version is not
+        replayable by the current code (no migration is implemented in M1-B).
+        """
+
+        session_events = (
+            list(events)
+            if events is not None
+            else self._session_events(state)
+        )
+        started = next(
+            (event for event in session_events if event.event_type == "SESSION_STARTED"),
+            None,
+        )
+        if started is None:
+            raise ValidationError(
+                f"session {state.session_id!r}: SESSION_STARTED event is missing; "
+                "refusing to continue an unreplayable session",
+                code="MAP-E13_EVENT_VERSION_INCOMPATIBLE",
+                details={"session_id": state.session_id},
+            )
+        payload = started.payload
+        current_domain_version = getattr(self._domain, "domain_version", None)
+        recorded_domain_id = payload.get("domain_id")
+        recorded_domain_version = payload.get("domain_version")
+        if recorded_domain_id != self._domain.domain_id:
+            raise ValidationError(
+                "session domain version mismatch (MAP-E12): pause and start a new session",
+                code="MAP-E12_DOMAIN_VERSION_MISMATCH",
+                details={
+                    "session_id": state.session_id,
+                    "recorded_domain_id": recorded_domain_id,
+                    "current_domain_id": self._domain.domain_id,
+                },
+            )
+        if recorded_domain_version != current_domain_version:
+            raise ValidationError(
+                "session domain version mismatch (MAP-E12): pause and start a new session",
+                code="MAP-E12_DOMAIN_VERSION_MISMATCH",
+                details={
+                    "session_id": state.session_id,
+                    "recorded_domain_version": recorded_domain_version,
+                    "current_domain_version": current_domain_version,
+                },
+            )
+        if payload.get("objective_id") != state.objective_id:
+            raise ValidationError(
+                "session objective binding mismatch (MAP-E12)",
+                code="MAP-E12_DOMAIN_VERSION_MISMATCH",
+                details={
+                    "session_id": state.session_id,
+                    "recorded_objective_id": payload.get("objective_id"),
+                    "state_objective_id": state.objective_id,
+                },
+            )
+        if payload.get("session_policy_version") != self._policy.policy_version:
+            raise ValidationError(
+                "session policy version incompatible (MAP-E13); no migration is implemented",
+                code="MAP-E13_EVENT_VERSION_INCOMPATIBLE",
+                details={
+                    "session_id": state.session_id,
+                    "recorded_session_policy_version": payload.get("session_policy_version"),
+                    "current_session_policy_version": self._policy.policy_version,
+                },
+            )
+        if self._vertical is not None:
+            vertical = payload.get("vertical")
+            if not isinstance(vertical, Mapping):
+                raise ValidationError(
+                    "session vertical metadata is missing (MAP-E13); cannot replay the "
+                    "domain plan from the event log",
+                    code="MAP-E13_EVENT_VERSION_INCOMPATIBLE",
+                    details={"session_id": state.session_id},
+                )
+            if vertical.get("domain_id") != self._vertical.domain_id:
+                raise ValidationError(
+                    "session vertical domain mismatch (MAP-E12)",
+                    code="MAP-E12_DOMAIN_VERSION_MISMATCH",
+                    details={
+                        "session_id": state.session_id,
+                        "recorded_domain_id": vertical.get("domain_id"),
+                        "current_domain_id": self._vertical.domain_id,
+                    },
+                )
+            if vertical.get("policy_version") != self._vertical.policy_version:
+                raise ValidationError(
+                    "session vertical policy version incompatible (MAP-E13); no migration "
+                    "is implemented",
+                    code="MAP-E13_EVENT_VERSION_INCOMPATIBLE",
+                    details={
+                        "session_id": state.session_id,
+                        "recorded_vertical_policy_version": vertical.get("policy_version"),
+                        "current_vertical_policy_version": self._vertical.policy_version,
+                    },
+                )
+
+    def _ensure_vertical_plan(self, state: SessionState) -> None:
+        """Restore the vertical plan from events before any continuation."""
+
+        if self._vertical is None:
+            return
+        if state.session_id in self._vertical_restored:
+            return
+        events = tuple(self._session_events(state))
+        self._validate_session_version_compatibility(state, events)
+        self._vertical.restore_session(
+            session_id=state.session_id,
+            events=events,
+            objective=self._objective(state),
+            snapshot=self._current_snapshot(state.learner_id),
+        )
+        self._vertical_restored.add(state.session_id)
+
+    def replay_session_state(self, session_id: str) -> dict[str, Any]:
+        """Rebuild the session state from the unified event log (no writes).
+
+        Returns ``phase``, ``turn_index``, ``pending_item_id``, ``last_action``,
+        ``plan`` (including the persisted vertical stage plan / next stage),
+        ``completed``/``goal_completed`` and the consumed event count.  Version
+        incompatibility raises MAP-E12/MAP-E13 instead of partially replaying.
+        """
+
+        state = self._load_session(session_id)
+        events = tuple(self._session_events(state))
+        self._validate_session_version_compatibility(state, events)
+        return self._replay_session_events(state, events)
+
+    def verify_session_replay(self, session_id: str) -> dict[str, Any]:
+        """Compare ``replay_session_state`` with the persisted session state.
+
+        Returns ``{"match": bool, "differences": {...}, ...}``; a difference is a
+        real persistence/replay bug (or an unreplayable legacy event stream).
+        """
+
+        state = self._load_session(session_id)
+        events = tuple(self._session_events(state))
+        replay = self.replay_session_state(session_id)
+        persisted = {
+            "phase": state.phase,
+            "turn_index": state.turn_index,
+            "pending_item_id": state.pending_item_id,
+        }
+        replayed = {
+            "phase": replay["phase"],
+            "turn_index": replay["turn_index"],
+            "pending_item_id": replay["pending_item_id"],
+        }
+        differences = {
+            key: {"persisted": persisted[key], "replay": replayed[key]}
+            for key in persisted
+            if persisted[key] != replayed[key]
+        }
+        return {
+            "session_id": session_id,
+            "match": not differences,
+            "differences": differences,
+            "persisted": persisted,
+            "replay": replayed,
+            "last_action": replay["last_action"],
+            "plan": replay["plan"],
+            "completed": replay["completed"],
+            "goal_completed": replay["goal_completed"],
+            "events_consumed": len(events),
+        }
+
+    def _replay_session_events(
+        self, state: SessionState, events: Sequence[HistoryEvent]
+    ) -> dict[str, Any]:
+        ordered = sorted(events, key=lambda event: event.seq)
+        started = next(
+            (event for event in ordered if event.event_type == "SESSION_STARTED"), None
+        )
+        if started is None:  # pragma: no cover - validated by caller
+            raise ValidationError(
+                f"session {state.session_id!r}: SESSION_STARTED event is missing",
+                code="MAP-E13_EVENT_VERSION_INCOMPATIBLE",
+            )
+        replay: dict[str, Any] = {
+            "session_id": state.session_id,
+            "learner_id": state.learner_id,
+            "goal_id": state.goal_id,
+            "objective_id": state.objective_id,
+            "domain_id": started.payload.get("domain_id"),
+            "domain_version": started.payload.get("domain_version"),
+            "session_policy_version": started.payload.get("session_policy_version"),
+            "phase": started.payload.get("phase", PHASE_DIAGNOSE),
+            "turn_index": 0,
+            "pending_item_id": None,
+            "last_action": None,
+            "plan": None,
+            "completed": False,
+            "goal_completed": False,
+            "events_consumed": len(ordered),
+        }
+        vertical_plan: Mapping[str, Any] | None = None
+        vertical = started.payload.get("vertical")
+        if isinstance(vertical, Mapping) and isinstance(vertical.get("plan"), Mapping):
+            vertical_plan = vertical["plan"]
+        for event in ordered:
+            etype = event.event_type
+            payload = event.payload
+            if etype == "PLAN_CREATED":
+                replay["plan"] = {
+                    "plan_id": payload.get("plan_id"),
+                    "objective_id": payload.get("objective_id"),
+                    "step_count": payload.get("step_count"),
+                    "policy_version": payload.get("policy_version"),
+                    "vertical_plan": dict(vertical_plan) if vertical_plan is not None else None,
+                }
+            elif etype == "ACTION_TAKEN":
+                replay["phase"] = payload.get("phase", replay["phase"])
+                replay["turn_index"] = int(payload.get("turn_index", replay["turn_index"]))
+                replay["last_action"] = payload.get("action")
+                item_id = payload.get("item_id")
+                kind = payload.get("action_kind")
+                replay["pending_item_id"] = (
+                    item_id if item_id is not None and kind in _REPLAY_ITEM_KINDS else None
+                )
+            elif etype in {"ASSESSED", "ERROR"}:
+                next_state = payload.get("next_state")
+                if isinstance(next_state, Mapping):
+                    replay["phase"] = next_state.get("phase", replay["phase"])
+                    replay["turn_index"] = int(
+                        next_state.get("turn_index", replay["turn_index"])
+                    )
+                    replay["pending_item_id"] = next_state.get("pending_item_id")
+                else:  # pragma: no cover - legacy sessions without next_state metadata
+                    replay["phase"] = PHASE_REVIEW
+                    replay["pending_item_id"] = None
+            elif etype == "TURN_ADVANCED":
+                next_state = payload.get("next_state") or {}
+                replay["phase"] = next_state.get("phase", PHASE_REVIEW)
+                replay["turn_index"] = int(
+                    next_state.get("turn_index", replay["turn_index"])
+                )
+                replay["pending_item_id"] = next_state.get("pending_item_id")
+            elif etype == "SESSION_PAUSED":
+                next_state = payload.get("next_state") or {}
+                replay["phase"] = next_state.get("phase", PHASE_PAUSED)
+                replay["turn_index"] = int(
+                    next_state.get("turn_index", payload.get("turn_index", replay["turn_index"]))
+                )
+                replay["pending_item_id"] = next_state.get(
+                    "pending_item_id", payload.get("pending_item_id")
+                )
+            elif etype == "SESSION_RESUMED":
+                next_state = payload.get("next_state") or {}
+                replay["phase"] = next_state.get("phase", payload.get("phase", replay["phase"]))
+                replay["turn_index"] = int(
+                    next_state.get("turn_index", replay["turn_index"])
+                )
+                replay["pending_item_id"] = next_state.get(
+                    "pending_item_id", replay["pending_item_id"]
+                )
+            elif etype == "GOAL_COMPLETED":
+                replay["goal_completed"] = True
+        replay["completed"] = bool(
+            replay["goal_completed"] or replay["phase"] == PHASE_COMPLETE
+        )
+        if isinstance(vertical_plan, Mapping):
+            stages = list(vertical_plan.get("stages") or [])
+            advancing = sum(
+                1
+                for event in ordered
+                if event.event_type == "ASSESSED"
+                and event.payload.get("status") in _MUTATING_STATUSES
+            )
+            ladder_completed = bool(stages) and advancing >= 1 + len(stages)
+            next_stage = (
+                stages[advancing - 1]
+                if stages and 1 <= advancing <= len(stages)
+                else None
+            )
+            derived_plan = dict(vertical_plan)
+            derived_plan["advanced_answers"] = advancing
+            derived_plan["ladder_completed"] = ladder_completed
+            derived_plan["next_stage"] = next_stage
+            if replay["plan"] is not None:
+                replay["plan"]["vertical_plan"] = derived_plan
+            else:  # pragma: no cover - SESSION_STARTED precedes PLAN_CREATED
+                replay["plan"] = {"vertical_plan": derived_plan}
+        return replay
+
     def _current_snapshot(self, learner_id: str) -> LearnerSnapshot:
         snapshot = self._repository.get_snapshot(learner_id)
         if snapshot is not None:
@@ -2386,7 +2758,7 @@ class TeachingSessionEngine:
         snapshot: LearnerSnapshot,
     ) -> SessionState:
         payload_extra = (
-            self._vertical.assessment_payload_extra(result)
+            self._vertical.assessment_payload_extra(result, session_id=state.session_id)
             if self._vertical is not None
             else None
         )
@@ -2453,7 +2825,7 @@ class TeachingSessionEngine:
         snapshot: LearnerSnapshot,
     ) -> SessionState:
         vertical_payload_extra = (
-            self._vertical.assessment_payload_extra(result)
+            self._vertical.assessment_payload_extra(result, session_id=state.session_id)
             if self._vertical is not None
             else None
         )
@@ -2552,6 +2924,11 @@ class TeachingSessionEngine:
             "turn_index": state.turn_index,
             "snapshot_revision": snapshot.revision,
             "session_policy_version": self._policy.policy_version,
+            "next_state": {
+                "phase": phase,
+                "turn_index": state.turn_index,
+                "pending_item_id": pending_item_id,
+            },
         }
         if self._vertical is not None:
             action_payload.update(self._vertical.action_event_payload(action, state))

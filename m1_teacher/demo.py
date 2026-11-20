@@ -735,7 +735,16 @@ def run_student_path(
             "mastery_after": _mastery_map(final_snapshot),
             "next_recommendation": next_recommendation,
             "verify_rebuild": verify_rebuild,
-            "event_count": len(session_events),
+            # B-PR4 additive replay markers (TURN_ADVANCED) are engine-internal
+            # acknowledgements; the frozen M1-A demo summary keeps its historical
+            # event_count/hash semantics (default output is byte-identical).
+            "event_count": len(
+                [
+                    event
+                    for event in session_events
+                    if event.event_type != "TURN_ADVANCED"
+                ]
+            ),
             "_session_events": session_events,
         }
         return summary

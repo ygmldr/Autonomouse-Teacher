@@ -122,6 +122,11 @@ HISTORY_EVENT_TYPE_VALUES: tuple[str, ...] = (
     # crash between scoring preparation and the terminal ASSESSED/ERROR events
     # is recoverable.  Appended only; no existing value is renamed/removed.
     "ASSESSMENT_PREPARED",
+    # B-NEXT (B-PR4) additive value: the acknowledged content-action turn
+    # advance marker, so event-sourced session replay can distinguish an
+    # acknowledged content action from one still awaiting ``advance_session``.
+    # Appended only; no existing value is renamed/removed.
+    "TURN_ADVANCED",
 )
 
 DIAGNOSIS_STATUS_VALUES: tuple[str, ...] = (

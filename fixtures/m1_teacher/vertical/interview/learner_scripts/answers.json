@@ -1,0 +1,61 @@
+{
+  "schema_version": "m1a.v0",
+  "script_version": "interview.learner_scripts.v1",
+  "domain_id": "interview_coach",
+  "hidden": false,
+  "synthetic": true,
+  "license": "CC0-1.0",
+  "notes": "Teacher-visible synthetic MOCK learner responses for demo/E2E paths. Independent of scorer-side material; not an answer key and not real candidate data.",
+  "answers": [
+    {
+      "answer_id": "learner-ml-overfit-v1",
+      "question_id": "q-ml-001",
+      "track": "ml_fundamentals",
+      "response": {
+        "text": "先给定义：过拟合是模型在训练集上表现好、但在没见过的验证集上泛化变差，原因是模型把噪声也学进去了。判断时我会看训练集与验证集的 loss 或指标 gap，以及学习曲线：训练指标继续变好、验证指标先降后升。方法上我会用正则化（L2、dropout）并做早停，用交叉验证调超参数，最后在独立测试集上确认效果。资源方面会关注训练成本、数据量和模型容量，结论以验证集指标为准。"
+      }
+    },
+    {
+      "answer_id": "learner-ml-vague-v1",
+      "question_id": "q-ml-001",
+      "track": "ml_fundamentals",
+      "response": {
+        "text": "过拟合就是模型太复杂了，正则化一下、多训练几轮应该就好了。"
+      }
+    },
+    {
+      "answer_id": "learner-eng-missing-facts-v1",
+      "question_id": "q-eng-001",
+      "track": "engineering_metrics",
+      "response": {
+        "text": "我做过推荐系统的延迟优化，主要是加缓存和异步处理，也做过一些特征侧的工作。"
+      }
+    },
+    {
+      "answer_id": "learner-eng-vague-with-facts-v1",
+      "question_id": "q-eng-001",
+      "track": "engineering_metrics",
+      "response": {
+        "text": "加缓存、优化一下特征、扩容一下应该就能降低延迟了。",
+        "project_facts": [
+          "合成项目：负责推荐服务性能优化，P99 从 880ms 降到 210ms（合成数据，仅演示）"
+        ]
+      }
+    },
+    {
+      "answer_id": "learner-eng-facts-v1",
+      "question_id": "q-eng-001",
+      "track": "engineering_metrics",
+      "response": {
+        "text": "先给基线：优化前监控显示推荐服务 P99 延迟约 880ms，瓶颈定位主要靠链路追踪和 profile，发现召回和特征拉取占比最高。方法上先做缓存和批处理，再做异步化，按 5% 流量灰度 A/B 验证，观察 P99 延迟、吞吐和错误率护栏，指标口径与监控日志对齐，样本量按两周观察。结论是 P99 降到约 210ms，CTR 无显著回归。",
+        "project_facts": [
+          "合成项目：负责推荐服务性能优化，P99 从 880ms 降到 210ms（合成数据，仅演示）"
+        ],
+        "evidence_refs": [
+          "合成监控看板：延迟 P99 与错误率（合成数据）",
+          "合成 A/B 实验记录：5% 灰度两周（合成数据）"
+        ]
+      }
+    }
+  ]
+}
