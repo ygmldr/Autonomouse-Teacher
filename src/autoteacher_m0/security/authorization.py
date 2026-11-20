@@ -799,18 +799,34 @@ class AuthorizationUse:
     record_path: Path
 
 
-def _read_use_record(path: Path) -> str:
+def _read_use_record(path: Path, *,
+                     expected_authorization_id: str) -> tuple[str, str]:
     """Read one complete use record, or fail closed with a precise reason.
 
     Publication is atomic, so an existing record is already complete. The read
-    itself still validates the node: ``O_NOFOLLOW`` rejects a symlink, the size
-    bound rejects partial/oversized documents, ``nlink > 2`` rejects a record
-    that has been hardlinked elsewhere (``nlink == 2`` is tolerated because a
-    crash between link and temp cleanup leaves the final plus its own temp), and
-    a group/world-writable record is never trusted.
+    itself still validates the node: ``O_NOFOLLOW`` rejects a symlink,
+    ``O_NONBLOCK`` keeps a FIFO/device from blocking the reader (a no-op for a
+    regular file), the size bound rejects partial/oversized documents,
+    ``nlink > 2`` rejects a record that has been hardlinked elsewhere
+    (``nlink == 2`` is tolerated because a crash between link and temp cleanup
+    leaves the final plus its own temp), and a group/world-writable record is
+    never trusted.
+
+    The body is additionally cross-checked against its own storage name and
+    against the authorization the caller verified (G4-R P2-01): the body
+    ``authorization_id`` must obey the same identifier rule as the signed
+    authorization, must hash to ``sha256(id) + ".json"`` (this record's final
+    name), and must equal ``expected_authorization_id``. Any mismatch is a
+    stable ``AUTHORIZATION_USE_RECORD_INVALID``: a foreign or mismatched record
+    is never reported as a real replay. ``consumed_utc`` must also use the one
+    UTC form the publisher writes. Returns ``(authorization_id, run_epoch)``.
     """
+    if (not isinstance(expected_authorization_id, str)
+            or not _IDENTIFIER.fullmatch(expected_authorization_id)):
+        raise AuthorizationRejected(("AUTHORIZATION_USE_RECORD_INVALID",))
     try:
-        descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
+        descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK
+                             | os.O_CLOEXEC)
     except OSError as error:
         if error.errno == errno.ELOOP:
             raise AuthorizationRejected(("AUTHORIZATION_USE_RECORD_INVALID",)) from None
@@ -839,27 +855,41 @@ def _read_use_record(path: Path) -> str:
         parsed = _parse_json_object(raw, label="authorization use record")
     except ValueError:
         raise AuthorizationRejected(("AUTHORIZATION_USE_RECORD_INVALID",)) from None
+    authorization_id = parsed.get("authorization_id")
     epoch = parsed.get("run_epoch")
+    consumed_utc = parsed.get("consumed_utc")
     if (set(parsed) != {"schema", "authorization_id", "run_epoch", "consumed_utc"}
             or parsed.get("schema") != _USE_LOG_SCHEMA
-            or not isinstance(epoch, str) or not _IDENTIFIER.fullmatch(epoch)):
+            or not isinstance(authorization_id, str)
+            or not _IDENTIFIER.fullmatch(authorization_id)
+            or not isinstance(epoch, str) or not _IDENTIFIER.fullmatch(epoch)
+            or not isinstance(consumed_utc, str)
+            or not _UTC_TEXT.fullmatch(consumed_utc)):
         raise AuthorizationRejected(("AUTHORIZATION_USE_RECORD_INVALID",))
-    return epoch
+    expected_name = (hashlib.sha256(authorization_id.encode("ascii")).hexdigest()
+                     + ".json")
+    if path.name != expected_name or authorization_id != expected_authorization_id:
+        # Body id, storage name and the verified authorization must all agree;
+        # a mismatch is corruption, not a replay.
+        raise AuthorizationRejected(("AUTHORIZATION_USE_RECORD_INVALID",))
+    return authorization_id, epoch
 
 
-def _read_use_record_settled(path: Path) -> str:
+def _read_use_record_settled(path: Path, *,
+                             expected_authorization_id: str) -> tuple[str, str]:
     """Read a record, tolerating a transiently partial legacy publisher.
 
     Records published by this module are complete before they become visible, so
     the retry can only matter for a record produced by the old create-then-write
     publisher that is still settling. It can never weaken a decision: a record
-    that stays malformed, symlinked or replaced still fails closed with
-    ``AUTHORIZATION_USE_RECORD_INVALID``.
+    that stays malformed, foreign to this path/authorization, symlinked or
+    replaced still fails closed with ``AUTHORIZATION_USE_RECORD_INVALID``.
     """
     attempts = max(1, _USE_RECORD_READ_ATTEMPTS)
     for attempt in range(attempts):
         try:
-            return _read_use_record(path)
+            return _read_use_record(
+                path, expected_authorization_id=expected_authorization_id)
         except AuthorizationRejected as error:
             if (attempt + 1 >= attempts
                     or error.reasons != ("AUTHORIZATION_USE_RECORD_INVALID",)
@@ -1036,8 +1066,9 @@ def consume_execution_authorization(*, use_log_dir: Path, run_epoch: str,
     # log. The authoritative classification for a racing publish is the
     # EEXIST branch of the atomic link below.
     if record_path.exists() or record_path.is_symlink():
-        raise AuthorizationRejected((_replay_reason(
-            _read_use_record_settled(record_path), run_epoch),))
+        _recorded_id, previous_epoch = _read_use_record_settled(
+            record_path, expected_authorization_id=authorization.authorization_id)
+        raise AuthorizationRejected((_replay_reason(previous_epoch, run_epoch),))
     _reap_stale_use_record_temps(directory)
     finals, temps = _count_use_log_entries(directory)
     if finals >= MAX_AUTHORIZATION_USES:
@@ -1080,10 +1111,12 @@ def consume_execution_authorization(*, use_log_dir: Path, run_epoch: str,
     if not linked:
         # A concurrent consumer won the atomic publish. Its record was complete
         # before it became visible, so classification is stable; our unborn
-        # temp is removed and can never become a second record.
+        # temp is removed and can never become a second record. A foreign or
+        # mismatched body id is INVALID, never a replay.
         _safe_unlink_temp(temporary)
-        raise AuthorizationRejected((_replay_reason(
-            _read_use_record_settled(record_path), run_epoch),))
+        _recorded_id, previous_epoch = _read_use_record_settled(
+            record_path, expected_authorization_id=authorization.authorization_id)
+        raise AuthorizationRejected((_replay_reason(previous_epoch, run_epoch),))
     try:
         _fsync_directory(directory)
     except OSError:
