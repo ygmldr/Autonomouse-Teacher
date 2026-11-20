@@ -1,0 +1,42 @@
+{
+  "schema_version": "m1a.v0",
+  "student_id": "student_a",
+  "display_name": "Student A（合成）",
+  "description": "已理解二分查找的整体思想，但在边界与重复元素处理上常犯 off-by-one 错误；前置知识完整。全部为合成数据，仅用于离线演示与确定性测试。",
+  "synthetic": true,
+  "license": "CC0-1.0",
+  "expected_traits": {
+    "known_nodes": [
+      "cf.search.binary"
+    ],
+    "weak_nodes": [
+      "cf.search.boundary"
+    ],
+    "missing_prerequisites": []
+  },
+  "response_script": {
+    "default": {
+      "kind": "CORRECT"
+    },
+    "per_item": {
+      "item.bs.mcq.005": {
+        "status": "INCORRECT",
+        "error": "off_by_one"
+      },
+      "item.bs.code.003": {
+        "status": "INCORRECT",
+        "error": "off_by_one"
+      },
+      "item.bs.short.001": {
+        "status": "PARTIAL",
+        "score": 0.5
+      },
+      "item.bs.short.002": {
+        "status": "NEEDS_REVIEW"
+      },
+      "item.bs.short.003": {
+        "status": "NEEDS_REVIEW"
+      }
+    }
+  }
+}

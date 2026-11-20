@@ -259,6 +259,19 @@ def _arrays_in_test_case(args: list) -> list:
 
 
 def test_fixture_layout_is_exact_and_self_contained():
+    """The CF domain subtree has an exact, self-contained file layout.
+
+    B-PR2 note (scope correction, not a weakening): from B-PR2 on,
+    ``fixtures/m1_teacher/students/`` is a legitimate addition (synthetic
+    learner fixtures consumed by the learner-history mock-response tests and by
+    PR5).  This layout assertion therefore constrains only the
+    ``fixtures/m1_teacher/domains/cf_binary_search/**`` subtree; the fixture
+    README is still required explicitly.  Inside the domain subtree the
+    original strength is preserved: the only files allowed are the four domain
+    documents plus one flat hidden scoring spec per item, and any extra file is
+    still rejected.
+    """
+
     assert FIXTURES_DIR.is_dir(), f"missing fixture root: {FIXTURES_DIR}"
     assert README_PATH.is_file(), f"missing fixture README: {README_PATH}"
     assert DOMAIN_DIR.is_dir(), f"missing domain directory: {DOMAIN_DIR}"
@@ -274,10 +287,12 @@ def test_fixture_layout_is_exact_and_self_contained():
         assert path.parent == SCORING_DIR, f"scoring specs must not nest: {path}"
         assert path.suffix == ".json", f"scoring spec must be JSON: {path}"
 
-    expected = {README_PATH} | {DOMAIN_DIR / name for name in DOMAIN_DOCS}
-    actual = {path for path in FIXTURES_DIR.rglob("*") if path.is_file()}
-    unexpected = actual - expected - set(scoring_files)
-    assert not unexpected, f"unexpected fixture files: {sorted(unexpected)}"
+    expected = {DOMAIN_DIR / name for name in DOMAIN_DOCS} | set(scoring_files)
+    actual = {path for path in DOMAIN_DIR.rglob("*") if path.is_file()}
+    unexpected = actual - expected
+    assert not unexpected, f"unexpected files in the CF domain fixture tree: {sorted(unexpected)}"
+    missing = expected - actual
+    assert not missing, f"missing CF domain fixture files: {sorted(missing)}"
 
 
 def test_all_json_documents_parse_as_utf8_objects():

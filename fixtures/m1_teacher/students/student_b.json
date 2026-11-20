@@ -1,0 +1,58 @@
+{
+  "schema_version": "m1a.v0",
+  "student_id": "student_b",
+  "display_name": "Student B（合成）",
+  "description": "尚未掌握二分查找的单调性前提（有序数组），二分查找掌握度低，需要先回退补课单调性前提。全部为合成数据，仅用于离线演示与确定性测试。",
+  "synthetic": true,
+  "license": "CC0-1.0",
+  "expected_traits": {
+    "known_nodes": [
+      "cf.array.basics",
+      "cf.search.linear"
+    ],
+    "weak_nodes": [
+      "cf.sort.sortedness",
+      "cf.search.binary"
+    ],
+    "missing_prerequisites": [
+      "cf.sort.sortedness"
+    ]
+  },
+  "response_script": {
+    "default": {
+      "kind": "CORRECT"
+    },
+    "per_item": {
+      "item.bs.mcq.002": {
+        "status": "INCORRECT",
+        "error": "sortedness_missing"
+      },
+      "item.bs.short.002": {
+        "status": "NEEDS_REVIEW"
+      },
+      "item.bs.code.005": {
+        "status": "INCORRECT",
+        "error": "sortedness_missing"
+      },
+      "item.bs.mcq.004": {
+        "status": "INCORRECT",
+        "error": "prerequisite_gap"
+      },
+      "item.bs.code.001": {
+        "status": "INCORRECT",
+        "error": "prerequisite_gap"
+      },
+      "item.bs.mcq.006": {
+        "status": "INCORRECT",
+        "error": "prerequisite_gap"
+      },
+      "item.bs.code.002": {
+        "status": "INCORRECT",
+        "error": "prerequisite_gap"
+      },
+      "item.bs.short.003": {
+        "status": "NEEDS_REVIEW"
+      }
+    }
+  }
+}
