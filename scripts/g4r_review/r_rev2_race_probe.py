@@ -231,7 +231,7 @@ def run_process_race(fixture, rounds: int, consumers: int) -> dict:
 def run_cross_epoch(fixture, rounds: int) -> dict:
     stats = {"rounds": rounds, "winner_count": 0, "loser_codes": {}}
     for index in range(rounds):
-        authorization_id = new_authorization(fixture, "rev-epoch", index)
+        new_authorization(fixture, "rev-epoch", index)
         barrier = threading.Barrier(2)
         outcomes: list[str] = []
         lock = threading.Lock()
@@ -365,7 +365,7 @@ def run_crash_injection(fixture) -> dict:
     crash_temp = fixture.use_log / temps_after_crash[0]
     old = time.time() - 400
     os.utime(crash_temp, (old, old))
-    fresh_id = new_authorization(fixture, "rev-crash-reap", 1)
+    new_authorization(fixture, "rev-crash-reap", 1)
     code = rejected_code(lambda: fixture.consume())
     stats["reap_consume"] = "OK" if code is None else code
     stats["temps_after_reap"] = temp_entries(fixture.use_log)

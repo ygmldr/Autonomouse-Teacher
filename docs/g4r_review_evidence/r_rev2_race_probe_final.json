@@ -47,7 +47,7 @@
     "rounds": 8,
     "winner_count": 8
   },
-  "elapsed_seconds": 32.99,
+  "elapsed_seconds": 29.96,
   "failure_count": 0,
   "failures": [],
   "fsync_failure": {

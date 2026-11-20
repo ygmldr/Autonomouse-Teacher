@@ -1,13 +1,13 @@
-[B] round 000: winners=1 codes=['AUTHORIZATION_REPLAYED', None, 'AUTHORIZATION_REPLAYED'] 339ms
-[B] round 001: winners=1 codes=[None, 'AUTHORIZATION_REPLAYED', 'AUTHORIZATION_REPLAYED'] 346ms
-[B] round 002: winners=1 codes=['AUTHORIZATION_REPLAYED', 'AUTHORIZATION_REPLAYED', None] 374ms
-[B] round 003: winners=1 codes=['AUTHORIZATION_REPLAYED', 'AUTHORIZATION_REPLAYED', None] 364ms
-[B] round 004: winners=1 codes=[None, 'AUTHORIZATION_REPLAYED', 'AUTHORIZATION_REPLAYED'] 359ms
-[B] round 005: winners=1 codes=['AUTHORIZATION_REPLAYED', 'AUTHORIZATION_REPLAYED', None] 345ms
-[B] round 006: winners=1 codes=['AUTHORIZATION_REPLAYED', 'AUTHORIZATION_REPLAYED', None] 341ms
-[B] round 007: winners=1 codes=['AUTHORIZATION_REPLAYED', None, 'AUTHORIZATION_REPLAYED'] 347ms
-[B] round 008: winners=1 codes=['AUTHORIZATION_REPLAYED', None, 'AUTHORIZATION_REPLAYED'] 338ms
-[B] round 009: winners=1 codes=[None, 'AUTHORIZATION_REPLAYED', 'AUTHORIZATION_REPLAYED'] 338ms
+[B] round 000: winners=1 codes=[None, 'AUTHORIZATION_REPLAYED', 'AUTHORIZATION_REPLAYED'] 312ms
+[B] round 001: winners=1 codes=['AUTHORIZATION_REPLAYED', None, 'AUTHORIZATION_REPLAYED'] 316ms
+[B] round 002: winners=1 codes=[None, 'AUTHORIZATION_REPLAYED', 'AUTHORIZATION_REPLAYED'] 322ms
+[B] round 003: winners=1 codes=['AUTHORIZATION_REPLAYED', None, 'AUTHORIZATION_REPLAYED'] 320ms
+[B] round 004: winners=1 codes=['AUTHORIZATION_REPLAYED', 'AUTHORIZATION_REPLAYED', None] 307ms
+[B] round 005: winners=1 codes=['AUTHORIZATION_REPLAYED', 'AUTHORIZATION_REPLAYED', None] 325ms
+[B] round 006: winners=1 codes=['AUTHORIZATION_REPLAYED', None, 'AUTHORIZATION_REPLAYED'] 312ms
+[B] round 007: winners=1 codes=[None, 'AUTHORIZATION_REPLAYED', 'AUTHORIZATION_REPLAYED'] 312ms
+[B] round 008: winners=1 codes=['AUTHORIZATION_REPLAYED', None, 'AUTHORIZATION_REPLAYED'] 313ms
+[B] round 009: winners=1 codes=['AUTHORIZATION_REPLAYED', 'AUTHORIZATION_REPLAYED', None] 315ms
 {
  "corrupt_finals": {
   "authorization_id_crosscheck": "NOT_CHECKED_BY_IMPLEMENTATION; classified REPLAYED",
@@ -57,7 +57,7 @@
   "rounds": 8,
   "winner_count": 8
  },
- "elapsed_seconds": 32.99,
+ "elapsed_seconds": 29.96,
  "failure_count": 0,
  "fsync_failure": {
   "final_exists": true,
