@@ -115,6 +115,7 @@ EXIT_REJECTED = 2
 
 CASE_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 RUN_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,95}$")
+GIT_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 
 TZ_KEYS = ("TZ",)
 EXTRA_ENV_KEYS = ("PYTHONHASHSEED",)
@@ -504,6 +505,9 @@ def _build_entry(
     run_id: str,
     branch: str,
     git_sha: str | None,
+    git_available: bool,
+    git_sha_source: str,
+    tree_sha: str | None,
     command: str | None,
     command_argv: list[str] | None,
     cwd: Path,
@@ -527,6 +531,9 @@ def _build_entry(
         "run_id": run_id,
         "branch": branch,
         "git_sha": git_sha,
+        "git_available": git_available,
+        "git_sha_source": git_sha_source,
+        "tree_sha": tree_sha,
         "command": command,
         "command_argv": command_argv,
         "cwd": str(cwd),
@@ -608,8 +615,25 @@ def run(args: argparse.Namespace) -> int:
             "append-only evidence requires a unique run_id"
         )
 
+    git_probe = _git_value(repo_root, "rev-parse", "HEAD")
+    git_available = git_probe is not None
+    tree_sha = args.tree_sha or (
+        _git_value(repo_root, "rev-parse", "HEAD^{tree}") if git_available else None
+    )
+    if args.tree_sha is not None and not GIT_SHA_RE.match(args.tree_sha):
+        raise EvidenceError("--tree-sha must be a 40-hex git object id")
+    if args.git_sha is not None:
+        if not GIT_SHA_RE.match(args.git_sha):
+            raise EvidenceError("--git-sha must be a 40-hex git commit id")
+        git_sha: str | None = args.git_sha
+        git_sha_source = "explicit"
+    elif git_available:
+        git_sha = git_probe
+        git_sha_source = "git"
+    else:
+        git_sha = None
+        git_sha_source = "unavailable"
     branch = args.branch or _git_value(repo_root, "rev-parse", "--abbrev-ref", "HEAD") or "UNKNOWN"
-    git_sha = _git_value(repo_root, "rev-parse", "HEAD")
     environment = _environment_payload(repo_root, repo_root)
     utc = utc_now()
     limitations: list[str] = list(args.limitation or [])
@@ -644,6 +668,9 @@ def run(args: argparse.Namespace) -> int:
             run_id=run_id,
             branch=branch,
             git_sha=git_sha,
+            git_available=git_available,
+            git_sha_source=git_sha_source,
+            tree_sha=tree_sha,
             command=command,
             command_argv=None,
             cwd=cwd,
@@ -747,6 +774,9 @@ def run(args: argparse.Namespace) -> int:
         "run_id": run_id,
         "branch": branch,
         "git_sha": git_sha,
+        "git_available": git_available,
+        "git_sha_source": git_sha_source,
+        "tree_sha": tree_sha,
         "command": command,
         "command_argv": command_argv,
         "cwd": str(cwd),
@@ -774,6 +804,9 @@ def run(args: argparse.Namespace) -> int:
         run_id=run_id,
         branch=branch,
         git_sha=git_sha,
+        git_available=git_available,
+        git_sha_source=git_sha_source,
+        tree_sha=tree_sha,
         command=command,
         command_argv=command_argv,
         cwd=cwd,
@@ -840,6 +873,19 @@ def build_parser() -> argparse.ArgumentParser:
         help="limitation note recorded with the evidence entry (repeatable)",
     )
     parser.add_argument("--run-id", default=None, help="explicit run id (default: generated)")
+    parser.add_argument(
+        "--git-sha",
+        default=None,
+        help=(
+            "explicit 40-hex frozen commit id for archives without .git "
+            "(recorded as git_sha_source=explicit; never invented from a branch name)"
+        ),
+    )
+    parser.add_argument(
+        "--tree-sha",
+        default=None,
+        help="explicit 40-hex tree id (default: git rev-parse HEAD^{tree} when git is available)",
+    )
     parser.add_argument(
         "--branch",
         default=None,

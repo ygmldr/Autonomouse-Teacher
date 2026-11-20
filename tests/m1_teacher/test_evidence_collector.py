@@ -14,6 +14,7 @@ import json
 import os
 import re
 import shlex
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -87,6 +88,9 @@ def test_collects_executed_pass_with_full_index_entry(tmp_path: Path) -> None:
         "case_id",
         "branch",
         "git_sha",
+        "git_available",
+        "git_sha_source",
+        "tree_sha",
         "run_id",
         "command",
         "environment",
@@ -107,7 +111,14 @@ def test_collects_executed_pass_with_full_index_entry(tmp_path: Path) -> None:
     assert entry["evidence_class"] == "NOT_VERIFIED"
     assert entry["limitation"] == "synthetic unit case"
     assert entry["collector"]["name"] == "m1b.collect-evidence"
-    assert re.fullmatch(r"[0-9a-f]{40}", entry["git_sha"])
+    # P1-1: a git checkout records a real 40-hex SHA; a no-.git archive is
+    # explicitly allowed to record git_sha=None (never invent a SHA).
+    if entry["git_available"]:
+        assert re.fullmatch(r"[0-9a-f]{40}", entry["git_sha"])
+        assert entry["git_sha_source"] in {"git", "explicit"}
+    else:
+        assert entry["git_sha"] is None
+        assert entry["git_sha_source"] == "unavailable"
     assert entry["branch"]
     assert re.fullmatch(r"[0-9a-f]{64}", entry["sha256"])
 
@@ -448,3 +459,84 @@ def test_evidence_class_label_is_recorded_and_validated(tmp_path: Path) -> None:
     assert rejected.returncode == 2
     assert "invalid --evidence-class" in rejected.stderr
     assert len(read_entries(out)) == 1
+
+
+def _run_collector_in(
+    script: Path,
+    cwd: Path,
+    *args: str,
+    out: Path,
+    case_id: str,
+) -> subprocess.CompletedProcess[str]:
+    command = [
+        PYTHON,
+        str(script),
+        "--out",
+        str(out),
+        "--case-id",
+        case_id,
+        *args,
+    ]
+    return subprocess.run(
+        command,
+        cwd=str(cwd),
+        capture_output=True,
+        text=True,
+        timeout=120,
+        env={**os.environ},
+    )
+
+
+def test_collector_is_portable_in_a_no_git_archive_copy(tmp_path: Path) -> None:
+    """P1-1 regression: no-.git archive records git_sha=None instead of inventing one."""
+
+    archive = tmp_path / "archive"
+    (archive / "scripts" / "m1b").mkdir(parents=True)
+    shutil.copy2(COLLECTOR, archive / "scripts" / "m1b" / "collect_evidence.py")
+    assert not (archive / ".git").exists()
+    command = shell_command(PYTHON, "-c", "print('no-git-ok')")
+
+    out = tmp_path / "packet"
+    completed = _run_collector_in(
+        archive / "scripts" / "m1b" / "collect_evidence.py",
+        archive,
+        "--command",
+        command,
+        out=out,
+        case_id="T-NOGIT-01",
+    )
+    assert completed.returncode == 0, completed.stderr
+    entry = read_entries(out)[0]
+    assert entry["status"] == "EXECUTED_PASS"
+    assert entry["git_available"] is False
+    assert entry["git_sha"] is None
+    assert entry["git_sha_source"] == "unavailable"
+    assert entry["tree_sha"] is None
+    assert entry["branch"] == "UNKNOWN"
+    assert "no-git-ok" in entry["stdout"]["tail"]
+    raw_path = out / entry["raw_evidence_path"]
+    assert sha256_file(raw_path) == entry["sha256"]
+
+    # Archives that know their frozen SHA may pass it explicitly; the source is
+    # recorded so it can never be confused with a live git read.
+    explicit_sha = "0123456789abcdef0123456789abcdef01234567"
+    explicit_tree = "89abcdef0123456789abcdef0123456789abcdef"
+    out_two = tmp_path / "packet_explicit"
+    completed = _run_collector_in(
+        archive / "scripts" / "m1b" / "collect_evidence.py",
+        archive,
+        "--command",
+        command,
+        "--git-sha",
+        explicit_sha,
+        "--tree-sha",
+        explicit_tree,
+        out=out_two,
+        case_id="T-NOGIT-02",
+    )
+    assert completed.returncode == 0, completed.stderr
+    explicit_entry = read_entries(out_two)[0]
+    assert explicit_entry["git_available"] is False
+    assert explicit_entry["git_sha"] == explicit_sha
+    assert explicit_entry["git_sha_source"] == "explicit"
+    assert explicit_entry["tree_sha"] == explicit_tree

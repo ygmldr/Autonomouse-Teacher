@@ -56,7 +56,10 @@
 | `case_id` | string | 证据用例 ID（如 `B1-05`、`B4-01`、`X-01`）；`[A-Za-z0-9][A-Za-z0-9._-]{0,63}` |
 | `run_id` | string | 本次运行唯一 ID；默认 `<case_id>-<UTC compact>-<hash>`，可由 `--run-id` 显式指定（重复拒绝） |
 | `branch` | string | `--branch` 或 git 当前分支；git 不可用为 `UNKNOWN` |
-| `git_sha` | string/null | 仓库 `HEAD`（40 hex）或 `null`（无 git 环境） |
+| `git_sha` | string/null | 仓库 `HEAD`（40 hex）或 `null`（无 git 环境；**绝不伪造**；可用 `--git-sha` 显式传入归档冻结 SHA） |
+| `git_available` | boolean | 被测量目录是否存在可用的 git 仓库（无 `.git` clean archive 为 `false`） |
+| `git_sha_source` | string | `git`（从当前仓库读取）/ `explicit`（调用者 `--git-sha` 显式提供）/ `unavailable`（无 git 且未提供） |
+| `tree_sha` | string/null | `git rev-parse HEAD^{tree}`（40 hex）或 `--tree-sha` 显式值；无 git 时为 `null` |
 | `command` | string/null | 原始命令字符串（调用者提供；不来自 fixture） |
 | `command_argv` | array/null | 经 `shlex` 解析后的 argv（`shell=False` 实际执行体） |
 | `cwd` | string | 实际执行目录（必须位于仓库根内） |
@@ -75,6 +78,28 @@
 | `schema_version` | string | `"m1b.audit-index.v0"` |
 | `collector` | object | 工具 `name/version/sha256`（自身溯源） |
 
+### 3.1 无 `.git` clean archive 的绑定行为（P1-1）
+
+- 在 `git archive HEAD | tar -x` 生成的 clean archive 中运行时，collector 探测到没有 git 仓库，记录
+  `git_sha: null`、`git_available: false`、`git_sha_source: "unavailable"`、`tree_sha: null`，
+  `branch: "UNKNOWN"`；**不会编造 40-hex SHA**。
+- 需要绑定冻结 SHA 时，调用者必须显式传入 `--git-sha <40-hex-frozen-commit>`（可选 `--tree-sha <40-hex-tree>`），
+  collector 记录 `git_sha_source: "explicit"`；该 SHA 是调用者提供的 provenance，不是运行时 git 读取。
+- clean-archive 回归命令（Reviewer/CI 可复跑）：
+
+```bash
+rm -rf /tmp/m1b-archive && mkdir -p /tmp/m1b-archive
+git -C <repo> archive <FROZEN_SHA> | tar -x -C /tmp/m1b-archive   # no .git
+cd /tmp/m1b-archive
+PY="/root/Autonomous Teacher/.venv/bin/python"
+"$PY" scripts/m1b/collect_evidence.py --out /tmp/m1b-archive-evidence --case-id ARCHIVE-01 \
+  --git-sha <FROZEN_SHA> --tree-sha <FROZEN_TREE_SHA> \
+  --command "$("$PY" -c 'import shlex,sys;print(shlex.join([sys.executable,"-m","pytest","tests/m1_teacher","-q"]))')"
+```
+
+- 回归测试：`tests/m1_teacher/test_evidence_collector.py::test_collector_is_portable_in_a_no_git_archive_copy`
+  （`git_available=false`/`git_sha=None`/显式 `--git-sha` 两分支）；在 clean archive 中该测试随全量套件一起执行。
+
 **索引条目模板（字段示意；不是运行结果，状态与数值均为占位）**：
 
 ```json
@@ -84,6 +109,9 @@
   "run_id": "<RUN_ID>",
   "branch": "<BRANCH>",
   "git_sha": "<FROZEN_40_HEX_SHA_OR_NULL>",
+  "git_available": true,
+  "git_sha_source": "git",
+  "tree_sha": "<40_HEX_TREE_OR_NULL>",
   "command": "<QUOTED_COMMAND>",
   "command_argv": ["<ARG0>", "<ARG1>"],
   "cwd": "<REPO_ROOT>",
