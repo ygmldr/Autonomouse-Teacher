@@ -1,0 +1,5 @@
+{
+  "kind": "MCQ",
+  "correct_option_index": 0,
+  "explanation": "边界用例应同时覆盖极小规模（空、单元素）和极端位置（两端、缺失、重复），随机大数组反而容易漏掉 off-by-one。"
+}

@@ -1,0 +1,90 @@
+{
+  "schema_version": "m1a.v0",
+  "domain_id": "cf_binary_search",
+  "domain_version": "0.1.0",
+  "nodes": [
+    {
+      "node_id": "cf.array.basics",
+      "title": "数组基础与索引",
+      "description": "理解 0-based 下标、连续存放的数组长度与合法下标范围 [0, n-1]，知道越界访问的后果。",
+      "difficulty": 1,
+      "assessment_mode": "DETERMINISTIC_JUDGE",
+      "tags": ["array", "indexing"],
+      "content_ref": "cf.array.basics"
+    },
+    {
+      "node_id": "cf.sort.sortedness",
+      "title": "排序与单调性前提",
+      "description": "理解非递减/非递增数组提供的整体单调性是二分查找成立的前提，能判断输入数组是否满足该前提。",
+      "difficulty": 2,
+      "assessment_mode": "DETERMINISTIC_JUDGE",
+      "tags": ["sorting", "monotonicity"],
+      "content_ref": "cf.sort.sortedness"
+    },
+    {
+      "node_id": "cf.search.linear",
+      "title": "线性查找",
+      "description": "在没有顺序信息的数组中小规模逐个比较查找目标，理解其 O(n) 代价与适用场景。",
+      "difficulty": 1,
+      "assessment_mode": "DETERMINISTIC_JUDGE",
+      "tags": ["search", "linear"],
+      "content_ref": "cf.search.linear"
+    },
+    {
+      "node_id": "cf.search.binary",
+      "title": "二分查找",
+      "description": "在非递减数组中通过反复折半缩小区间定位目标，理解循环不变量与每步排除一半候选的原理。",
+      "difficulty": 3,
+      "assessment_mode": "DETERMINISTIC_JUDGE",
+      "tags": ["search", "binary"],
+      "content_ref": "cf.search.binary"
+    },
+    {
+      "node_id": "cf.search.boundary",
+      "title": "二分边界与 off-by-one",
+      "description": "正确处理闭区间与半开区间、mid 取整方向与边界更新，避免漏元素、死循环和越界。",
+      "difficulty": 4,
+      "assessment_mode": "DETERMINISTIC_JUDGE",
+      "tags": ["search", "boundary", "off-by-one"],
+      "content_ref": "cf.search.boundary"
+    },
+    {
+      "node_id": "cf.search.lower_upper",
+      "title": "lower_bound 与 upper_bound",
+      "description": "区分第一个大于等于目标与第一个严格大于目标的位置，理解重复元素区间 [lower, upper) 的语义。",
+      "difficulty": 4,
+      "assessment_mode": "DETERMINISTIC_JUDGE",
+      "tags": ["search", "lower_bound", "upper_bound"],
+      "content_ref": "cf.search.lower_upper"
+    },
+    {
+      "node_id": "cf.complexity.log",
+      "title": "对数时间复杂度",
+      "description": "理解每次折半使问题规模减半，二分查找的时间复杂度为 O(log n)，能用迭代次数估算可处理规模。",
+      "difficulty": 3,
+      "assessment_mode": "RULE_RUBRIC",
+      "tags": ["complexity", "log"],
+      "content_ref": "cf.complexity.log"
+    },
+    {
+      "node_id": "cf.debug.edge_cases",
+      "title": "边界用例调试",
+      "description": "针对空数组、单元素、目标缺失、重复元素、目标位于两端等边界情形设计用例并定位实现错误。",
+      "difficulty": 3,
+      "assessment_mode": "RULE_RUBRIC",
+      "tags": ["debugging", "edge-cases"],
+      "content_ref": "cf.debug.edge_cases"
+    }
+  ],
+  "edges": [
+    {"source_node_id": "cf.array.basics", "target_node_id": "cf.sort.sortedness", "kind": "HARD", "weight": 1.0},
+    {"source_node_id": "cf.array.basics", "target_node_id": "cf.search.linear", "kind": "HARD", "weight": 1.0},
+    {"source_node_id": "cf.sort.sortedness", "target_node_id": "cf.search.binary", "kind": "HARD", "weight": 1.0},
+    {"source_node_id": "cf.search.linear", "target_node_id": "cf.search.binary", "kind": "SOFT", "weight": 0.5},
+    {"source_node_id": "cf.search.binary", "target_node_id": "cf.search.boundary", "kind": "HARD", "weight": 1.0},
+    {"source_node_id": "cf.search.binary", "target_node_id": "cf.search.lower_upper", "kind": "HARD", "weight": 1.0},
+    {"source_node_id": "cf.search.binary", "target_node_id": "cf.complexity.log", "kind": "SOFT", "weight": 0.5},
+    {"source_node_id": "cf.search.boundary", "target_node_id": "cf.debug.edge_cases", "kind": "SOFT", "weight": 0.5},
+    {"source_node_id": "cf.sort.sortedness", "target_node_id": "cf.search.lower_upper", "kind": "SOFT", "weight": 0.5}
+  ]
+}

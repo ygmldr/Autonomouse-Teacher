@@ -1,0 +1,10 @@
+{
+  "kind": "SEMANTIC_RUBRIC",
+  "required_concept_groups": [
+    ["单调", "有序", "sorted", "非递减"],
+    ["前提", "条件", "假设", "保证"],
+    ["漏掉", "错过", "错误结果", "失效", "找不到"]
+  ],
+  "allow_correct": false,
+  "on_insufficient": "NEEDS_REVIEW"
+}

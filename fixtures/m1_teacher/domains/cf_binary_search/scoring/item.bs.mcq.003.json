@@ -1,0 +1,5 @@
+{
+  "kind": "MCQ",
+  "correct_option_index": 3,
+  "explanation": "没有顺序信息时只能逐个比较，最坏情况检查全部 n 个元素；折半策略需要单调性作为前提，不能直接套用。"
+}

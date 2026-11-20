@@ -1,0 +1,10 @@
+{
+  "kind": "SEMANTIC_RUBRIC",
+  "required_concept_groups": [
+    ["排除", "舍弃", "已经比较过", "移出候选区间"],
+    ["死循环", "无限循环", "不收敛", "无法终止"],
+    ["收缩", "缩小", "区间变小"]
+  ],
+  "allow_correct": false,
+  "on_insufficient": "NEEDS_REVIEW"
+}

@@ -1,0 +1,235 @@
+{
+  "schema_version": "m1a.v0",
+  "domain_id": "cf_binary_search",
+  "items": [
+    {
+      "item_id": "item.bs.mcq.001",
+      "node_ids": ["cf.array.basics"],
+      "item_type": "MCQ",
+      "difficulty": 1,
+      "prompt": "一个长度为 n 的数组使用 0-based 下标，下列哪个说法是正确的？",
+      "options": [
+        "最后一个元素的下标是 n，合法下标范围是 0 到 n",
+        "最后一个元素的下标是 n-1，合法下标范围是 1 到 n-1",
+        "最后一个元素的下标是 n-1，合法下标范围是 0 到 n-1",
+        "最后一个元素的下标是 0，合法下标范围是 0 到 n"
+      ],
+      "max_score": 1.0,
+      "deterministic": true,
+      "scoring_spec_ref": "scoring/item.bs.mcq.001.json",
+      "public": true
+    },
+    {
+      "item_id": "item.bs.mcq.002",
+      "node_ids": ["cf.sort.sortedness"],
+      "item_type": "MCQ",
+      "difficulty": 2,
+      "prompt": "二分查找能够正确工作的关键输入前提是什么？",
+      "options": [
+        "数组中的元素必须全部互不相同，不能有重复值",
+        "数组必须按非递减或非递增顺序整体有序，即元素满足单调性",
+        "数组的长度必须是奇数，不能是偶数",
+        "数组中的所有元素必须都是正数，不能有负数"
+      ],
+      "max_score": 1.0,
+      "deterministic": true,
+      "scoring_spec_ref": "scoring/item.bs.mcq.002.json",
+      "public": true
+    },
+    {
+      "item_id": "item.bs.mcq.003",
+      "node_ids": ["cf.search.linear"],
+      "item_type": "MCQ",
+      "difficulty": 1,
+      "prompt": "在完全没有顺序信息的数组中查找某个值是否存在，下列哪种做法最稳妥？",
+      "options": [
+        "直接取中间元素比较，然后只保留右半边继续查找",
+        "先比较首尾元素，再按两端差值跳转到某个下标比较",
+        "随机挑选一个下标比较，最多重复两次就给出结论",
+        "从第一个元素开始逐个比较，直到找到目标或遍历结束"
+      ],
+      "max_score": 1.0,
+      "deterministic": true,
+      "scoring_spec_ref": "scoring/item.bs.mcq.003.json",
+      "public": true
+    },
+    {
+      "item_id": "item.bs.mcq.004",
+      "node_ids": ["cf.search.binary"],
+      "item_type": "MCQ",
+      "difficulty": 3,
+      "prompt": "在非递减数组中使用二分查找定位目标，每次比较之后搜索区间如何变化？",
+      "options": [
+        "每次比较后丢弃一半候选元素，搜索区间大约缩小为原来的一半",
+        "每次比较后搜索区间只缩小一个元素，效果相当于线性扫描",
+        "每次比较后搜索区间扩大为原来的两倍，以便覆盖更多元素",
+        "每次比较后搜索区间保持不变，只是比较次数不断增加"
+      ],
+      "max_score": 1.0,
+      "deterministic": true,
+      "scoring_spec_ref": "scoring/item.bs.mcq.004.json",
+      "public": true
+    },
+    {
+      "item_id": "item.bs.mcq.005",
+      "node_ids": ["cf.search.boundary"],
+      "item_type": "MCQ",
+      "difficulty": 4,
+      "prompt": "闭区间二分中循环条件写成 low <= high，若把边界更新 high = mid - 1 误写成 high = mid，当目标不存在时最可能发生什么？",
+      "options": [
+        "第一次比较就会访问到数组之外，立刻抛出异常",
+        "数组会被原地修改，导致元素顺序发生变化",
+        "候选区间无法继续缩小，循环可能永远不结束",
+        "查找结果会固定返回下标 0，且不会报错"
+      ],
+      "max_score": 1.0,
+      "deterministic": true,
+      "scoring_spec_ref": "scoring/item.bs.mcq.005.json",
+      "public": true
+    },
+    {
+      "item_id": "item.bs.mcq.006",
+      "node_ids": ["cf.search.lower_upper"],
+      "item_type": "MCQ",
+      "difficulty": 4,
+      "prompt": "对非递减数组 [1, 2, 2, 2, 3]，按“第一个严格大于目标的元素下标”定义的 upper_bound(目标值 2) 返回什么？",
+      "options": [
+        "下标 1，因为第一个等于 2 的元素是下标 1",
+        "下标 4，因为第一个大于 2 的元素是下标 4 处的 3",
+        "下标 2，因为数组中间位置的元素是 2",
+        "下标 3，因为最后一个等于 2 的元素是下标 3"
+      ],
+      "max_score": 1.0,
+      "deterministic": true,
+      "scoring_spec_ref": "scoring/item.bs.mcq.006.json",
+      "public": true
+    },
+    {
+      "item_id": "item.bs.mcq.007",
+      "node_ids": ["cf.complexity.log"],
+      "item_type": "MCQ",
+      "difficulty": 3,
+      "prompt": "当 n = 1024 时，每次把候选区间折半的二分查找最多需要多少次比较（以 2 为底估算）？",
+      "options": [
+        "大约 1024 次，因为每个元素都要比较一次",
+        "大约 512 次，因为每次只排除一半的元素",
+        "大约 1 次，因为一次比较就能直接定位目标",
+        "大约 10 次，因为 2 的 10 次方约等于 1024"
+      ],
+      "max_score": 1.0,
+      "deterministic": true,
+      "scoring_spec_ref": "scoring/item.bs.mcq.007.json",
+      "public": true
+    },
+    {
+      "item_id": "item.bs.mcq.008",
+      "node_ids": ["cf.debug.edge_cases"],
+      "item_type": "MCQ",
+      "difficulty": 3,
+      "prompt": "在验证一个二分查找实现时，下列哪组边界用例最能暴露实现中的缺陷？",
+      "options": [
+        "空数组、单元素数组、目标不存在、重复元素、目标在两端",
+        "只测试长度为 1024 的随机数组，多跑几组即可",
+        "只测试目标恰好等于中间元素的数组，验证成功路径",
+        "只测试全部元素相同的超长数组，观察是否报错"
+      ],
+      "max_score": 1.0,
+      "deterministic": true,
+      "scoring_spec_ref": "scoring/item.bs.mcq.008.json",
+      "public": true
+    },
+    {
+      "item_id": "item.bs.code.001",
+      "node_ids": ["cf.search.binary"],
+      "item_type": "CODE",
+      "difficulty": 3,
+      "prompt": "实现函数 binary_search_exact(arr, target)：在严格递增的整数数组中返回 target 的下标；若 target 不存在则返回 -1。要求时间复杂度 O(log n)，不得修改输入数组。",
+      "function_name": "binary_search_exact",
+      "max_score": 1.0,
+      "deterministic": true,
+      "scoring_spec_ref": "scoring/item.bs.code.001.json",
+      "public": true
+    },
+    {
+      "item_id": "item.bs.code.002",
+      "node_ids": ["cf.search.lower_upper"],
+      "item_type": "CODE",
+      "difficulty": 4,
+      "prompt": "实现函数 lower_bound(arr, target)：在非递减整数数组 arr 中返回第一个满足 arr[i] >= target 的下标 i；若不存在这样的下标（target 大于所有元素）则返回数组长度。要求 O(log n)，不得修改输入数组。",
+      "function_name": "lower_bound",
+      "max_score": 1.0,
+      "deterministic": true,
+      "scoring_spec_ref": "scoring/item.bs.code.002.json",
+      "public": true
+    },
+    {
+      "item_id": "item.bs.code.003",
+      "node_ids": ["cf.search.boundary"],
+      "item_type": "CODE",
+      "difficulty": 4,
+      "prompt": "实现函数 first_occurrence(arr, target)：在非递减整数数组 arr 中返回 target 第一次出现的下标；若 target 不存在则返回 -1。要求 O(log n)，不得修改输入数组。",
+      "function_name": "first_occurrence",
+      "max_score": 1.0,
+      "deterministic": true,
+      "scoring_spec_ref": "scoring/item.bs.code.003.json",
+      "public": true
+    },
+    {
+      "item_id": "item.bs.code.004",
+      "node_ids": ["cf.debug.edge_cases"],
+      "item_type": "CODE",
+      "difficulty": 3,
+      "prompt": "实现函数 count_occurrences(arr, target)：统计非递减整数数组中 target 出现的次数。要求 O(log n)，不要退化成逐元素扫描，不得修改输入数组。",
+      "function_name": "count_occurrences",
+      "max_score": 1.0,
+      "deterministic": true,
+      "scoring_spec_ref": "scoring/item.bs.code.004.json",
+      "public": true
+    },
+    {
+      "item_id": "item.bs.code.005",
+      "node_ids": ["cf.sort.sortedness"],
+      "item_type": "CODE",
+      "difficulty": 2,
+      "prompt": "实现函数 is_non_decreasing(arr)：判断整数数组是否按非递减顺序排列，是则返回 True，否则返回 False。空数组和单元素数组视为非递减。",
+      "function_name": "is_non_decreasing",
+      "max_score": 1.0,
+      "deterministic": true,
+      "scoring_spec_ref": "scoring/item.bs.code.005.json",
+      "public": true
+    },
+    {
+      "item_id": "item.bs.short.001",
+      "node_ids": ["cf.search.boundary"],
+      "item_type": "SHORT_ANSWER",
+      "difficulty": 4,
+      "prompt": "在闭区间二分查找中，循环条件为 low <= high，区间更新为 low = mid + 1 与 high = mid - 1。请解释：（1）更新边界时为什么要把 mid 本身排除；（2）如果误写成 high = mid，可能出现什么后果。",
+      "max_score": 1.0,
+      "deterministic": false,
+      "scoring_spec_ref": "scoring/item.bs.short.001.json",
+      "public": true
+    },
+    {
+      "item_id": "item.bs.short.002",
+      "node_ids": ["cf.sort.sortedness"],
+      "item_type": "SHORT_ANSWER",
+      "difficulty": 3,
+      "prompt": "请用自己的话解释：为什么二分查找要求输入数组有序（满足单调性）？如果对无序数组直接使用二分查找，可能出现什么后果？",
+      "max_score": 1.0,
+      "deterministic": false,
+      "scoring_spec_ref": "scoring/item.bs.short.002.json",
+      "public": true
+    },
+    {
+      "item_id": "item.bs.short.003",
+      "node_ids": ["cf.search.lower_upper"],
+      "item_type": "SHORT_ANSWER",
+      "difficulty": 4,
+      "prompt": "请说明 lower_bound 与 upper_bound 的语义区别，并解释为什么在有重复元素的数组中，二者返回的下标可能不同。",
+      "max_score": 1.0,
+      "deterministic": false,
+      "scoring_spec_ref": "scoring/item.bs.short.003.json",
+      "public": true
+    }
+  ]
+}

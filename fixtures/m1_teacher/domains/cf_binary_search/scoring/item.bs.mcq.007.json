@@ -1,0 +1,5 @@
+{
+  "kind": "MCQ",
+  "correct_option_index": 3,
+  "explanation": "log2(1024) = 10，折半查找最多约 10 次比较；逐个比较才需要与 n 同阶的次数。"
+}

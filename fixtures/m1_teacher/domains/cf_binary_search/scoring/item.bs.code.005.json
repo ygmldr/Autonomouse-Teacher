@@ -1,0 +1,15 @@
+{
+  "kind": "PYTHON_FUNCTION",
+  "function_name": "is_non_decreasing",
+  "tests": [
+    {"args": [[]], "expected": true},
+    {"args": [[9]], "expected": true},
+    {"args": [[1, 2, 2, 3]], "expected": true},
+    {"args": [[2, 1]], "expected": false},
+    {"args": [[1, 2, 2, 1]], "expected": false},
+    {"args": [[-3, 0, 0, 5]], "expected": true},
+    {"args": [[3, 3, 3]], "expected": true},
+    {"args": [[0, -1]], "expected": false}
+  ],
+  "timeout_s": 2
+}

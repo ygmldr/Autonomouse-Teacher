@@ -1,0 +1,16 @@
+{
+  "kind": "PYTHON_FUNCTION",
+  "function_name": "first_occurrence",
+  "tests": [
+    {"args": [[], 1], "expected": -1},
+    {"args": [[5], 5], "expected": 0},
+    {"args": [[5], 4], "expected": -1},
+    {"args": [[1, 2, 2, 2, 3], 2], "expected": 1},
+    {"args": [[2, 2, 2], 2], "expected": 0},
+    {"args": [[1, 1, 2, 3], 1], "expected": 0},
+    {"args": [[1, 2, 3, 3, 3], 3], "expected": 2},
+    {"args": [[1, 2, 3, 3, 3], 4], "expected": -1},
+    {"args": [[1, 2, 3, 3, 3], 1], "expected": 0}
+  ],
+  "timeout_s": 2
+}

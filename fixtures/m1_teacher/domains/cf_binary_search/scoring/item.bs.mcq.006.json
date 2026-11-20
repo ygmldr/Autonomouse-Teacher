@@ -1,0 +1,5 @@
+{
+  "kind": "MCQ",
+  "correct_option_index": 1,
+  "explanation": "[1, 2, 2, 2, 3] 中第一个严格大于 2 的元素是下标 4 处的 3，所以 upper_bound(2) 返回 4。"
+}

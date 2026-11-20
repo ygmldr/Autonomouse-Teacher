@@ -1,0 +1,5 @@
+{
+  "kind": "MCQ",
+  "correct_option_index": 2,
+  "explanation": "high = mid 时区间可能不再收缩（例如 high - low <= 1 的情形），循环条件 low <= high 会一直成立，导致死循环。"
+}

@@ -1,0 +1,10 @@
+{
+  "kind": "SEMANTIC_RUBRIC",
+  "required_concept_groups": [
+    ["第一个大于等于", "不小于", "lower_bound", "lower bound"],
+    ["第一个大于", "严格大于", "upper_bound", "upper bound"],
+    ["重复", "相同值", "重复元素"]
+  ],
+  "allow_correct": false,
+  "on_insufficient": "NEEDS_REVIEW"
+}

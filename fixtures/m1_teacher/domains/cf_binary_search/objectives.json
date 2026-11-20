@@ -1,0 +1,23 @@
+{
+  "schema_version": "m1a.v0",
+  "domain_id": "cf_binary_search",
+  "objectives": [
+    {
+      "objective_id": "obj.cf.binary_search.mastery",
+      "title": "掌握二分查找与边界处理",
+      "description": "能够在非递减数组中正确实现二分查找与 lower_bound/upper_bound 边界变体，判断单调性前提并分析对数复杂度。",
+      "target_node_ids": [
+        "cf.search.binary",
+        "cf.search.boundary",
+        "cf.search.lower_upper",
+        "cf.complexity.log"
+      ],
+      "success_criteria": {
+        "min_mastery": 0.7,
+        "required_node_ids": ["cf.search.binary", "cf.search.boundary"],
+        "max_error_rate": 0.3
+      },
+      "estimated_minutes": 120
+    }
+  ]
+}

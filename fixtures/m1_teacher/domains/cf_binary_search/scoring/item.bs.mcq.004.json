@@ -1,0 +1,5 @@
+{
+  "kind": "MCQ",
+  "correct_option_index": 0,
+  "explanation": "每次比较后可以整体排除中点一侧的候选项，搜索区间约缩小一半，这正是 O(log n) 的来源。"
+}
