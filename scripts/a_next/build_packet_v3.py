@@ -200,6 +200,7 @@ def write_packet(
     out_dir: Path,
     staging: Path,
     payload: dict[str, dict],
+    packet_name: str,
     *,
     impl_sha: str,
     content_sha256: str,
@@ -221,7 +222,7 @@ def write_packet(
             raise common.PacketError("COPY_HASH_MISMATCH", relpath)
         os.chmod(target, common.FILE_MODE)
     manifest = build_manifest(
-        packet_name=out_dir.name,
+        packet_name=packet_name,
         impl_sha=impl_sha,
         content_sha256=content_sha256,
         builder_sha256=builder_sha256,
@@ -345,6 +346,7 @@ def build(args: argparse.Namespace) -> int:
             tmp_dir,
             staging,
             payload,
+            packet_name=out_dir.name,
             impl_sha=args.impl_sha,
             content_sha256=content_sha256,
             phase=phase,
@@ -356,7 +358,7 @@ def build(args: argparse.Namespace) -> int:
         sys.path.insert(0, str(Path(__file__).resolve().parent))
         import verify_packet_v3  # noqa: E402
 
-        result = verify_packet_v3.verify(tmp_dir, allow_phase1=True)
+        result = verify_packet_v3.verify(tmp_dir, allow_phase1=True, allow_build_tmp_name=True)
         if result["verdict"] != "PASS":
             raise common.PacketError("SELF_CHECK_FAILED", json.dumps(result["failures"])[:600])
         os.replace(str(tmp_dir), str(out_dir))

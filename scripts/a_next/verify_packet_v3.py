@@ -99,6 +99,8 @@ def failure_exit(code: str) -> int:
     if code in ("PAYLOAD_TREE_MISMATCH", "CONTENT_SHA_MISMATCH",
                 "CONTENT_SHA_MISMATCH_EXPECTED"):
         return EXIT_CONTENT
+    if code.startswith("PACKET_NAME"):
+        return EXIT_MANIFEST
     if code.startswith(("FROZEN", "INCIDENT", "CLAIM", "V1_CLAIM")):
         return EXIT_FROZEN_INCIDENT
     return EXIT_MANIFEST
@@ -391,7 +393,8 @@ def verify_layout(files: set[str], dirs: set[str], payload: dict[str, dict], res
 
 
 def verify(packet_root: Path, *, expected_impl_sha: str | None = None,
-           expected_content_sha256: str | None = None, allow_phase1: bool = False) -> dict:
+           expected_content_sha256: str | None = None, allow_phase1: bool = False,
+           allow_build_tmp_name: bool = False) -> dict:
     root = Path(packet_root)
     result = Result(root)
     if not root.is_dir():
@@ -442,11 +445,34 @@ def verify(packet_root: Path, *, expected_impl_sha: str | None = None,
     verify_frozen(manifest, result, allow_phase1)
     verify_incident(manifest, result)
     packet = manifest.get("packet") if isinstance(manifest.get("packet"), dict) else {}
-    _require(
-        isinstance(packet.get("name"), str) and packet["name"],
-        result,
-        "PACKET_NAME_INVALID",
+    identity = manifest.get("identity") if isinstance(manifest.get("identity"), dict) else {}
+    packet_name = packet.get("name")
+    impl_sha = identity.get("impl_sha")
+    expected_name = (
+        common.IDENTITY_ROOT_PREFIX + impl_sha
+        if isinstance(impl_sha, str) and common.IMPL_SHA_RE.match(impl_sha)
+        else None
     )
+    is_build_tmp = root.name.startswith(".") and ".build-" in root.name
+    allow_tmp = allow_build_tmp_name and is_build_tmp
+    if not isinstance(packet_name, str) or not packet_name:
+        result.fail("PACKET_NAME_INVALID", str(packet_name))
+    else:
+        if packet_name != root.name and not allow_tmp:
+            result.fail(
+                "PACKET_NAME_MISMATCH",
+                f"manifest.packet.name={packet_name!r} != packet_root dir {root.name!r}",
+            )
+        if ".build-" in packet_name and not allow_tmp:
+            result.fail(
+                "PACKET_NAME_MISMATCH",
+                f"manifest.packet.name contains temporary build dir marker: {packet_name!r}",
+            )
+        if expected_name is not None and packet_name != expected_name:
+            result.fail(
+                "PACKET_NAME_MISMATCH",
+                f"manifest.packet.name={packet_name!r} != {expected_name!r}",
+            )
     _require(
         manifest.get("status") in ALLOWED_STATUS,
         result,

@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import subprocess
 
 from a_next_packet_helpers import (
     IMPL,
+    WORKTREE,
     canonical_sha,
     copy_packet,
     make_tree,
@@ -309,7 +311,10 @@ def test_builder_refuses_unverified_commit(tmp_path, staging):
 # verifier mutations (each must FAIL)
 # ---------------------------------------------------------------------------
 def _copy(built_packet, tmp_path, name):
-    packet = copy_packet(built_packet["packet"], tmp_path / name)
+    # keep the packet directory basename: verifier enforces name == directory name
+    parent = tmp_path / f"case-{name}"
+    parent.mkdir(parents=True, exist_ok=True)
+    packet = copy_packet(built_packet["packet"], parent / built_packet["packet"].name)
     normalize_modes(packet)
     return packet
 
@@ -471,3 +476,38 @@ def test_verifier_json_out(built_packet, tmp_path):
     )
     assert proc.returncode == 0
     assert json.loads(json_out.read_text())["verdict"] == "PASS"
+
+
+def test_manifest_packet_name_matches_final_out_dir(built_packet):
+    """Frozen builder must write the final packet name, not the build temp dir name."""
+    packet_dir = built_packet["packet"]
+    manifest_name = built_packet["manifest"]["packet"]["name"]
+    assert manifest_name == packet_dir.name
+    assert ".build-" not in manifest_name
+    assert built_packet["manifest"]["packet"]["phase"] == "final"
+
+
+def test_builder_sha256_matches_frozen_tree_source(built_packet):
+    """identity.builder_sha256 must equal sha256 of the frozen builder source file."""
+    builder = WORKTREE / "scripts" / "a_next" / "build_packet_v3.py"
+    digest = hashlib.sha256(builder.read_bytes()).hexdigest()
+    assert built_packet["manifest"]["identity"]["builder_sha256"] == digest
+
+
+def test_verifier_rejects_packet_name_tamper(built_packet, tmp_path):
+    bad = _copy(built_packet, tmp_path, "bad-packet-name")
+    manifest = json.loads((bad / "manifest.json").read_text())
+    manifest["packet"]["name"] = ".review-packet-a-next-v3-" + "a" * 40 + ".build-12345"
+    mutate_file(
+        bad / "manifest.json",
+        lambda path: path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n"),
+    )
+    _assert_fail(_verify(bad), 43, "PACKET_NAME_MISMATCH")
+
+
+def test_verifier_rejects_directory_name_not_identity(built_packet, tmp_path):
+    parent = tmp_path / "case-wrong-dir"
+    parent.mkdir()
+    wrong = copy_packet(built_packet["packet"], parent / "wrong-packet-name")
+    normalize_modes(wrong)
+    _assert_fail(_verify(wrong), 43, "PACKET_NAME_MISMATCH")
