@@ -15,6 +15,12 @@ data; all students/outcomes are synthetic fixtures (MOCK) and the demo makes no
 real teaching-effectiveness claim.
 """
 
+# B-PR1 judge-policy note: the CLI is a demo/offline wrapper and deliberately
+# exposes no flag that enables learner CODE execution.  Code-grading policy
+# (trusted_fixture_only) is a trusted construction/deployment decision in
+# repository tests/CI only -- never a CLI argument or request field.  The
+# default remains UNTRUSTED_CODE_EXECUTION_BLOCKED.
+
 from __future__ import annotations
 
 import argparse

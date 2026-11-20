@@ -59,6 +59,24 @@ from .sandbox import (
 )
 from .worker import UntrustedExecutionWorker
 
+# add-only export of the trusted supervisor (owned by B-PR1 integration).  The
+# implementation lives in ``supervisor.py``; ``__init__`` itself stays owned by
+# the sandbox workstream.
+from .supervisor import (
+    DEFAULT_CASE_TIMEOUT_S,
+    MAX_CASE_TIMEOUT_S,
+    MIN_CASE_TIMEOUT_S,
+    STATUS_JUDGE_INFRA_ERROR,
+    STATUS_JUDGE_SANDBOX_UNAVAILABLE,
+    STATUS_PASS,
+    STATUS_RE,
+    STATUS_TLE,
+    STATUS_UNTRUSTED_CODE_EXECUTION_BLOCKED,
+    STATUS_WA,
+    JudgeVerdict,
+    TrustedJudgeSupervisor,
+)
+
 __all__ = [
     # protocol constants / policy
     "PROTOCOL_VERSION",
@@ -95,4 +113,17 @@ __all__ = [
     "SandboxUnavailable",
     # worker
     "UntrustedExecutionWorker",
+    # trusted supervisor (B-PR1 integration)
+    "DEFAULT_CASE_TIMEOUT_S",
+    "MIN_CASE_TIMEOUT_S",
+    "MAX_CASE_TIMEOUT_S",
+    "STATUS_PASS",
+    "STATUS_WA",
+    "STATUS_RE",
+    "STATUS_TLE",
+    "STATUS_JUDGE_INFRA_ERROR",
+    "STATUS_UNTRUSTED_CODE_EXECUTION_BLOCKED",
+    "STATUS_JUDGE_SANDBOX_UNAVAILABLE",
+    "JudgeVerdict",
+    "TrustedJudgeSupervisor",
 ]

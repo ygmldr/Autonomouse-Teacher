@@ -2,7 +2,7 @@
 
 - 文档编号：`M1_B_THREAT_MODEL_JUDGE` / B-PR1 设计前置
 - 状态：**DESIGN_ONLY**（设计 + 可复现 `LOCAL_PROBE`；**未实现、未验收**）
-- 版本：v0.1（2026-11-20，UTC）
+- 版本：v0.2（2026-11-20，UTC；PR1 实现回填修订：P1-01/P1-08/P2-05/P2-06 关闭）
 - 作者：B-NEXT / B-PR1 Judge 安全边界设计负责人（Implementer 前置设计）
 - 工作树：`/root/m1b/tm`，分支 `b-next/pr1-threat-model`，基线 `4706250643fd42d48d69ddad7159e011955fa9fd`
   （`work/m1a-mvp`，即 M1-A PR1–PR5 冻结 HEAD）
@@ -205,7 +205,7 @@
 ### 3.1 版本与传输
 
 - 协议版本常量：`m1b.judge.worker.v1`（request/response 都必须携带；不匹配 → `JUDGE_INFRA_ERROR`）。
-- 传输：supervisor 通过 stdin 发送**单个** UTF-8 JSON 对象（无 BOM、无换行要求），通过 stdout 读取**单行** UTF-8 JSON（≤16 KiB；只取第一行；后续字节丢弃并记录截断，必要时判 INFRA_ERROR）。
+- 传输：supervisor 通过 stdin 发送**单个** UTF-8 JSON 对象（无 BOM、无换行要求），通过**专用协议 fd** 读取**单行** UTF-8 JSON（上限 128 KiB；只取第一行；后续字节丢弃并记录截断，必要时判 INFRA_ERROR）。该 fd 由 worker_runner 在导入 learner 代码前 `os.dup(1)` 得到（通常为 fd 3），随后 fd 1/2 被重定向到 `/dev/null`； learner 的 `print`/`sys.stdout.write` 不能进入协议通道，worker_runner 写完唯一一行响应后立即 `os._exit(0)`（详见 §4.3；与 m1a-fixtures 的 `worker_runner.py` 实现一致）。
 - **不使用** argv 传入任何路径/expected；**不使用** result 文件；**不使用**共享可写目录。
 - supervisor 侧禁止把 request/response 写入 Teacher 可见日志（仅受限 judge 日志，且只含 request_id/case_index/分类/耗时/资源摘要；不允许 expected/args 原文）。
 
@@ -214,7 +214,7 @@
 ```json
 {
   "schema_version": "m1b.judge.worker.v1",
-  "request_id": "req_7c1f0b9a2d4e6f80",
+  "request_id": "7c1f0b9a2d4e6f80112233445566aabb",
   "function_name": "binary_search_exact",
   "args": [[1, 3, 5, 7, 9], 4],
   "timeout_ms": 1500,
@@ -226,21 +226,22 @@
 | 字段 | 类型 | 约束 | 说明 |
 | --- | --- | --- | --- |
 | `schema_version` | string | 必须 `"m1b.judge.worker.v1"` | 协议版本 |
-| `request_id` | string | `^[a-f0-9]{16,64}$` | supervisor 生成，仅用于日志关联；不参与比较 |
+| `request_id` | string | `^[a-f0-9]{16,64}$`（实现生成 32 hex） | supervisor 生成，仅用于日志关联；不参与比较 |
 | `function_name` | string | `^[A-Za-z_][A-Za-z0-9_]{0,127}$` | 目标函数名 |
-| `args` | array (JSON) | canonical JSON ≤ 4096 bytes；允许 JSON 基本类型/数组/对象；深度 ≤ 4；总节点数 ≤ 256 | **单个 case 的输入**（不是全量 tests） |
+| `args` | array (JSON) | canonical JSON ≤ 1 MiB；允许 JSON 基本类型/数组/对象；深度 ≤ 4；总节点数 ≤ 1,048,576 | **单个 case 的输入**（不是全量 tests） |
 | `timeout_ms` | integer | 50 ≤ x ≤ 5000 | 该 case 的墙钟预算（supervisor 还会外加 500ms kill 宽限） |
 | `stdout_limit` | integer | 0..4096 | learner stdout 截断上限 |
 | `stderr_limit` | integer | 0..4096 | learner stderr 截断上限 |
 
 **禁止字段（worker 必须拒绝、不得提供任何默认行为）**：`expected`、`tests`、`hidden`、`case_index`、`scoring_spec_ref`、`scoring_path`、`workspace`、`result_path`、`db_path`、`learner_id`、`session_id`、`verdict`、`passed`、任何宿主路径。未知字段 → worker 返回 `INFRA_ERROR(REQUEST_UNKNOWN_FIELD)`；supervisor 本身也不得构造这些字段（测试断言 request JSON 不含 expected 子串）。
+**P2-05/06 对齐说明（PR1 已关闭）**：PR1 实现的 `m1_teacher/assessment/judge/protocol.py` 在保持字段名/语义/禁止字段不变的前提下，把字节上限按 14 题认证语料的最大 hidden actual 上调为 request 2 MiB / response 128 KiB / args 1 MiB / actual 64 KiB；`request_id` 由 `secrets.token_hex(16)` 生成 32 位十六进制，示例与正则一致。协议通道的精确表述见 §3.1 与 `worker_runner.py`（`os.dup(1)` 专用 fd、fd1/2 重定向、`os._exit(0)`）。
 
 ### 3.3 Worker → Trusted 响应（唯一允许字段）
 
 ```json
 {
   "schema_version": "m1b.judge.worker.v1",
-  "request_id": "req_7c1f0b9a2d4e6f80",
+  "request_id": "7c1f0b9a2d4e6f80112233445566aabb",
   "status": "COMPLETED",
   "actual_canonical": "-1",
   "exception_type": null,
@@ -254,7 +255,7 @@
 | `schema_version` | string | `"m1b.judge.worker.v1"` | 版本 |
 | `request_id` | string | 必须与请求一致 | 关联/防串 |
 | `status` | string enum | `COMPLETED` / `RAISED` / `SYNTAX_ERROR` / `IMPORT_ERROR` / `MISSING_FUNCTION` / `TIMEOUT` / `INFRA_ERROR` | 只描述 worker 观测；**不是 verdict** |
-| `actual_canonical` | string\|null | `COMPLETED` 时非 null，canonical JSON ≤ 8192 bytes；其他状态为 null | 观测返回值（字符串形式）；不是 passed |
+| `actual_canonical` | string\|null | `COMPLETED` 时非 null，canonical JSON ≤ 64 KiB；其他状态为 null | 观测返回值（字符串形式）；不是 passed |
 | `exception_type` | string\|null | ≤128；`^[A-Za-z_][A-Za-z0-9_.]{0,127}$` | 异常类名，**不含 message/堆栈/expected** |
 | `stdout_excerpt` | string | ≤ `stdout_limit` 字节（UTF-8 截断按字符边界） | learner stdout（不可信、仅调试/聚合） |
 | `stderr_excerpt` | string | ≤ `stderr_limit` 字节 | learner stderr（不可信） |
@@ -301,13 +302,14 @@
   --unshare-all --die-with-parent --clearenv \
   --ro-bind /usr /usr --ro-bind /lib /lib --ro-bind /lib64 /lib64 --ro-bind /bin /bin \
   --ro-bind <WORKER_DIR> /worker \
-  --proc /proc --dev /dev --tmpfs /tmp --size 16777216 \
+  --proc /proc --dev /dev --size 16777216 --tmpfs /tmp \
   --uid 65534 --gid 65534 --hostname m1b-worker \
   /usr/bin/python3 /worker/worker_runner.py
 ```
 
 - `<WORKER_DIR>`： supervisor 为本次调用生成的只读目录，**只含** `worker_runner.py` 与 `solution.py`（synthetic/受控写入）；不 bind 任何 fixture/scoring/expected/DB/host 目录。
 - 不使用 `--share-net`；不使用 `--dev-bind`；不使用 `--as-pid-1`（保留 bwrap reaper）；标准输入=protocol request，标准输出=protocol response（见 §4.3 的 fd 分离建议）。
+- **P1-08（已关闭，PR1 实现同步）**：bwrap 0.9.0 要求 `--size` **紧跟**它所配置的 `--tmpfs`。本文早期版本写作 `--tmpfs /tmp --size 16777216` 会被 bwrap 拒绝；本机复测：错误顺序 `exit=1`，stderr 为 `bwrap: --size must be followed by --tmpfs`；正确顺序（上）`exit=0`，观测 `uid=65534, pid=2`。PR1 的 `m1_teacher/assessment/judge/sandbox.py` 已按 `--size` → `--tmpfs` 顺序构造命令（实现含注释 "bwrap 0.9 requires --size *before* the --tmpfs it configures"；见 `sandbox.py:353-356` 一带），worker/sandbox 测试全绿，故不存在旧命令形式。
 - 宿主侧 `preexec_fn` 在 exec bwrap 前设置 rlimits（bwrap 0.9 本身无 `--rlimit-*` 选项，实测 `--help` 无 rlimit 段；使用 Python `resource.setrlimit`，bwrap 与 python3 继承）：
 
 | 资源 | 限制 | 实测（LOCAL_PROBE） |
@@ -362,7 +364,8 @@
 | `TRUSTED_FIXTURE_TEST_ONLY` | 仅限仓库内部自编 synthetic fixtures 的可信测试入口；显式 opt-in；仍建议在沙箱内运行 | 否 | 仓库测试/CI（显式参数或测试专用入口）、PR1 的 B1-05 证据 |
 | `SANDBOXED_WORKER` | 经 B1-01..B1-04 独立验收 + 人类批准后才允许的 CODE 判题 | 否（PR1 之后也不默认对外） | 未来受控服务；仍需人工批准 |
 
-- **MCQ / 静态 SHORT_ANSWER**：不执行 code、不需要 worker，保持现有行为（A `scorer.py:469-492`, `649+`；B 无 CODE 路径的复用逻辑同样不涉及 worker）。默认 blocked 只影响 CODE。
+- **MCQ / 静态 SHORT_ANSWER**：不执行 code、不需要 worker，保持现有行为（A `scorer.py:469-491`, `649+`；B 无 CODE 路径的复用逻辑同样不涉及 worker）。默认 blocked 只影响 CODE。
+- **P1-01（已关闭）**：`trusted_fixture_only` **只能**来自可信构造/部署配置——即 `DeterministicScorer(...)` / `TrustedJudgeSupervisor(...)` 的构造参数（由仓库测试/CI 或受控部署代码显式传入），**绝不可**来自 AssessmentJob、请求体、响应体、`AssessmentItem` 字段、`result_id`、环境变量或任何调用方自报数据。数据路径无法改变策略；PR1 回归测试 `tests/m1_teacher/test_judge_supervisor.py::test_policy_cannot_be_enabled_from_caller_data_paths` 覆盖 item/response/result_id/env 绕过尝试，并断言 worker 从未被调用。
 - **TRUSTED_FIXTURE_TEST_ONLY 的边界**：只能由代码内显式参数/环境变量开启（例如 `execution_policy="trusted_fixture_test_only"`），且必须伴随 `fixtures_root` 指向仓库合成 fixture；**不可**由 learner 输入/请求体/LLM 文本开启。该模式不是安全策略，仅用于离线合成测试与 PR1 证据。
 
 ### 5.2 返回结构（blocked 与 infra error 的区分）
@@ -636,7 +639,7 @@ worker 只读目录 `/tmp/m1b_probe/sandbox_worker`，`worker_runner.py` 实现 
 **请求（只含单 case 输入）**
 
 ```json
-{"schema_version":"m1b.judge.worker.v1","request_id":"req_00112233445566aa",
+{"schema_version":"m1b.judge.worker.v1","request_id":"00112233445566aabbccddeeff00112233",
  "function_name":"probe_fn","args":[[1,2,3],2],"timeout_ms":1500,
  "stdout_limit":512,"stderr_limit":512}
 ```
@@ -644,7 +647,7 @@ worker 只读目录 `/tmp/m1b_probe/sandbox_worker`，`worker_runner.py` 实现 
 **响应（COMPLETED，无 verdict）**
 
 ```json
-{"schema_version":"m1b.judge.worker.v1","request_id":"req_00112233445566aa",
+{"schema_version":"m1b.judge.worker.v1","request_id":"00112233445566aabbccddeeff00112233",
  "status":"COMPLETED","actual_canonical":"2","exception_type":null,
  "stdout_excerpt":"","stderr_excerpt":""}
 ```
@@ -652,7 +655,7 @@ worker 只读目录 `/tmp/m1b_probe/sandbox_worker`，`worker_runner.py` 实现 
 **响应（学生语法错误）**
 
 ```json
-{"schema_version":"m1b.judge.worker.v1","request_id":"req_...",
+{"schema_version":"m1b.judge.worker.v1","request_id":"00112233445566aabbccddeeff00112233",
  "status":"SYNTAX_ERROR","actual_canonical":null,"exception_type":null,
  "stdout_excerpt":"","stderr_excerpt":""}
 ```
@@ -660,7 +663,7 @@ worker 只读目录 `/tmp/m1b_probe/sandbox_worker`，`worker_runner.py` 实现 
 **被 supervisor 拒绝的伪造响应（示例）**
 
 ```json
-{"schema_version":"m1b.judge.worker.v1","request_id":"req_...",
+{"schema_version":"m1b.judge.worker.v1","request_id":"00112233445566aabbccddeeff00112233",
  "status":"COMPLETED","actual_canonical":"2","passed":true}
 ```
 
@@ -705,3 +708,4 @@ worker 只读目录 `/tmp/m1b_probe/sandbox_worker`，`worker_runner.py` 实现 
 | 版本 | 日期 | 变更 |
 | --- | --- | --- |
 | v0.1 | 2026-11-20 | 初版 DESIGN_ONLY：资产/信任域、A/B 根因证据、冻结 worker 协议 v1、bwrap OS 规格与 LOCAL_PROBE、默认 BLOCKED 策略、负例矩阵、正确性/泄漏规格、B1-01..06 验收映射、非目标与 Reviewer 清单 |
+| v0.2 | 2026-11-20 | PR1 实现回填：P1-08 CLOSED（`--size` 必须在 `--tmpfs` 前，给出实测 exit 1/exit 0 与 sandbox.py 同步证据）；P1-01 CLOSED（opt-in 仅构造/部署配置，不可由数据路径/请求/env 绕过）；P2-05 修正 request_id 正则示例；P2-06 统一协议通道为专用 fd（dup(1)）+ fd1/2 重定向 + `os._exit(0)` 表述 |
