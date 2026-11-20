@@ -3,7 +3,7 @@
 - **状态**：`IMPLEMENTED (B-PR4 + P1/P2 review response)`。在最终 PR1/PR2/PR3 合并树上，把 Interview/Freshness vertical 层接入 canonical `m1_teacher` Session 状态机，交付 B4-01/02/03 离线确定性 E2E，并关闭独立评审 P1-1/P1-2/P1-3。
 - **工作区 / 分支**：`/root/m1b/pr4int`，`b-next/pr4-domain-ports`。
   - 早期基线：PR3 HEAD `3103a06`（PR2 事务 + PR3 scoped idempotency）；vertical merge `efe385d`（合并后 692 passed）。
-  - 最终合并树：`11a4f72`（PR1 judge 资产 + PR2 最终事务/恢复/P1-P2 修复 + PR3；774 既有 + 85 新增 = 859 passed）→ 评审 `dfda203` → P1/P2 修复后本轮 **869 passed**。
+  - 最终合并树：`8ab4281`（更新后的 PR1/PR2/PR3 review-fix tree 合入 PR4；PR3 final 基线 818）→ 评审 `dfda203` → P1/P2 修复 → legacy v0 兼容回归修复后本轮 **913 passed**。
 - **设计/评审依据**：`docs/M1_B_INTERVIEW_FRESHNESS_MAPPING.md`（设计映射）、`docs/M1_B_INTERVIEW_FRESHNESS_IMPLEMENTATION.md`（vertical 层）、`docs/M1_B_TXN_RECOVERY.md`、`docs/M1_B_SCOPED_IDEMPOTENCY_IMPLEMENTATION.md`、`docs/M1_B_PR4_REVIEW.md`（独立评审）、`docs/M1_B_PR4_REVIEW_RESPONSE.md`（P1/P2 处置与关闭证据）。
 - **边界**：无网络/真实简历/招聘 JD/Provider/LiveGate；合成数据；真实学习效果 **NOT_VERIFIED**；启发式阈值 **UNCALIBRATED_HEURISTIC**（运行时可见）；不修改 M0/security/bridge/config/g*/scripts/g4/LiveGate。
 
@@ -69,7 +69,7 @@ canonical engine (m1_teacher/session/engine.py)
   - `ASSESSED`/`MASTERY_UPDATED.payload`: `rubric_audit{question_id,scorer_id,status,open_answer,dimensions{4},failure_modes[],spec_digest}` + `vertical` + `next_state`（terminal drafts）。
   - `TURN_ADVANCED.payload.next_state`: 内容动作确认后的 phase/turn/pending。
 - **Replay**：`replay_session_state(session_id)` 仅消费事件重建 phase/turn/pending/last action/plan（含 `advanced_answers`/`next_stage`/`ladder_completed`）/completed；`verify_session_replay(session_id)` 与持久 session 比较并返回差异（篡改测试可证伪）。`LearningHistory.rebuild_state/verify_rebuild` 继续重建 LearnerSnapshot；两套 replay 均为真实 API。
-- **版本拒绝**：`_validate_session_version_compatibility()` 在 continue/resume/replay 前检查 `SESSION_STARTED` 的 `domain_id/domain_version/objective_id/session_policy_version` 与 vertical payload 的 `domain_id/policy_version`；不匹配 → `MAP-E12_DOMAIN_VERSION_MISMATCH` / `MAP-E13_EVENT_VERSION_INCOMPATIBLE`，零写入。**event-level `schema_version`/fixture 版本未知拒绝未实现**（payload 无该字段，repository schema 归 PR3）；设计表中该行声明为 PARTIAL。
+- **版本拒绝**：`_validate_session_version_compatibility()` 在 continue/resume/replay 前检查 `SESSION_STARTED` 的 `domain_id/domain_version/objective_id/session_policy_version` 与 vertical payload 的 `domain_id/policy_version`；**只有记录字段存在且与当前值不匹配时**才 `MAP-E12_DOMAIN_VERSION_MISMATCH` / `MAP-E13_EVENT_VERSION_INCOMPATIBLE` fail-closed（零写入）。**legacy v0 兼容**：真实 pre-PR3 v1 fixture 的 `SESSION_STARTED` 没有 `domain_id/domain_version`（两者均缺失），按 v0 legacy 放行并可在 `replay_session_state` 输出 `legacy_v0_session=true` 诊断标记（不写库），不得被误判为 MAP-E12；显式记录了不匹配 domain/policy 的 session 仍拒绝。**event-level `schema_version`/fixture 版本未知拒绝未实现**（payload 无该字段，repository schema 归 PR3）；设计表中该行声明为 PARTIAL。
 - **determinism**：固定 ids/seed/clock；测试/demo 投影去除时间戳后逐字节相等；demo 两次运行同 sha。
 
 ## 5. JD / Freshness 门禁（P1-1 修订）
@@ -98,7 +98,7 @@ canonical engine (m1_teacher/session/engine.py)
 ```bash
 # 最终全量回归（P1/P2 修复后）
 $ "/root/Autonomous Teacher/.venv/bin/python" -m pytest tests/m1_teacher -q
-869 passed in 78.12s
+913 passed in 88.37s
 
 # 定向
 $ pytest tests/m1_teacher/test_b4_durability_replay.py -q
@@ -120,7 +120,7 @@ sha256(run1.json) = b3231658a4ac12a49cd2ac57f4a3e8d9719fbf7476ca36a54e4d8f9eea72
 
 demo 摘要（真实输出）：B4-01 `paths_differ=true`；B4-02 `learner_input_source=teacher-visible vertical/interview/learner_scripts/answers.json`、`learner_script_sha256=bd81292ad08357ff…`、`jd_versions=[v2,v1]`、`paths_differ=true`、`full_solution_emitted=false`、A 跳过 concept / B 完整 5 阶段 + clarify 1 + hint L1；B4-03 `decision_counts={KEEP:2,UPDATE:2,RECHECK:5}`、`silent_imports=0`。
 
-**测试计数构成**：774（PR3 final 基线）+ 60（vertical）+ 25（B4 E2E/policy）+ 9（durability/replay/version）+ 1（P2-3 calibration）= **869**。
+**测试计数构成**：818（更新后 PR3 final 基线）+ 60（vertical）+ 25（B4 E2E/policy）+ 9（durability/replay/version）+ 1（P2-3 calibration）= **913**。
 
 ## 8. 对既有测试/断言的保护（P1-2 强化）
 
@@ -168,7 +168,7 @@ demo 摘要（真实输出）：B4-01 `paths_differ=true`；B4-02 `learner_input
 
 ```bash
 cd /root/m1b/pr4int
-"/root/Autonomous Teacher/.venv/bin/python" -m pytest tests/m1_teacher -q              # 869 passed
+"/root/Autonomous Teacher/.venv/bin/python" -m pytest tests/m1_teacher -q              # 913 passed
 "/root/Autonomous Teacher/.venv/bin/python" -m pytest tests/m1_teacher/test_b4_durability_replay.py -q  # 9 passed
 "/root/Autonomous Teacher/.venv/bin/python" -m pytest tests/m1_teacher/test_b4_e2e.py tests/m1_teacher/test_vertical_policy.py -q  # 26 passed
 "/root/Autonomous Teacher/.venv/bin/python" -m m1_teacher.demo_b4 --json                # 确定性 B4 摘要

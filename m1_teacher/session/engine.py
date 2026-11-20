@@ -2415,43 +2415,62 @@ class TeachingSessionEngine:
         current_domain_version = getattr(self._domain, "domain_version", None)
         recorded_domain_id = payload.get("domain_id")
         recorded_domain_version = payload.get("domain_version")
-        if recorded_domain_id != self._domain.domain_id:
-            raise ValidationError(
-                "session domain version mismatch (MAP-E12): pause and start a new session",
-                code="MAP-E12_DOMAIN_VERSION_MISMATCH",
-                details={
-                    "session_id": state.session_id,
-                    "recorded_domain_id": recorded_domain_id,
-                    "current_domain_id": self._domain.domain_id,
-                },
-            )
-        if recorded_domain_version != current_domain_version:
-            raise ValidationError(
-                "session domain version mismatch (MAP-E12): pause and start a new session",
-                code="MAP-E12_DOMAIN_VERSION_MISMATCH",
-                details={
-                    "session_id": state.session_id,
-                    "recorded_domain_version": recorded_domain_version,
-                    "current_domain_version": current_domain_version,
-                },
-            )
-        if payload.get("objective_id") != state.objective_id:
+        # Legacy (pre-B-PR4) sessions were written by the frozen M1-A engine,
+        # whose SESSION_STARTED payload had no domain_id/domain_version.  Treat a
+        # session with *both* fields absent as v0-legacy and remain replayable: a
+        # first-class compatibility check must not turn an old, valid event stream
+        # into a spurious MAP-E12 failure.  Only *recorded* values are compared;
+        # explicitly persisted mismatches still fail closed below.
+        legacy_v0_session = recorded_domain_id is None and recorded_domain_version is None
+        if not legacy_v0_session:
+            if (
+                recorded_domain_id is not None
+                and recorded_domain_id != self._domain.domain_id
+            ):
+                raise ValidationError(
+                    "session domain version mismatch (MAP-E12): pause and start a new session",
+                    code="MAP-E12_DOMAIN_VERSION_MISMATCH",
+                    details={
+                        "session_id": state.session_id,
+                        "recorded_domain_id": recorded_domain_id,
+                        "current_domain_id": self._domain.domain_id,
+                    },
+                )
+            if (
+                recorded_domain_version is not None
+                and recorded_domain_version != current_domain_version
+            ):
+                raise ValidationError(
+                    "session domain version mismatch (MAP-E12): pause and start a new session",
+                    code="MAP-E12_DOMAIN_VERSION_MISMATCH",
+                    details={
+                        "session_id": state.session_id,
+                        "recorded_domain_version": recorded_domain_version,
+                        "current_domain_version": current_domain_version,
+                    },
+                )
+        recorded_objective = payload.get("objective_id")
+        if recorded_objective is not None and recorded_objective != state.objective_id:
             raise ValidationError(
                 "session objective binding mismatch (MAP-E12)",
                 code="MAP-E12_DOMAIN_VERSION_MISMATCH",
                 details={
                     "session_id": state.session_id,
-                    "recorded_objective_id": payload.get("objective_id"),
+                    "recorded_objective_id": recorded_objective,
                     "state_objective_id": state.objective_id,
                 },
             )
-        if payload.get("session_policy_version") != self._policy.policy_version:
+        recorded_policy_version = payload.get("session_policy_version")
+        if (
+            recorded_policy_version is not None
+            and recorded_policy_version != self._policy.policy_version
+        ):
             raise ValidationError(
                 "session policy version incompatible (MAP-E13); no migration is implemented",
                 code="MAP-E13_EVENT_VERSION_INCOMPATIBLE",
                 details={
                     "session_id": state.session_id,
-                    "recorded_session_policy_version": payload.get("session_policy_version"),
+                    "recorded_session_policy_version": recorded_policy_version,
                     "current_session_policy_version": self._policy.policy_version,
                 },
             )
@@ -2575,6 +2594,12 @@ class TeachingSessionEngine:
             "domain_id": started.payload.get("domain_id"),
             "domain_version": started.payload.get("domain_version"),
             "session_policy_version": started.payload.get("session_policy_version"),
+            # Diagnostic only, never persisted: pre-B-PR4 v0 sessions had no
+            # domain_id/domain_version in SESSION_STARTED and are replayed as-is.
+            "legacy_v0_session": (
+                started.payload.get("domain_id") is None
+                and started.payload.get("domain_version") is None
+            ),
             "phase": started.payload.get("phase", PHASE_DIAGNOSE),
             "turn_index": 0,
             "pending_item_id": None,

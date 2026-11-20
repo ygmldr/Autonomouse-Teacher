@@ -30,7 +30,7 @@ import pytest
 from m1_teacher import demo
 from m1_teacher.assessment.interview_judge import InterviewRubricJudge
 from m1_teacher.contracts.errors import ValidationError
-from m1_teacher.contracts.types import HistoryEvent, LearnerGoal
+from m1_teacher.contracts.types import HistoryEvent, LearnerGoal, SessionState
 from m1_teacher.domains.interview import FOLLOW_UP_STAGES, InterviewDomainAdapter
 from m1_teacher.idempotency import canonical_response  # noqa: F401 - used in assertions context
 from m1_teacher.knowledge.freshness import KnowledgeFreshnessService
@@ -696,6 +696,95 @@ def test_version_incompatibility_rejected_with_zero_writes(
             assert repository.load_session("iv:version").to_dict() == baseline_session
         finally:
             adapter._domain_version = original_version  # noqa: SLF001
+    finally:
+        repository.close()
+
+    # P1-3 legacy compatibility regression (real pre-PR3 v1 fixture shape):
+    components = demo.build_components(FIXTURES_ROOT)
+    student = demo.load_student_fixture(FIXTURES_ROOT, "student_a")
+    repository = SqliteRepository(tmp_path / "legacy_compat.sqlite")
+    try:
+        engine = TeachingSessionEngine(
+            components.adapter,
+            components.graph,
+            repository,
+            history=LearningHistory(repository),
+            scorer=demo.MockStudentScorer(student),
+        )
+        state = SessionState(
+            session_id="legacy:session",
+            learner_id="legacy:learner",
+            goal_id="goal:legacy",
+            objective_id=components.objective.objective_id,
+            phase="DIAGNOSE",
+            turn_index=0,
+            pending_item_id=None,
+        )
+        base_payload = {
+            "learner_id": "legacy:learner",
+            "goal_id": "goal:legacy",
+            "objective_id": components.objective.objective_id,
+            "phase": "DIAGNOSE",
+            "snapshot_revision": 0,
+            "session_policy_version": SessionPolicy().policy_version,
+        }
+
+        def fake_event(payload: dict) -> HistoryEvent:
+            return HistoryEvent(
+                event_id="evt.legacy.started",
+                learner_id="legacy:learner",
+                session_id="legacy:session",
+                seq=0,
+                event_type="SESSION_STARTED",
+                payload=payload,
+                created_at=FIXED_TS,
+            )
+
+        # Both domain fields absent -> legacy v0 is accepted (no write, no raise).
+        engine._validate_session_version_compatibility(  # noqa: SLF001 - direct seam test
+            state, (fake_event(dict(base_payload)),)
+        )
+
+        # Persist the legacy session/event and replay it through the public API.
+        repository.save_session(state)
+        repository.append_event(fake_event(dict(base_payload)))
+        replay = engine.replay_session_state("legacy:session")
+        assert replay["legacy_v0_session"] is True
+        assert replay["phase"] == "DIAGNOSE"
+        assert engine.verify_session_replay("legacy:session")["match"] is True
+
+        # A recorded (present) domain id/version that mismatches still fails.
+        cases = (
+            (dict(base_payload, domain_id="other.domain"), "MAP-E12_DOMAIN_VERSION_MISMATCH"),
+            (
+                dict(
+                    base_payload,
+                    domain_id=components.adapter.domain_id,
+                    domain_version="bogus.domain.version",
+                ),
+                "MAP-E12_DOMAIN_VERSION_MISMATCH",
+            ),
+            (
+                dict(base_payload, domain_id=components.adapter.domain_id, domain_version=None),
+                None,
+            ),
+            (
+                dict(base_payload, session_policy_version="bogus.session.policy"),
+                "MAP-E13_EVENT_VERSION_INCOMPATIBLE",
+            ),
+        )
+        for payload, expected_code in cases:
+            if expected_code is None:
+                # Domain id present but version legitimately absent: still allowed.
+                engine._validate_session_version_compatibility(  # noqa: SLF001
+                    state, (fake_event(payload),)
+                )
+                continue
+            with pytest.raises(ValidationError) as excinfo:
+                engine._validate_session_version_compatibility(  # noqa: SLF001
+                    state, (fake_event(payload),)
+                )
+            assert excinfo.value.code == expected_code
     finally:
         repository.close()
 

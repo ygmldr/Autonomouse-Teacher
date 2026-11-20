@@ -32,7 +32,7 @@
 
 ```text
 pytest tests/m1_teacher -q
-869 passed in 78.12s
+913 passed in 88.37s
 
 pytest tests/m1_teacher/test_b4_durability_replay.py -q
 9 passed
@@ -55,14 +55,16 @@ demo 摘要（真实输出）：B4-01 `paths_differ=true`；B4-02 `learner_input
 
 | 来源 | 数量 |
 |---|---|
-| PR3 final 基线（PR1 judge + PR2 事务/恢复 + P1/P2 修复） | 774 |
+| 更新后 PR3 final 基线（PR1/PR2/PR3 review-fix tree） | 818 |
 | vertical 层（interview domain/fixtures/judge/freshness） | 60 |
 | B4 E2E + vertical policy（本轮之前） | 25 |
 | B4 durability/replay/version 新测试 | 9 |
 | P2-3 calibration 运行时测试 | 1 |
-| **合计** | **869** |
+| **合计** | **913** |
 
-（“既有 774”来自评审报告基线 collect-only；774+60+25+9+1=869，与全量实测一致。）
+（818+60+25+9+1=913，与合并更新 PR3 后的全量实测一致。）
+
+> **Post-merge 补充（PR3 final 合入后）**：真实 pre-PR3 v1 fixture 的 `SESSION_STARTED` payload 没有 `domain_id/domain_version`（来自 base `4706250`），初版 MAP-E12 检查把缺字段误判为 mismatch，导致 `test_scope_migration.py::test_real_pre_pr3_structured_legacy_replays_with_old_projection` 回归。已改为 **legacy v0 双缺失放行**（仅比较“记录存在”的 domain/policy 字段，legacy 标记只进 replay 输出不写库）；显式 mismatch 的 MAP-E12/E13 测试保留。合入后全量 **913 passed**（`M1B_REQUIRE_OS_SANDBOX=1`，0 skipped），`test_scope_migration` 15 passed。
 
 ## 5. 仍未关闭 / 不可声称项
 
