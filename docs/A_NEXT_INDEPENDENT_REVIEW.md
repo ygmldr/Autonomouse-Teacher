@@ -463,3 +463,209 @@ $ git -C worktrees/a-next-auth-record status --porcelain -uall
   -> ?? docs/A_NEXT_AUTH_RECORD_REPORT.md; ?? tests/integration/a_next_auth/{conftest,test_a1_use_record_integrity}.py
      (uncommitted -> evidence not yet SHA-bound; C1)
 ```
+
+
+---
+
+## 8. 阶段 2（第一批）独立复核 — 2026-11-20T19:50Z–20:25Z
+
+> 本章节为 append-only 阶段 2 记录；阶段 1 裁定与日期保留（A1 设计 **PASS(C1)**、A2 ADR **PASS(C2–C8)**、
+> A0-01 PASS、A0-02 PARTIAL、A0-03 NOT_RUN）。本批将阶段 1 裁定绑定到实际提交 SHA：
+> A1 设计报告 `0df36de`、A2 ADR `960724b`、A1 实现 `e6f3aa6`（新增审阅对象）。所有结论仍限 **no-key** 范围。
+
+### 8.0 环境重大变化（P1-OBS，必须先记录）
+
+在本批审阅过程中（**2026-11-20T19:52:06Z→19:53:28Z 之间**），主工作树的冻结环境根
+`/root/Autonomous Teacher/artifacts/` **被清空**（目录改为空，mtime 19:53）：
+
+```text
+19:52:06Z  rootfs_guard.py --rootfs <main artifacts frozen rootfs> --expected-sha 25491e45…
+           -> verdict OK / sha_matches_expected=true / mount.read_only=false      (Reviewer 实测)
+19:53:28Z  同一路径 -> stat: No such file or directory；artifacts/ 为空（仅 . ..）
+19:54Z+    canonical 副本仍在 worktrees/a-next-rrev6/artifacts/security/rootfs，
+           tar 规范化 sha256 = 25491e45aa3dc54c526db9b9d46d18b31c7840150473e2fdb4d8b882f02fe9c0（Reviewer 实测）
+           （该 worktree 还有 artifacts/foundation/deps 副本；推测为 A4/R-REV6 独占窗口环境迁移，
+           未由 Lead 确认，本报告不臆断动机）
+```
+
+**影响与要求**：
+1. **A0-03 工具对“真实冻结树”的现场验证窗口被环境迁移打断**：19:52:06 的真实树检查结果有效（工具行为正确），
+   19:53 起主 artifacts 路径不再存在；本报告不再能对“当前 canonical 冻结树”复算 `25491e45`。
+2. **不得**在 Packet v3/任何 OCI 前假定环境未变；需 Lead 确认 canonical 环境根位置（主 artifacts 恢复、
+   或明确 a-next-rrev6 副本为输入）。在此之前 Packet/OCI 相关项保持 `NOT_RUN`。
+3. 本报告 A0-03 结论只覆盖**工具行为与声明**（fake-tree + 19:52 真实树窗口），**不**覆盖真实部署防写。
+
+### 8.1 A-PR0 文档（`docs/a-next-baseline` @ `e1fa0b9`，3 docs / +564）——**PARTIAL**
+
+**独立核验（Reviewer 命令，UTC 19:50–20:05Z）**：
+
+```text
+$ git -C worktrees/a-next-baseline diff --name-status fd1d3a6..e1fa0b9
+A docs/A_NEXT_BASELINE.md / A docS/A_NEXT_BRANCH_RECONCILIATION.md / A docs/A_NEXT_REVIEW_STATUS_RECONCILIATION.md
+  → 只新增 3 个 docs；冻结 CSV/Review/src/tests 零改动
+
+$ sha256sum docs/Autonomous_Teacher_M0_G4R_Test_Evidence_Matrix_v1.0.csv   -> 741d7d55…1382 (== 冻结值)
+$ sha256sum docs/REVIEW_G4R_INDEPENDENT.md                                  -> 0599856a…446c (== 冻结值)
+$ find docs/g4r_review_evidence -type f | wc -l                             -> 43
+$ sha256sum * | sort | sha256sum (evidence dir)                             -> 8326e4ca… (== 文档声明)
+$ 解析 A_NEXT_REVIEW_STATUS_RECONCILIATION §2 表：65 行；frozen 计数 29/14/12/4/6；
+  与冻结 CSV 逐行对比 mismatch=0；表内无 CSV 之外 case_id
+$ Reviewer 终态映射：PASS 25 / PARTIAL 18 / NOT_RUN 10 / UNVERIFIED 2 / NO_DIRECT 4 / N/A 6 = 65
+```
+
+**通过项（如实）**：
+- 65 行逐 case 对账**数据一致**：frozen 列与 CSV 逐行相等；REV-01..08 终态与 Reviewer 报告完全一致
+  （PASS/PASS/PARTIAL/PARTIAL/PASS/NOT_RUN/PASS/PARTIAL）；无“最终矩阵全 PASS”伪报；明确保留
+  R2 L2 `PARTIAL`、R4-09/10 `NOT_RUN`、R5 `NOT_RUN`、G4-H `N/A(HUMAN)`。
+- append-only 声明属实（新增 3 docs；§6 版本记录 + 冻结字节未改证明；未重打包 Packet）。
+- H0 F-02 结论与 Reviewer 独立仲裁一致：G4-R 目录 fsync + `DURABILITY_UNKNOWN` 覆盖 H0 缺口 ⇒ cherry-pick=0。
+- 证据 SHA（矩阵 `741d7d55`、Review `0599856a`、evidence dir `8326e4ca`、Packet v2 三 SHA）与 Reviewer
+  实测一致；“交接写 45 份、实测 43 份”的 `NOTE` 正确（**Reviewer 早前消息写 45 为 Reviewer 笔误，以 43 为准**）。
+
+**未通过项（须 append-only v2 更正，不得删原行）**：
+1. **`R4-05`（SQLite backup provenance）被映射为 `PASS`（依据 `r_rev5_packet_verify`）——无 Reviewer 直接证据**。
+   Reviewer 的 R-REV5 验证覆盖 Packet 全树/哈希/mutation 与 SQLite **只读可打开/immutable**，**未验证备份来源
+   provenance**；Reviewer 报告正文亦未提 R4-05。应改为 `NO_DIRECT`/`PARTIAL`（保留 frozen PARTIAL）并注明。
+2. **`R4-12`（Evidence path correction）被映射为 `PASS`（同上）——无 Reviewer 直接证据**。R-REV5 verifier 证据
+   JSON 只有 `packet/status/expected_impl_sha/mutation_undetected/issues` 键，不含 path-correction 校验；
+   Reviewer 报告只在 P2-02 观察中提到 F2-07 旧路径缺失/实际路径存在，不等于该行 PASS。
+   （`R4-13` LiveGate reason snapshot equality 有 R-REV5 livegate 快照一致性支撑，保留 PASS 可接受。）
+
+**裁定：PARTIAL**（数据/append-only/F-02 均属实；2 行过度归因 PASS）。**是否允许集成**：**可以（docs）**，
+但必须先在 `A_NEXT_REVIEW_STATUS_RECONCILIATION.md` **追加 v2 更正 2 行**（保留原行；给出 old→new + 依据），
+或在 Packet v3 引用时显式标注“R4-05/R4-12 无 Reviewer 直接证据、不作为 PASS 依据”。更正后本项可升 PASS。
+
+### 8.2 A-PR0 工具（`chore/a-next-oci-hygiene` @ `16a4187`，9 files / +2244）——**PASS（条件）**
+
+**范围**：仅新增 `docs/A_NEXT_ENV_HARDENING.md` + `scripts/a_next/{_common,oci_guard,rootfs_guard,ci_guard}.py`
++ `tests/a_next_hygiene/**`（**无 `src/`、无冻结件改动**）。
+
+**Reviewer 亲自运行（20:00–20:15Z）**：
+
+```text
+$ pytest tests/a_next_hygiene -q -p no:cacheprovider        -> 38 passed in 3.09s (exit 0)
+
+独立 fake-tree 探针（/tmp 隔离，未写冻结 rootfs）：
+oci_guard:  check-rootfs frozen(path/hash) -> 10；workcopy(内容不同) -> 0；
+            preflight 已存在 evidence -> 11；新 evidence -> 0；run 成功 -> 0；
+            T0/T1 drift（wrapped 命令污染 fake frozen）-> 20 ("DRIFT")；
+            pre-existing drift -> 23；run 以 frozen 为 --rootfs -> 10
+rootfs_guard: OK -> 0；wrong sha -> 31；group/other writable(sha 匹配) -> 30；
+              --require-ro-mount 在可写 tmp -> 32；missing path -> 33
+ci_guard:    protected（真实 review 仓库，仅 docs 变化）-> 0；
+            protected 违规（临时 git repo 改 security/gates.py）-> 33
+真实冻结树（迁移前 19:52:06Z）：rootfs_guard -> OK / sha_matches=true / mount.read_only=false
+```
+
+**判定**：工具拒绝路径与退出码均按文档工作，测试真实（无 skip/弱化）；残余风险自述**如实**：
+`--require-ro-mount` 在现 rw 挂载下 exit 32 是真实限制、hash 是事后证据、单 writer 锁是协作约定、
+env 脱敏仅名称匹配、“已知 SHA 的内容副本也会被识别为 frozen（预期）”。**不构成安全边界**，与文档一致。
+
+**前置条件（集成前）**：
+1. Lead 确认 canonical 环境根后，在真实冻结树上复跑 `rootfs_guard`/`oci_guard check-rootfs` 并把输出绑定 UTC/SHA
+   （当前主 artifacts 为空，见 §8.0）；**不得**以 rw 挂载声称“物理只读已达成”。
+2. 在集成树复跑 `pytest tests/a_next_hygiene`（本批 38 passed 基于 16a4187 工作树）。
+3. 使用守卫的 OCI 批次仍需按文档 T0/T1 执行；守卫仅为工程卫生层，不替代部署侧只读挂载/权限强制。
+
+**裁定：PASS（条件）**。**是否允许集成**：**是**（scripts/tests/docs，均为新增卫生工具；不改 runtime/security 行为）；
+但集成后 OCI/rootfs 结论仍不得写成 OS 强制或“全程无漂移”。
+
+### 8.3 A-PR1/A1 实现（`fix/a-next-auth-record` @ `e6f3aa6`）——**PASS（条件）**
+
+**范围独立核对**：`git diff --name-status fd1d3a6..e6f3aa6` = 4 files：`docs/A_NEXT_AUTH_RECORD_REPORT.md`
+（A）、`src/autoteacher_m0/security/authorization.py`（M，+69/−18）、`tests/integration/a_next_auth/{conftest,test_a1_use_record_integrity}.py`（A）。
+无其它 `src/`/受保护文件改动。
+
+**Reviewer 亲自运行（20:01–20:12Z）**：
+
+```text
+$ pytest tests/integration/a_next_auth -q -p no:cacheprovider
+  -> 39 passed in 80.54s (exit 0)
+$ pytest tests/integration/g4r_auth tests/unit/security/test_authorization.py -q -p no:cacheprovider
+  -> 73 passed in 298.66s (exit 0)   (G4-R R1 旧套件回归 + authorization 单测)
+```
+
+**Reviewer 自建对抗探针（/tmp，独立于 Owner 测试；9 组全部 PASS）**：
+同 epoch 二次消费 `REPLAYED` / 异 epoch `EPOCH_MISMATCH`；**A 的合法 body 写入 B 的 record 文件名 →
+`AUTHORIZATION_USE_RECORD_INVALID` 且不产生新 final**；reader expected-id 不匹配 → INVALID，匹配 → 返回 `(id, epoch)`；
+`consumed_utc` 非法 → INVALID；截断 JSON → INVALID；`nlink==2`（final+崩溃 temp）→ `REPLAYED`（容忍窗口保持）；
+**FIFO → INVALID 且 <5s 不阻塞**；8 线程×5 轮并发恰 1 accepted、其余稳定 REPLAYED；模块路径绑定到本 worktree `src`。
+
+**代码审阅**：校验严格单调收紧（`_IDENTIFIER`、`sha256(id)+".json"` path 绑定、expected-id、`_UTC_TEXT` 三处新增），
+不新增错误码、无 `os.replace`/O_CREAT 直写 final 回退、`O_NONBLOCK` 仅影响特殊节点、私有签名变更仅 2 个内部调用点
++ 测试；`DURABILITY_UNKNOWN`/dir fsync 语义不变。Owner 报告 §6 的 A1 测试/回归计数与 Reviewer 独立结果一致
+（39 passed；回归 73 passed 为本报告口径，Owner 拆分计数不同但无矛盾）。
+
+**前置条件（集成前）**：
+1. 合入顺序：A1 先冻结、A2 rebase（A2 ADR §11 已列）；A1 合入后复跑 `tests/integration/a_next_auth` +
+   `tests/integration/g4r_auth`。
+2. A1 报告 §6.4“提交后 HEAD 复跑”以 Reviewer 本次 `e6f3aa6` 独立结果为准（39 passed）；若后续再次改分支须重新绑定。
+3. A6 Handoff 的 BLK-08/D-14 在 A1 合入后需 append-only 更新（见 §8.4）。
+**裁定：PASS（条件）**。**是否允许集成**：**是**（安全加严、no-key；不改变任何门状态）；条件 1 未完成前不得宣称
+“P2-01 已在 canonical 线关闭”。
+
+### 8.4 A6 文档（`docs/a-next-handoff` @ `13e39a4`，4 docs / +760）——**PASS（条件）**
+
+**独立核对**：
+- 只新增 4 个 docs（HUMAN_HANDOFF / G4H1_RUNBOOK / PROVIDER_CONTRACT / PRICE_USAGE），**零 `src/`/冻结件/状态常量改动**。
+- 状态常量未改写：`LiveGate=BLOCKED`、`G4-H=NOT_AUTHORIZED`、`G5=BLOCKED`、`G6=NOT_RUN`、
+  `M0=DECISION_PENDING`、`E5_PRELIVE_FULL=BLOCKED_PENDING_HUMAN_DEPLOYMENT`（逐文档出现且一致）。
+- **D-01..D-22 = 22 行全部 `UNSIGNED`**；文档声明“Agent 代签/代批=0、全部空白”；签署方式要求人类填 ACCEPT/FIX/BLOCK/DEFER+姓名/UTC/依据。
+- **BLK-01..BLK-18 = 18 项**（`grep -c '| BLK-'`=18）；抽查 BLK-01（route/egress 不一致，`egress.py:31-34` opencode.ai
+  allowlist）、BLK-06（LiveGate 常量）、BLK-07/08（P2-02/P2-01）、BLK-09（DURABILITY_UNKNOWN 无消费方）、
+  BLK-14（dsh target profile）、BLK-17（R-REV6 NOT_RUN）均**有源码/审查依据**，不是空话。
+- X-01..X-08 差异表抽查行号真实：`gates.py` 6 个 reasons（含 `BASELINE_OR_CONFIGURATION_CHANGED`）、
+  `live_controller.py:66-70` 5 项 `EXTERNAL_*` 恒 BLOCKED、`settings.py` 默认 `deepseek-official`、
+  `authorization.py:988-1097` 原子 publish 描述、`egress.py` 第三方 allowlist——与 Reviewer 既有认知一致。
+- Provider/Price 文档明确“**2026-11-19 研究快照、未获批、未真实调用**”，未把研究事实写成 Live 验证；
+  价格/usage 状态如实标 `UNVERIFIED`/`PARTIAL`（不冒充 PASS）。
+
+**发现（须 append-only 更新，不否决）**：
+- `BLK-08`（P2-01 body id 未交叉校验）与 `D-14`（P2-01/P2-02 处置）仍按“P2-01 OPEN”写在 `fd1d3a6` 基线；
+  A1 实现已在独立分支 `e6f3aa6` 修复 P2-01（Reviewer 本批验证）→ **合并后必须 append-only 更新**为
+  “P2-01 已由 A1 e6f3aa6 修复，待合入/复测；P2-02 仍 OPEN”，不得删旧行。
+- `D-02` 引用 Packet v2 身份；A-PR4 将建 Packet v3 时应追加引用新身份（新目录/新 SHA/旧包只读）。
+
+**裁定：PASS（条件）**。**是否允许集成**：**是（docs）**；条件是同步 append-only 更新 BLK-08/D-14（A1 合并后）、
+且保持全部 D 项 `UNSIGNED`、18 BLK 不减项；不得凭本包宣称任何门通过。
+
+### 8.5 本批汇总（Stage-2 batch-1）
+
+| 对象 | 提交 SHA | 裁定 | 是否允许集成 | 前置条件 |
+|---|---|---|---|---|
+| A-PR0 文档（baseline/branch/review-status） | `e1fa0b9` | **PARTIAL** | 可以（docs），需先 v2 更正 | 更正 R4-05/R4-12 过度归因；append-only 保留原行 |
+| A-PR0 工具（OCI/rootfs/CI hygiene） | `16a4187` | **PASS（条件）** | **是** | canonical 环境确认后真实树复跑；集成树 38 tests 复跑；不得宣称 OS 只读 |
+| A-PR1/A1 实现（P2-01） | `e6f3aa6` | **PASS（条件）** | **是** | A1 先冻结→A2 rebase→合并后复跑；A6 BLK-08/D-14 更新 |
+| A6 文档（human handoff/runbook/provider/price） | `13e39a4` | **PASS（条件）** | **是（docs）** | 合并后 append-only 更新 BLK-08/D-14；D 全 UNSIGNED、BLK 不减项 |
+| A0-02 终态 | — | **PARTIAL**（v2 更正后 PASS） | 同 A-PR0 文档 | 同上 |
+| A0-03 终态 | — | **PASS（工具层）/ NOT_RUN（真实部署防写）** | 工具同 A-PR0 工具 | 真实树复跑 + 人类部署只读；19:53 环境迁移未确认 |
+| 阶段 1 裁定绑定 | A1 设计 `0df36de`；A2 ADR `960724b`；A1 实现 `e6f3aa6` | 维持 | — | A2 实现 SHA 待 Lead 提供后追加 |
+
+**本批未改变任何门状态**：`LiveGate=BLOCKED`、`G4-H=NOT_AUTHORIZED`、`G5=BLOCKED`、`G6=NOT_RUN`、
+`M0=DECISION_PENDING`、`E5_PRELIVE_FULL=BLOCKED_PENDING_HUMAN_DEPLOYMENT`；P2-02 仍 OPEN；B03/E5-P04 仍 UNVERIFIED；
+R-REV6 仍 NOT_RUN。**本报告不构成任何 PASS 授权、部署许可或 M0 GO。**
+
+### 8.6 下一批（等待 Lead）
+
+- 待落定后审：A2 实现（run admission 接线）、A3 registry、A4 R-REV6 L2（独占窗口/双 principal/Fake-only）、
+  A-PR0 文档 v2 更正、Packet v3 全树 mutation（未列文件/sidecar/symlink/hardlink/mode/hash/删除）、65+19 矩阵逐 ID 终态。
+- 环境项：Lead 确认 canonical artifacts 根后，Reviewer 重跑真实冻结树 rootfs_guard/oci_guard 并绑定 SHA/UTC。
+
+---
+
+## 附录 C：阶段 2（第一批）证据命令（绑定 §8）
+
+```text
+A-PR0 docs:  git -C worktrees/a-next-baseline diff --name-status fd1d3a6..e1fa0b9  -> 3 A docs
+             sha256sum 冻结 CSV -> 741d7d55…；REVIEW -> 0599856a…；evidence 43 files -> 8326e4ca…
+             Python 解析 §2 表 -> 65 rows / frozen 29,14,12,4,6 / mismatch 0 / reviewer 25,18,10,2,4,6
+A-PR0 tools: pytest tests/a_next_hygiene -q -> 38 passed in 3.09s
+             /tmp fake-tree probes: oci_guard 10/0/11/0/0/20/23；rootfs_guard 0/31/30/32/33；ci_guard 0/33
+             19:52:06Z real rootfs_guard -> OK sha_matches=true mount.read_only=false
+             19:53:28Z main artifacts/ -> empty（环境迁移；canonical copy at a-next-rrev6 = 25491e45…）
+A1 impl:     pytest tests/integration/a_next_auth -q -> 39 passed in 80.54s
+             pytest tests/integration/g4r_auth tests/unit/security/test_authorization.py -q -> 73 passed in 298.66s
+             Reviewer 自建 /tmp/a1_adversarial_probe.py -> 9 groups PASS（foreign body id / expected / FIFO / nlink2 / 并发…）
+A6 docs:     git -C worktrees/a-next-handoff diff --name-status fd1d3a6..13e39a4 -> 4 A docs
+             grep 状态常量/UNSIGNED/BLK -> 22 D rows UNSIGNED、18 BLK、状态常量一致
+```
