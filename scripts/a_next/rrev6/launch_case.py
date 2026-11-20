@@ -138,9 +138,16 @@ class CaseDriver(g4c_launch.G4CLauncher):
 def start_injection(kind: str, run_id: str, run_dir: Path,
                     evidence: Path) -> tuple[dict, threading.Thread]:
     holder: dict = {"kind": kind, "utc_start": utc_now()}
-    trusted = lib3d.container_name(run_id, "trusted")
-    candidate = lib3d.container_name(run_id, "candidate-t1")
     marker = run_dir / "state" / "g4f5-delay-marker.json"
+
+    def running_container(role: str) -> str | None:
+        proc = subprocess.run(["podman", "ps", "--format", "{{.Names}}"],
+                              capture_output=True, text=True, timeout=30)
+        for name in proc.stdout.splitlines():
+            name = name.strip()
+            if run_id in name and role in name:
+                return name
+        return None
 
     def wait_marker(timeout: float = 60.0) -> dict | None:
         deadline = time.monotonic() + timeout
@@ -160,9 +167,17 @@ def start_injection(kind: str, run_id: str, run_dir: Path,
             holder["error"] = "delay_marker_not_observed"
             return
         if kind == "candidate-crash":
-            argv = ["podman", "kill", "-s", "KILL", candidate]
+            target = running_container("candidate")
+            if target is None:
+                holder["error"] = "candidate_container_not_running"
+                return
+            argv = ["podman", "kill", "-s", "KILL", target]
         elif kind == "trusted-kill":
-            argv = ["podman", "kill", "-s", "KILL", trusted]
+            target = running_container("trusted")
+            if target is None:
+                holder["error"] = "trusted_container_not_running"
+                return
+            argv = ["podman", "kill", "-s", "KILL", target]
         elif kind == "broker-kill":
             code = (
                 "import os,signal\n"
@@ -174,7 +189,11 @@ def start_injection(kind: str, run_id: str, run_dir: Path,
                 "    if b'autoteacher_m0.accounting.broker' in cmd and int(name)!=os.getpid():\n"
                 "        os.kill(int(name), signal.SIGKILL); killed.append(int(name))\n"
                 "print('A_NEXT_BROKER_KILLED '+str(killed))\n")
-            argv = ["podman", "exec", trusted, "/opt/python/bin/python3.11",
+            target = running_container("trusted")
+            if target is None:
+                holder["error"] = "trusted_container_not_running"
+                return
+            argv = ["podman", "exec", target, "/opt/python/bin/python3.11",
                     "-B", "-c", code]
         else:  # fake-crash: kill the trusted Fake subprocess only
             code = (
@@ -187,7 +206,11 @@ def start_injection(kind: str, run_id: str, run_dir: Path,
                 "    if b'fake_provider.py' in cmd and int(name)!=os.getpid():\n"
                 "        os.kill(int(name), signal.SIGKILL); killed.append(int(name))\n"
                 "print('A_NEXT_FAKE_KILLED '+str(killed))\n")
-            argv = ["podman", "exec", trusted, "/opt/python/bin/python3.11",
+            target = running_container("trusted")
+            if target is None:
+                holder["error"] = "trusted_container_not_running"
+                return
+            argv = ["podman", "exec", target, "/opt/python/bin/python3.11",
                     "-B", "-c", code]
         holder["command"] = argv
         try:
