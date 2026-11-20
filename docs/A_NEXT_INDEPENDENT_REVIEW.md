@@ -1521,3 +1521,116 @@ A-NEXT suites: 223 passed, 1 skipped；G4 suites: 276 passed, 1 skipped
 OCI junit: 1287/97/54/31；meta deselect 44 entries/69 cases；151 F/E all environment-attributable
 P2-A0-1 hashes: e1fa0b9 5ebbe39c… / 94c81a1 597811ff… / v2 540f216b… / reconciliation-v1 81ecae3c… / v3 a9607137…
 ```
+
+
+---
+
+## 17. 终审 batch-5：新冻结树 `e1b48ee` + Packet v3 最终独立终审 — 2026-11-20T21:30Z–21:48Z
+
+### 17.1 新冻结树（Lead 指定）
+
+| 项 | Reviewer 实测 |
+|---|---|
+| 树/分支 | `work/a-next` @ **`e1b48ee33d72205395d5f14e6c28c79e969e6586`**（worktree clean，无后续 commit，未 push） |
+| 相对 bbbcb37 的 delta | **3 files / +105 / −9**：`M scripts/a_next/build_packet_v3.py`（+6/−2）、`M scripts/a_next/verify_packet_v3.py`（+28/−8）、`M tests/a_next_packet/test_packet_v3.py`（+71/−?）；**无 `src/`、产品 `tests/`、`docs/`、`config/` 变更**（与 Lead 声明一致） |
+| 修复内容（独立 code review） | ① `write_packet(..., packet_name=out_dir.name)` 显式传名；② verifier 新增 `PACKET_NAME_MISMATCH`（name == packet_root 目录名 == `review-packet-a-next-v3-<impl_sha>`，拒绝 `.build-`/临时名），build 自校验用 `allow_build_tmp_name`；③ manifest 去除墙钟字段（`created_utc`）保证确定性；④ 新增 name/builder/临时名/重建字节一致回归测试 |
+| 冻结 builder sha | 冻结 tree 中 `scripts/a_next/build_packet_v3.py` sha256 = **c5128cba8451e64ac0b98cfceec49a8330be92c7d35cd5fb9d4447b444f13a80** == Packet manifest `identity.builder_sha256` ✓ |
+| Host（最终冻结树） | Reviewer 亲跑 `pytest tests -q`：**1649 total = 1624 passed / 7 failed / 18 skipped（701.81s，exit 1）**；7 failures 与 bbbcb37 完全同 nodeid（6 ENV + 1 EXISTING，0 REAL_REGRESSION）；增量 +5 = 新 packet tests（42 passed）；A-NEXT/G4 套件与 packet tests 42 passed |
+
+### 17.2 Packet v3 最终身份（Reviewer 复算）
+
+Packet root：`worktrees/a-next/artifacts/review-packet-a-next-v3-e1b48ee33d72205395d5f14e6c28c79e969e6586`
+
+```text
+manifest.json    47ff93efa0b7e56f8d3a6ddb6a3c5b4e5162ecd1bfbed253b5d8d55f2a518d74  == Lead
+hashes.sha256    799d8db6b27ae713adc2d5c8eab2db0a89359c0169e1e44d95f3e1a9c1796330  == Lead
+README.md        5843ed24dc8801b32c4fcbc9a5d9791a0723464ac38bb0db9cd489a1545ce30c  (Reviewer 计算)
+content_sha256   1ba03b4fff58b8b7e89b7241934ec9d6f530927ea0510c088ade350d78cb9883  == Lead
+payload_tree     20b6356220b9b759c65fb994b81c5781d015b82eff12aca34d431245a7263d50  == Lead（content-lines 口径）
+payload tar canon a8fb79fe75b3519bfded204e1ed00924e7948b2edc1c6b1cc96297ce0d3610bb  == Lead（tar -C <packet> payload 口径）
+files            373 regular / 0 symlink / 0 hardlink（payload 370 + README/manifest/hashes）
+T0/T1            rootfs 25491e45…（相等）；deps 实际重算 e07729d7…；Stage manifest b3fd4cbc…（存在）
+packet.name      review-packet-a-next-v3-e1b48ee33d72205395d5f14e6c28c79e969e6586 == 目录名 == prefix+impl_sha
+status           CANDIDATE_PENDING_LEAD_FREEZE（未自称 frozen）；no_key: real_model=0/external=0/keys=0/LiveGate=BLOCKED
+incident         v1 LOST_ORIGINAL_BYTES_UNVERIFIABLE；v2 HISTORICAL_REFERENCE_ONLY/unmodified；claims global_no_drift=false/evidence_completeness=false
+```
+
+### 17.3 Reviewer 独立验证（自建 verifier，未 import packet tooling）
+
+`/tmp/reviewer_verify_packet_v3_v2.py` 独立实现：严格遍历（仅普通文件/0444/nlink==1/拒绝 symlink/sidecar/越界路径）、hashes 372 条目完整性与自排除、manifest schema/identity/content/tree/counts/file_modes/payload_files/stage_manifest、packet.name/目录名/impl 身份、frozen T0/T1/deps/runtime/stage、incident/v1 LOST/v2 historical/claims、no_key/LiveGate/status、确定性（无墙钟字段）、README 一致性/禁止性声明、repo 内 builder sha 与冻结文件一致、rootfs/deps 实际 canonical 重算、payload tar canonical 复算。
+
+**结果：`PASS`**（所有上述检查通过；`builder_actual=c5128cba…`、`rootfs_actual=25491e45…`、`deps_actual=e07729d7…`、`payload_tar_canonical=a8fb79fe…`）。
+
+### 17.4 独立复现（冻结 builder 重建对比）——**逐字节一致**
+
+```text
+cd worktrees/a-next（e1b48ee 冻结树）
+python scripts/a_next/build_packet_v3.py --staging-dir artifacts/a_next/integration/packet-staging   --impl-sha e1b48ee… --repo . --out-dir /tmp/repro-packet/review-packet-a-next-v3-e1b48ee…   --frozen-rootfs "/root/Autonomous Teacher/artifacts/security/rootfs"   --expected-rootfs-sha 25491e45… --deps-sha e07729d7…   --stage-manifest-sha b3fd4cbc… --incident-source-tar /root/a-next-artifacts-restored-20261121.tar
+-> EXIT 0（builder 自校验 PASS）
+
+manifest.json published == rebuilt：47ff93ef…（byte-identical）
+hashes.sha256 published == rebuilt：799d8db6…（byte-identical）
+README.md      published == rebuilt：5843ed24…（byte-identical）
+payload tar    published == rebuilt：a8fb79fe…；373 files / 0 symlink
+rebuilt packet 用 Reviewer verifier 复验：PASS
+```
+
+⇒ **Packet 可从冻结 commit 的 builder + 同一 staging/frozen 参数确定性复现**；修复了旧 bbcb37 包的 builder provenance/临时目录名/非确定性缺陷（旧包已标 SUPERSEDED/INVALID，保留于 `INVALID_PACKET_*` 不计证据）。
+
+### 17.5 全树 mutation（Reviewer 独立注入）
+
+基础 mutation（14 类）全部被拒绝：未列文件、sidecar、symlink、hardlink、mode 0644、内容改、删除文件、README 改、manifest 状态改、packet.name 改、builder_sha 改、注入 created_utc、false NO_DRIFT、临时目录名包。
+
+**语义重签名 mutation（改文件后同步刷新 hashes，模拟可写攻击者）6/6 全部被拒绝**：
+`packet.name` 篡改→`packet.name != dir name`；`builder_sha256` 篡改→manifest identity 失败；注入 `created_utc`→nondeterministic field；false `global_no_drift`→claims 拒绝；`impl_sha` 篡改→拒绝；README 禁止性声明篡改→拒绝。
+⇒ 不依赖哈希清单的“语义层”检查同样有效；**无 mutation 未被检出**。
+
+### 17.6 范围、exclusions 与披露审核
+
+- **Payload 完整性**：完整包含 `src/`、`tests/`、`scripts/`、`config/`（tracked 文件 0 缺失）、全部 `docs/A_NEXT_*`、G4-R 冻结矩阵 CSV（`741d7d55…`）、`REVIEW_G4R_INDEPENDENT.md`（`0599856a…`）、AGENTS.md、精选集成/Reviewer/Owner L2 证据。
+- **Exclusions 合理性**：按 `docs/A_NEXT_PACKET_V3_DISCLOSURES.md` §5——不含旧 191 个历史 docs/旧矩阵、`fixtures/`/`plugins/`/`spikes/`、dot/cfg 元文件、v1/v2 Packet 原字节、rootfs/deps/runtime/Stage 全树（以 canonical SHA + stage manifest 代替）、失效尝试证据；**理由充分、无安全相关遗漏**（受保护实现/测试/配置/脚本全在包内）。
+- **INCIDENT_20261121**：README + manifest + disclosures 三处披露；v1 LOST/v2 historical/claims false 全在；**P2-ENV-1**（早期 frozen-symlink 尝试）在 disclosures §3/Runbook §16.4/meta invalidated 中披露；T0/T1 与恢复 provenance 一致。
+- **禁止性表述**：README/manifest 明确禁止“全程 NO_DRIFT/证据完整”；Reviewer 未发现任何“E5-Full/G4-H1/G5/G6/M0 GO/Live safe”类越界声明。
+
+### 17.7 最终裁定（限 no-key）
+
+> **最终裁定：`PASS`（限 no-key 工程与证据范围）。**
+
+**依据**：A1/A2 实现与测试独立复跑通过；A-PR0 v3/P2-A0-1 闭环；A3 Registry 诚实 UNVERIFIED + 攻击矩阵；A4/R-REV6 Reviewer 独立 OCI L2 PASS（14/14、T0=T1、digest 11/9）；A6 文档/人类交接与 append-only 更新；集成树 69 files、冻结件零改、无未审受保护变更；Host 1649 tests 6 ENV+1 EXISTING、0 REAL_REGRESSION；Packet v3 身份/全树/mutation/T0-T1/incident/exclusions 全通过，且**可由冻结 builder 逐字节复现**。
+
+**P0/P1**：**0**。
+
+**P2（残余/非阻断，均已披露；需人类或后续工作项）**：
+1. **A-NEXT 测试 OCI 可移植性 `NOT_VERIFIED`**：OCI filtered 1287/97F/54E/31S，151 F/E 全环境归因（缺 host git/tar、uid 65534 owner、env 断言衍生），无产品失败；未来 OCI 覆盖需修测试工具假设。
+2. **A2 生产强制未完成（G4-H1 BLOCKER）**：run admission 仍 opt-in；G4-H1 前 `run_admission_required` 必须成为唯一生产启动路径（人类 Gate）。
+3. **A2-01..03 L2 `NOT_RUN`**（admission 真实 L2 未跑）；**B03/E5-P04 `UNVERIFIED`**（Registry 权威缺失，仅补偿控制）；**A3-01/A3-02 PARTIAL**。
+4. **Human decisions 全部 UNSIGNED**；E5-Full/G4-H1/G5/G6/M0 均 blocked/pending；真实 Key/Broker/Egress/Watchdog 未部署。
+5. **INCIDENT 残余**：v1 Packet 原始字节 LOST；部分 G4-F/G4-R 原始证据仅 PARTIAL 恢复（provenance 已披露）；不得宣称全程 NO_DRIFT/证据完整。
+6. **Packet 状态 `CANDIDATE_PENDING_LEAD_FREEZE`**：需 Lead/维护者执行最终冻结动作（本报告不代签）。
+7. **EXISTING security finding**（LeadB m1_teacher 合成 sentinel 历史 blob，masked）非 A-NEXT 回归，需 B 线处置。
+
+**P3（文档一致性建议，非阻断）**：IMPLEMENTATION_REPORT 顶部摘要仍写 “OCI filtered=NOT_RUN/65 files”、合并表未列 #8.2；矩阵 §5 行级 TBD/NOT_RUN 与 §10 终态并存需明示“以 §10/§6 为准”；merge 计数建议精确为“8 branch tips + 2 addendum = 10 merges”（与 Lead“9 分支”口径差异为措辞）。建议由 Integrator 在下一次 append-only 文档修订中澄清；不影响 Packet v3 身份/证据。
+
+**门状态（不变）**：`LiveGate=BLOCKED`、`G4-H=NOT_AUTHORIZED`、`G5=BLOCKED`、`G6=NOT_RUN`、`M0=DECISION_PENDING`、`E5_PRELIVE_FULL=BLOCKED_PENDING_HUMAN_DEPLOYMENT`；`B03/E5-P04=UNVERIFIED`；`A2-01..03=NOT_RUN`。**本 PASS 不是 E5-Full/G4-H1/G5/G6/M0/Live 授权。**
+
+### 17.8 结论与交接
+
+- 旧 Packet（bbbcb37）= `SUPERSEDED_BY_NEW_FREEZE`，其候选包/无效包不计最终证据；新 Packet（e1b48ee）通过 Reviewer 独立全树/mutation/复现终审。
+- 证据：Packet root + 上述 SHA；独立 verifier/mutation/rebuild 记录在 `/tmp/reviewer_verify_packet_v3_v2.py`、`/tmp/repro-packet/`（Reviewer 侧，未入库）。
+- 本报告不 push；Reviewer 建议 Lead 在 Packet 冻结动作后，将本 PASS 作为**no-key 工程门**依据，按 D-xx 人类决策清单继续。
+
+---
+
+## 附录 K：batch-5 最终终审命令/输出
+
+```text
+git -C worktrees/a-next rev-parse HEAD -> e1b48ee33d72205395d5f14e6c28c79e969e6586（clean）
+git diff bbbcb37..e1b48ee -> 3 files +105/−9（scripts/a_next/{build,verify}_packet_v3.py + tests/a_next_packet）
+sha256sum scripts/a_next/build_packet_v3.py -> c5128cba… == manifest.identity.builder_sha256
+pytest tests -q -> 7 failed, 1624 passed, 18 skipped (701.81s；1649 total；与 bbbcb37 同 7）
+Reviewer verifier: PASS（manifest 47ff93ef… / hashes 799d8db6… / content 1ba03b4f… / tree 20b63562… /
+  payload tar a8fb79fe… / T0=T1 25491e45… / deps e07729d7… / builder c5128cba… / name==dir）
+独立重建（冻结 builder，同 staging/frozen 参数）：manifest/hashes/README 逐字节相同；payload tar 相同
+基础 mutation 14/14 检出；语义重签名 mutation 6/6 检出；temp-name 包拒绝
+pytest tests/a_next_packet -q -> 42 passed
+```
