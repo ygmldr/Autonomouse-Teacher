@@ -87,7 +87,8 @@ SCORER_ID_DEFAULT = "m1a.deterministic.scorer.v0"
 _MUTATING_STATUSES = frozenset({"CORRECT", "INCORRECT", "PARTIAL"})
 _SCORING_DIR_NAME = "scoring"
 _DEFAULT_TIMEOUT_S = 2.0
-_MAX_TIMEOUT_S = 60.0
+# Aligned with TrustedJudgeSupervisor/worker MAX_CASE_TIMEOUT_S=5.0 (review P2-10).
+_MAX_TIMEOUT_S = 5.0
 _MIN_RESPONSE_CHARS = 8
 _MAX_RUBRIC_GROUPS = 32
 
@@ -265,7 +266,7 @@ class DeterministicScorer:
         max_score = float(item.max_score) if item.max_score > 0.0 else 1.0
         rid = result_id or self._default_result_id(item, response)
         try:
-            spec, spec_digest = self._load_spec(item)
+            spec, _spec_digest = self._load_spec(item)
             status, score, reason = self._score_with_spec(
                 item, spec, response, max_score
             )
@@ -310,7 +311,10 @@ class DeterministicScorer:
             status,
             score,
             reason,
-            [f"item:{item.item_id}", f"spec-sha256:{spec_digest[:16]}"],
+            # review P2-4: no truncated hidden-spec hash in teacher-visible
+            # evidence refs (low-entropy dictionary signal); the item id alone is
+            # the auditable reference.
+            [f"item:{item.item_id}"],
         )
 
     # -- validation --------------------------------------------------------

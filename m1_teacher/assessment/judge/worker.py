@@ -25,7 +25,9 @@ executing the learner code**.  There is no bare-subprocess fallback.
 
 from __future__ import annotations
 
+import os
 import shutil
+import signal
 import tempfile
 from pathlib import Path
 from typing import Any, Protocol, Sequence
@@ -66,9 +68,24 @@ MAX_CASE_TIMEOUT_S = 5.0
 #: kills the whole sandbox process group.
 WORKER_WALL_GRACE_S = 0.5
 
-WORK_DIR_PREFIX = "m1b_judge_worker_"
+#: Per-process prefix so concurrent test/CI processes cannot collide on the
+#: shared host ``/tmp`` (their cleanup assertions only observe their own dirs).
+WORK_DIR_PREFIX = f"m1b_judge_worker_{os.getpid()}_"
 SOLUTION_FILENAME = "solution.py"
 WORKER_RUNNER_FILENAME = "worker_runner.py"
+
+#: Positive exit codes that mean "the sandboxed process died from a resource
+#: signal" rather than a normal runner exit.  They are timeout evidence *only*
+#: when the run consumed ~the whole wall budget (review P1-1); otherwise they
+#: remain infrastructure failures.
+_TIMEOUT_SIGNAL_EXIT_CODES = frozenset(
+    {
+        124,  # common `timeout(1)` convention
+        128 + signal.SIGKILL,
+        128 + signal.SIGXCPU,
+    }
+)
+_TIMEOUT_ELAPSED_RATIO = 0.9
 
 
 class SandboxLike(Protocol):
@@ -171,10 +188,17 @@ class UntrustedExecutionWorker:
                     [WORKER_PYTHON, f"/worker/{WORKER_RUNNER_FILENAME}"],
                     timeout_value + self._timeout_grace_s,
                     stdin_data=request_text.encode("utf-8"),
+                    # P2-3: fixed interpreter env under --clearenv (deterministic
+                    # hash seed, no bytecode writes; interpreter path pinned to
+                    # WORKER_PYTHON).  Version pinning remains documented NOT_ADDRESSED.
+                    extra_env={
+                        "PYTHONHASHSEED": "0",
+                        "PYTHONDONTWRITEBYTECODE": "1",
+                    },
                 )
             except (SandboxUnavailable, SandboxLaunchError, OSError):
                 return infra_observation(request_id)
-            return self._interpret(result, request_id)
+            return self._interpret(result, request_id, timeout_value)
         finally:
             self._cleanup_work_dir(work_dir)
 
@@ -217,23 +241,48 @@ class UntrustedExecutionWorker:
             shutil.rmtree(work_dir, ignore_errors=True)
 
     @staticmethod
-    def _interpret(result: SandboxResult, request_id: str) -> WorkerObservation:
+    def _is_timeout_kill(result: SandboxResult, timeout_s: float) -> bool:
+        """True when a resource kill is consistent with the wall timeout (P1-1).
+
+        A negative exit code is the supervisor's own SIGKILL/SIGXCPU group kill.
+        A *positive* ``128+signal``/``124`` exit can come from the CPU rlimit
+        inside bwrap; only classify it as a student timeout when the run consumed
+        at least ~90% of the wall budget, so early failures stay infrastructure
+        errors.  ``RLIMIT_CPU`` is also raised above the wall budget by the
+        sandbox, keeping the wall timer the primary TLE mechanism.
+        """
+
+        exit_code = result.exit_code
+        if exit_code is None:
+            return False
+        if exit_code < 0:
+            return True
+        if timeout_s <= 0:
+            return False
+        if exit_code not in _TIMEOUT_SIGNAL_EXIT_CODES:
+            return False
+        return result.elapsed_s >= _TIMEOUT_ELAPSED_RATIO * timeout_s
+
+    @classmethod
+    def _interpret(
+        cls, result: SandboxResult, request_id: str, timeout_s: float = 0.0
+    ) -> WorkerObservation:
         """Map a raw sandbox run to a fail-closed untrusted observation."""
 
         if result.timed_out:
             return timeout_observation(request_id)
 
         if not result.stdout:
-            # A killed process (SIGKILL/SIGXCPU, e.g. RLIMIT_CPU exhaustion)
-            # never produced a protocol line; treat it as a student timeout.
-            if result.exit_code is not None and result.exit_code < 0:
+            # A killed process (wall kill, or a resource-signal backstop such as
+            # RLIMIT_CPU) never produced a protocol line.
+            if cls._is_timeout_kill(result, timeout_s):
                 return timeout_observation(request_id)
             return infra_observation(request_id)
 
         try:
             observation = protocol.parse_worker_response(result.stdout)
         except protocol.WorkerProtocolError:
-            if result.exit_code is not None and result.exit_code < 0:
+            if cls._is_timeout_kill(result, timeout_s):
                 return timeout_observation(request_id)
             return infra_observation(request_id)
 

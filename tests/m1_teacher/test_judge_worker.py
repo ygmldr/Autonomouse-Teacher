@@ -22,6 +22,7 @@ from pathlib import Path
 import pytest
 
 from m1_teacher.assessment.judge.protocol import (
+
     PROTOCOL_VERSION,
     REQUEST_FIELDS,
     WORKER_STATUS_COMPLETED,
@@ -32,6 +33,7 @@ from m1_teacher.assessment.judge.protocol import (
     WORKER_STATUS_SYNTAX_ERROR,
     WORKER_STATUS_TIMEOUT,
     WorkerObservation,
+    WorkerProtocolError,
     build_request,
     canonical_json,
     parse_worker_response,
@@ -44,10 +46,13 @@ from m1_teacher.assessment.judge.sandbox import (
     WORKER_PYTHON,
 )
 from m1_teacher.assessment.judge.worker import (
+    WORK_DIR_PREFIX,
     SOLUTION_FILENAME,
     WORKER_RUNNER_FILENAME,
     UntrustedExecutionWorker,
 )
+
+from judge_os_gate import require_os_sandbox
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CASES_PATH = REPO_ROOT / "fixtures" / "m1_teacher" / "judge" / "certification" / "cases.json"
@@ -165,8 +170,7 @@ class _StubSandbox:
 @pytest.fixture(scope="module")
 def real_sandbox() -> BwrapSandbox:
     sandbox = BwrapSandbox()
-    if not sandbox.available():
-        pytest.skip(f"bwrap sandbox unavailable on this host: {sandbox.probe_failure_reason()}")
+    require_os_sandbox(sandbox.available())
     return sandbox
 
 
@@ -201,7 +205,11 @@ def test_worker_request_carries_only_the_single_case_input():
     for forbidden in ("expected", "tests", "hidden", "verdict", "passed", "score", "result_path"):
         assert forbidden not in lowered
     assert run["argv"] == [WORKER_PYTHON, "/worker/worker_runner.py"]
-    assert run["extra_env"] is None
+    # P2-3: only fixed interpreter env under --clearenv; no host environment.
+    assert run["extra_env"] == {
+        "PYTHONHASHSEED": "0",
+        "PYTHONDONTWRITEBYTECODE": "1",
+    }
     # The private work dir must contain only the read-only runner + solution.
     entry_names = {entry["name"] for entry in sandbox.work_dir_entries}
     assert entry_names == {SOLUTION_FILENAME, WORKER_RUNNER_FILENAME}
@@ -248,7 +256,7 @@ def test_worker_api_and_observation_have_no_verdict_surface():
 
 
 def _temp_worker_dirs() -> set:
-    return {entry.name for entry in Path(tempfile.gettempdir()).iterdir() if entry.name.startswith("m1b_judge_worker_")}
+    return {entry.name for entry in Path(tempfile.gettempdir()).iterdir() if entry.name.startswith(WORK_DIR_PREFIX)}
 
 
 def test_unavailable_sandbox_returns_infra_without_executing_code():
@@ -601,5 +609,48 @@ def test_protocol_round_trip_and_strict_parsing():
     assert observation.actual_canonical == "1"
     assert observation.request_id == request_id
     for bad in (b"", b"{", _response_line(request_id) + b"\n" + _response_line(request_id)):
-        with pytest.raises(Exception):
+        with pytest.raises(WorkerProtocolError):
             parse_worker_response(bad)
+
+
+# ---------------------------------------------------------------------------
+# Review P1-1: timeout classification must not treat resource kills as INFRA
+# ---------------------------------------------------------------------------
+def _timeout_sandbox_result(
+    exit_code, elapsed_s, *, timed_out=False, stdout=b"", stderr=b""
+):
+    return SandboxResult(
+        exit_code=exit_code,
+        stdout=stdout,
+        stderr=stderr,
+        timed_out=timed_out,
+        elapsed_s=elapsed_s,
+        stdout_truncated=False,
+        stderr_truncated=False,
+    )
+
+
+def test_timeout_kill_classification_positive_signal_codes():
+    is_timeout = UntrustedExecutionWorker._is_timeout_kill
+    assert is_timeout(_timeout_sandbox_result(137, 1.9), 2.0) is True   # 128+SIGKILL
+    assert is_timeout(_timeout_sandbox_result(152, 1.85), 2.0) is True  # 128+SIGXCPU
+    assert is_timeout(_timeout_sandbox_result(124, 0.46), 0.5) is True  # timeout(1) code
+    assert is_timeout(_timeout_sandbox_result(-9, 0.2), 2.0) is True    # supervisor group kill
+    assert is_timeout(_timeout_sandbox_result(137, 0.2), 2.0) is False  # early failure != TLE
+    assert is_timeout(_timeout_sandbox_result(1, 2.0), 2.0) is False
+    assert is_timeout(_timeout_sandbox_result(None, 2.0), 2.0) is False
+    assert is_timeout(_timeout_sandbox_result(137, 2.0), 0.0) is False
+
+
+def test_interpret_positive_cpu_kill_after_budget_is_timeout():
+    observation = UntrustedExecutionWorker._interpret(
+        _timeout_sandbox_result(137, 2.0), "req", 2.0
+    )
+    assert observation.status == WORKER_STATUS_TIMEOUT
+
+
+def test_interpret_positive_cpu_kill_too_early_is_infra():
+    observation = UntrustedExecutionWorker._interpret(
+        _timeout_sandbox_result(137, 0.3), "req", 2.0
+    )
+    assert observation.status == WORKER_STATUS_INFRA_ERROR

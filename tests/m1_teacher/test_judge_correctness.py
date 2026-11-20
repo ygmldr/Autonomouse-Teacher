@@ -28,6 +28,9 @@ from typing import Any
 import pytest
 
 from m1_teacher.assessment.judge.worker import UntrustedExecutionWorker
+from m1_teacher.assessment.scorer import DeterministicScorer
+from m1_teacher.contracts.types import AssessmentItem
+
 from m1_teacher.assessment.judge.supervisor import (
     STATUS_JUDGE_SANDBOX_UNAVAILABLE,
     STATUS_PASS,
@@ -36,6 +39,8 @@ from m1_teacher.assessment.judge.supervisor import (
     STATUS_WA,
     TrustedJudgeSupervisor,
 )
+
+from judge_os_gate import require_os_sandbox
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 JUDGE_FIXTURES = REPO_ROOT / "fixtures" / "m1_teacher" / "judge"
@@ -59,11 +64,7 @@ NEGATIVES = {negative["negative_id"]: negative for negative in NEGATIVES_DOC["ne
 @pytest.fixture(scope="module")
 def worker() -> UntrustedExecutionWorker:
     candidate = UntrustedExecutionWorker()
-    if not candidate.sandbox_available():
-        pytest.skip(
-            "OS sandbox (bwrap) is unavailable on this host; "
-            "fail-closed blocked policy is covered by test_judge_supervisor.py"
-        )
+    require_os_sandbox(candidate.sandbox_available())
     return candidate
 
 
@@ -222,3 +223,111 @@ def test_trusted_fixture_only_is_required_even_with_real_worker(
     }
     assert verdict.cases_passed == 0
     assert verdict.infra_error is True
+
+
+# ---------------------------------------------------------------------------
+# Review P1-1: default 2.0s must classify wall/CPU timeouts as student TLE,
+# and a slow-but-correct solution must still PASS (not INFRA).
+# ---------------------------------------------------------------------------
+_INFINITE_LOOP = "def target(*_args, **_kwargs):\n    while True:\n        pass\n"
+_SLOW_CORRECT = (
+    "import time\n"
+    "def target(*_args, **_kwargs):\n"
+    "    time.sleep(1.5)\n"
+    "    return 42\n"
+)
+
+
+def _write_default_timeout_fixture(root: Path, *, expected) -> None:
+    scoring = root / "domains" / "cf_binary_search" / "scoring"
+    scoring.mkdir(parents=True, exist_ok=True)
+    spec = {
+        "kind": "PYTHON_FUNCTION",
+        "function_name": "target",
+        "tests": [{"args": [], "expected": expected}],
+        "timeout_s": 2.0,
+    }
+    (scoring / "p1_1.json").write_text(json.dumps(spec), encoding="utf-8")
+
+
+def _default_timeout_item() -> AssessmentItem:
+    return AssessmentItem(
+        item_id="item.m1b.p1_1.default_timeout",
+        domain_id="cf_binary_search",
+        node_ids=["cf.practice.001"],
+        item_type="CODE",
+        difficulty=2,
+        prompt="synthetic P1-1 timeout certification item",
+        function_name="target",
+        scoring_spec_ref="scoring/p1_1.json",
+    )
+
+
+def test_default_timeout_infinite_loop_is_student_tle(worker) -> None:
+    supervisor = TrustedJudgeSupervisor(
+        worker, trusted_fixture_only=True, timeout_s=2.0
+    )
+    verdict = supervisor.evaluate(
+        _INFINITE_LOOP,
+        "target",
+        [{"args": [], "expected": 0}],
+        timeout_s=2.0,
+    )
+    assert verdict.infra_error is False
+    assert verdict.status == STATUS_TLE
+    assert verdict.cases_passed == 0
+
+
+def test_default_timeout_slow_correct_solution_passes(worker) -> None:
+    supervisor = TrustedJudgeSupervisor(
+        worker, trusted_fixture_only=True, timeout_s=2.0
+    )
+    verdict = supervisor.evaluate(
+        _SLOW_CORRECT,
+        "target",
+        [{"args": [], "expected": 42}],
+        timeout_s=2.0,
+    )
+    assert verdict.infra_error is False
+    assert verdict.status == STATUS_PASS
+    assert verdict.cases_passed == verdict.cases_total == 1
+
+
+def test_short_timeout_infinite_loop_is_still_student_tle(worker) -> None:
+    supervisor = TrustedJudgeSupervisor(
+        worker, trusted_fixture_only=True, timeout_s=0.5
+    )
+    verdict = supervisor.evaluate(
+        _INFINITE_LOOP,
+        "target",
+        [{"args": [], "expected": 0}],
+        timeout_s=0.5,
+    )
+    assert verdict.infra_error is False
+    assert verdict.status == STATUS_TLE
+
+
+def test_scorer_default_timeout_infinite_loop_is_tle_not_infra(
+    worker, tmp_path: Path
+) -> None:
+    root = tmp_path / "fixtures"
+    _write_default_timeout_fixture(root, expected=0)
+    scorer = DeterministicScorer(
+        root, trusted_fixture_only=True, judge_worker=worker
+    )
+    result = scorer.score(_default_timeout_item(), "learner.p1_1", _INFINITE_LOOP)
+    assert result.status == "INCORRECT"
+    assert result.failure_reason == "JUDGE_STUDENT_TLE"
+
+
+def test_scorer_default_timeout_slow_correct_solution_passes(
+    worker, tmp_path: Path
+) -> None:
+    root = tmp_path / "fixtures"
+    _write_default_timeout_fixture(root, expected=42)
+    scorer = DeterministicScorer(
+        root, trusted_fixture_only=True, judge_worker=worker
+    )
+    result = scorer.score(_default_timeout_item(), "learner.p1_1", _SLOW_CORRECT)
+    assert result.status == "CORRECT"
+    assert result.failure_reason == ""

@@ -3,7 +3,7 @@
 - 工作树：`/root/m1b/pr1-sandbox`，分支 `b-next/pr1-untrusted-worker`
 - 基线：`4706250`（`work/m1a-mvp`），先 merge `b-next/pr1-judge-fixtures`（`0fd3ed4`，认证语料）
 - 设计依据：`docs/M1_B_THREAT_MODEL_JUDGE.md`（b-cf，§3 协议 / §4 bwrap 规格 / §6 负例矩阵 / §8 泄漏规格）
-- 状态：**IMPLEMENTED + LOCAL/MOCK 证据**。B1-01..B1-06 的最终 PASS 仍须独立 Reviewer 在冻结 SHA 上复跑 + 人类批准；本文件不声称安全验收通过，也不开启对真实用户 CODE 的执行。
+- 状态：**IMPLEMENTED + LOCAL/MOCK 证据**。独立评审（`docs/M1_B_PR1_REVIEW.md`）后已修复 P1-1（默认超时 TLE 误分类）/P1-2（宿主非 root principal 报告）/P1-3（安全 CI 不得跳过）；B1-04 仍为 `PARTIAL`（本机 root 运行 bwrap，`LOCAL_ONLY`），最终 PASS 仍须独立 Reviewer 在冻结 SHA 上复跑 + 人类批准；本文件不声称安全验收通过，也不开启对真实用户 CODE 的执行。
 - 默认策略不变：真实 learner CODE 仍为 `UNTRUSTED_CODE_EXECUTION_BLOCKED`（本 PR 只提供被集成方 b-cf 的 supervisor 调用的 worker 组件；supervisor 集成未在本 PR 内）。
 
 ## 1. 范围与文件
@@ -75,19 +75,21 @@ canonical comparator / verdict                    function_name, args, timeout_m
 
 ### 4.2 canary 自检（每次进程内首次 `available()`）
 
-canary 在真实沙箱内检查并全部通过才返回 `True`：uid/gid=65534、hostname=`m1b-worker`、pid ≥ 2、`/root` 与 `/etc/passwd` 不可见、宿主 sentinel 文件不可读、`socket.if_nameindex()==['lo']`、`/proc/net/dev` 仅 `lo`、`/usr` 只读、`/worker` 只读、`/tmp` 可写。任一失败 → `available()=False`，`run()` 抛 `SandboxUnavailable`；**绝不回退裸子进程**。
+canary 在真实沙箱内检查并全部通过才返回 `True`：uid/gid=65534、hostname=`m1b-worker`、pid ≥ 2、`/root` 与 `/etc/passwd` 不可见、宿主 sentinel 文件不可读、`socket.if_nameindex()==['lo']`、`/proc/net/dev` 仅 `lo`、`/usr` 只读、`/worker` 只读、`/tmp` 可写；并记录 `uid_map` 与沙箱内 `python_version`。任一失败 → `available()=False`，`run()` 抛 `SandboxUnavailable`；**绝不回退裸子进程**。
+
+**P1-2 宿主 principal 报告**：`BwrapSandbox.security_profile()` 返回 `host_euid`、`host_is_root`、`sandbox_uid/gid`、`uid_map`、`mapped_host_uids`、`sandbox_python_version`、`non_root_principal_verified`、`profile`（`LOCAL_ONLY` / `NON_ROOT_PRINCIPAL`）与 `limitation`。本机以 root 运行 bwrap，实测 `uid_map=65534 0 1` → `non_root_principal_verified=False`、`profile=LOCAL_ONLY`。**namespace 内 uid 65534 不证明宿主非 root principal**；B1-04 需要目标部署使用专用非 root 服务账号（或单独评审的 setuid bwrap）并由该 profile 验证，本地不能满足。
 
 ### 4.3 主机侧 rlimits（`preexec_fn`）
 
 | 资源 | 值 |
 | --- | --- |
 | `RLIMIT_AS` | 256 MiB |
-| `RLIMIT_CPU` | 2 s（软/硬） |
+| `RLIMIT_CPU` | **每 run 动态** `max(10, ceil(wall_s)+2)` 秒（软/硬）；wall timer 为主判据，CPU 限额只作防御性 backstop（P1-1） |
 | `RLIMIT_FSIZE` | 1 MiB |
 | `RLIMIT_NOFILE` | 64 |
 | `RLIMIT_NPROC`（宿主侧） | `max(4096, 当前宿主 uid 进程数+1024)` |
 | `RLIMIT_CORE` | 0 |
-| wall clock | `timeout_ms/1000 + 0.5s`，超时 `killpg(SIGKILL)` |
+| wall clock | `timeout_ms/1000 + 0.5s`，超时 `killpg(SIGKILL)`；正 `137/152/124` 仅在 elapsed ≥ 90% timeout 时按学生 TLE 归类（P1-1） |
 
 **NPROC 说明**：实测 `RLIMIT_NPROC=32` 会让 bwrap 自身在宿主 fork 失败（`Creating new namespace failed: Resource temporarily unavailable`，因为该 rlimit 按宿主 uid 进程计数）。因此宿主 preexec 取宽松值；**真正的每沙箱进程上限 32 由 `worker_runner.py` 在 user namespace 内 `setrlimit(RLIMIT_NPROC,32)` 施加**（实测第 31 次 fork 起 `BlockingIOError`）。pidns + 墙钟 + 进程组 kill 是主控制，NPROC 为纵深防御。
 
@@ -228,11 +230,11 @@ $ "/root/Autonomous Teacher/.venv/bin/python" -m pytest tests/m1_teacher -q
 ## 9. 已知限制与残余风险
 
 1. **证据等级**：本文件为 IMPLEMENTED + LOCAL/MOCK；bwrap 隔离依赖宿主内核/userns 配置，目标 CI/生产环境是否允许 bwrap 仍 `NOT_RUN`；不能据此开启真实用户 CODE。
-2. bwrap/内核 0day、侧信道、宿主本身以 root 运行 bwrap 的风险不在防护范围；生产部署需要非 root bwrap 策略或 setuid 方案并单独验收。
+2. **P1-2（LOCAL_ONLY，未满足）** bwrap/内核 0day、侧信道、宿主本身以 root 运行 bwrap 的风险不在防护范围；本机 `uid_map=65534 0 1`（inside→host 0），`security_profile()["non_root_principal_verified"]=False`。生产部署必须使用非 root 服务账号（或单独评审的 setuid 方案）并复跑 B1-04。
 3. `RLIMIT_NPROC` 在不同内核/userns 映射下语义不同：宿主侧必须宽松，真正上限在沙箱内施加；cgroup v2 限额未使用（增强项）。
 4. 每 case 一进程的启动成本实测 ~30–50 ms（112 case ≈ 3.9 s），并发/吞吐上限、目标部署延迟与本机差异未测。
 5. `exit_code_tamper` 类（`os._exit`）在 worker 侧表现为"无有效响应 → INFRA"，与 fixture 声明的 RE 同属 fail-closed；supervisor 映射时需把无响应/非 0 退出统一归入 `JUDGE_INFRA_ERROR`（b-cf 集成）。
-6. `TIMEOUT` 由墙钟 kill 产生；SIGKILL/SIGXCPU 的 exit code 在 worker 侧被归为 TIMEOUT（学生 TLE 语义），与"学生恶意自 kill"不可区分，但不影响"绝不 PASS"。
+6. **P1-1（已修复）** `TIMEOUT` 由墙钟 kill 产生；正 `exit=137(128+SIGKILL)`/`152(128+SIGXCPU)`/`124` 仅在 `elapsed_s ≥ 0.9 × timeout_s` 时归为 TIMEOUT（学生 TLE 语义），过早的资源 kill 仍为 `INFRA_ERROR`；同时 `RLIMIT_CPU` 动态设为 `max(10, ceil(wall)+2)`，确保 wall timer 先触发。回归测试：默认 2.0s 死循环 → `STUDENT_TLE`，~1.5s 慢正确解 → PASS，短 timeout 0.5s 仍 TLE。
 7. learner 若直接写协议 fd，可抢先输出一行；严格解析只会得到 INFRA/WA/RE，不可能 PASS，但可能掩盖 runner 的真实响应（fail-closed 可接受，记录为已知面）。
 8. 协议限值偏离（§5）已由 Lead 批准并注释在代码；若后续 Reviewer 要求回到 4096B，则 large hidden cases 需另行协议（如 supervisor 侧标记 unsupported 或分片），否则 B1-05 的 112/112 不成立。
 9. 认证语料含 hidden expected，属 JUDGE 内部资产；Teacher 可见性隔离由 `test_judge_fixture_integrity.py` 与 supervisor 集成共同保证。
