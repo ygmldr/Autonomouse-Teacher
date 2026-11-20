@@ -27,8 +27,9 @@
 > 本版本裁定：**`PARTIAL_FOR_G4R_NO_KEY_SCOPE`**。原因：
 > 1) R1/R2/R3/R4 的 no-key 修复与 L1-HOST 负例经 Reviewer 自建探针/独立解析复验成立；
 > 2) **P1 环境类发现（见 §1.4）**：冻结 rootfs 工件被并发 OCI 运行（`podman --rootfs` 直接指向
->    `artifacts/security/rootfs`）写入挂载点目录，canonical 由 `25491e45…` 变为 `a6737150…`；
->    在清理并恢复 canonical 之前，最终 Stage/Packet/L2 的 rootfs 绑定不可信；
+>    `artifacts/security/rootfs`）写入挂载点目录，发生**两次污染窗口**（16:52–16:53 与 16:55–16:59），
+>    观测到三个漂移哈希（`0340fb78…` / `a6737150…` / `e1a8fcf9…`），canonical 偏离冻结值
+>    `25491e45…`；在清理并恢复 canonical 之前，最终 Stage/Packet/L2 的 rootfs 绑定不可信；
 > 3) **R-REV5 最终 Packet 未到**、**R-REV6 未跑**，L2-REAL-DSH 全链 UNVERIFIED。
 >
 > 若最终 Packet 在**清理后 canonical 环境**中构建并经 Reviewer 独立遍历/变异注入通过，且 delta 仍
@@ -97,16 +98,20 @@ Reviewer 独立复算（`tar --sort=name --mtime=@0 --owner=0 --group=0 --numeri
 | Stage full tree | `7d32ec1d…f222068` | `7d32ec1d…` | **NO_DRIFT** |
 | **rootfs tree** | **`a6737150…b39b4fa`（污染态）**；漂移窗口内还观测到 `0340fb78…`；16:43:53 首次复算曾 = `25491e45…` | `25491e45…2fe9c0` | **❌ 非 canonical（P1）** |
 
-**根因（Reviewer 定位，可复现）**：Integration 的 OCI 运行直接以冻结 rootfs 作容器根：
-`podman run --rootfs "/root/Autonomous Teacher/artifacts/security/rootfs" … -v …:/evidence --tmpfs /tmp --tmpfs /work`
-（argv 见 `worktrees/g4r-phase2/artifacts/g4r/logs/oci-filtered-final.meta`）。podman 在 `--rootfs`
-目录内创建挂载点目录且未清理：**新增 6 个空目录**（16:55，mode 1755 sticky）：
-`evidence/`、`fixtures/`、`plugin/`、`skill/`、`var/`、`var/tmp/`。同一漂移被 Integration 的 Stage
-重建 fail-closed 检出（`stage-build-new-20261120T165224Z.log`：`rootfs is not canonical before build`，
-base=d33e0aa）；`stage-build-final`（16:54:07）成功时 rootfs 尚为 `25491e45`，16:55 容器启动后被污染。
-**该缺陷属 R5 集成/OCI 流程（rootfs 工件可被 podman 直接写），不是 d33e0aa/src 缺陷**；但它使
-“环境 NO_DRIFT”不成立于审查窗口，并会使此后构建的 Stage/Packet 的 `rootfs_sha256` 绑定不可信。
-Reviewer **不修改冻结工件**；建议处置见 §9 P1 与给 Lead 的报告。
+**根因（Reviewer 定位，可复现；Lead 已复核并升级清理清单）**：Integration 的 OCI 运行直接以冻结
+rootfs 作容器根：`podman run --rootfs "/root/Autonomous Teacher/artifacts/security/rootfs" …`（argv 见
+`worktrees/g4r-phase2/artifacts/g4r/logs/oci-filtered-final.meta`）。podman 在该目录内创建挂载点目录
+且未清理。Lead 复核确认时间线：16:53:34 曾清理恢复 `25491e45…`；**16:54:07 Stage 构建成功时
+rootfs 为 canonical**（`stage-20261120T165407Z`，候选有效）；16:55–16:59 又发生**二次污染**（范围扩大：
+除 `evidence/fixtures/plugin/skill/var/var/tmp` 外，`probe/` 下新增 `lib/node_modules/test/package.json`），
+当前 canonical 观测到 `e1a8fcf9…`。**两次污染窗口：16:52–16:53 与 16:55–16:59；三个漂移哈希：
+`0340fb78…`、`a6737150…`、`e1a8fcf9…`（冻结值 `25491e45…`）**。同一漂移被 Integration 的 Stage 重建
+fail-closed 检出（`stage-build-new-20261120T165224Z.log`：`rootfs is not canonical before build`，base=d33e0aa）。
+**该缺陷属 R5 集成/OCI 流程（rootfs 工件可被 podman `--rootfs` 直接写），不是 d33e0aa/src 缺陷**；
+但它使“环境 NO_DRIFT”不成立于审查窗口，并会使此后构建的 Stage/Packet 的 `rootfs_sha256` 绑定不可信。
+Reviewer **不修改冻结工件**；处置要求（Lead 已发 Integration）：停止容器 → 精确删除两轮污染目录 →
+复算期望恢复 `25491e45…`（不等则 STOP）→ 此后 OCI 改用 rootfs **可写副本**，禁止直接 `--rootfs`
+冻结工件；最终 Packet 必须含 drift/cleanup/独占窗口记录，不得写“全程 NO_DRIFT”。
 
 **加载身份**：6/6 关键模块（`authorization`/`controller`/`request_lifecycle`/`recovery_diagnostics`/
 `dispatch_audit`/`gates`）的 `sha256(实际加载文件)` == `git cat-file blob d33e0aa:<path>`（全部一致）。
@@ -220,8 +225,13 @@ Reviewer **不修改冻结工件**；建议处置见 §9 P1 与给 Lead 的报�
 
 ## 7. R-REV5 最终 Packet（UNVERIFIED，待 Lead 路径）
 
-最终 Packet 将由 F-C 从 `d33e0aa` 构建（含新 Stage/Runtime SHA），文件名 `review-packet-g4r-v2-d33e0aa…`。
-本版本未收到路径 ⇒：
+最终 Packet 将由 F-C 从 `d33e0aa` 构建（含新 Stage/Runtime SHA），文件名 `review-packet-g4r-v2-d33e0aa…`；
+Lead 要求其 rootfs=`25491e45…`（清理后）、Stage=`stage-20261120T165407Z`（base d33e0aa /
+manifest `cc7ccb61…` / tree `933f2c07…` / trusted `f10053d4…`）、含 drift/cleanup 记录、L2 独占窗口串行。
+**Reviewer 自建独立遍历器已就绪并通过自测**：`scripts/g4r_review/r_rev5_packet_verifier.py`
+（自建逻辑，不 import Owner builder/verifier；在 `/tmp` 用 test support 构建的合成包上
+clean=0 issues、8 类 mutation 全部检出；自测日志 `r_rev5_verifier_selftest.log`）。本版本未收到最终
+Packet 路径 ⇒：
 
 - 全树独立遍历（文件/目录/symlink/隐藏/未知/manifest-hashes-payload 一致性）、
   `-wal/-shm`/隐藏/未知文件/ symlink/篡改注入必须 FAIL、旧 v1 Packet 未改写、SQLite 快照只读可读
@@ -247,7 +257,7 @@ Reviewer **不修改冻结工件**；建议处置见 §9 P1 与给 Lead 的报�
 
 | ID | 级别 | 描述 | 影响/建议 |
 |---|---|---|---|
-| P1-01 | **P1** | 冻结 rootfs 工件被并发 OCI 运行污染：`podman run --rootfs artifacts/security/rootfs` 在制品内创建 6 个空挂载点目录（`evidence fixtures plugin skill var var/tmp`）；canonical 由 `25491e45…` 变为 `a6737150…`（窗口内另见 `0340fb78…`）；Integration Stage 重建 16:52 fail-closed 检出 | 环境/证据完整性：清理前构建的 Stage/Packet/L2 的 rootfs 绑定不可信。**建议**：停止并发 OCI；删除空挂载点目录或恢复 canonical rootfs 并复算回 `25491e45…`；最终 Stage/Packet 前后各做 canonical 快照；OCI 改用 COW/复制 staging，禁止 `--rootfs` 直指冻结工件；Packet 报告中登记该事件窗口与恢复证据（不得写“全程 NO_DRIFT”）|
+| P1-01 | **P1** | 冻结 rootfs 工件被并发 OCI 运行污染（`podman --rootfs artifacts/security/rootfs` 直指冻结工件）：**两次污染窗口 16:52–16:53 与 16:55–16:59**；三个漂移哈希 `0340fb78…`/`a6737150…`/`e1a8fcf9…`（冻结值 `25491e45…`）；16:54:07 Stage 构建时仍 canonical；Integration Stage 重建 16:52 fail-closed 检出；Lead 已复核并升级删除清单 | 环境/证据完整性：清理前构建的 Stage/Packet/L2 的 rootfs 绑定不可信。**处置**：停止容器；按 Lead 精确清单删除两轮污染目录并复算恢复 `25491e45…`（不等则 STOP）；最终 Stage/Packet 前后 canonical 快照 + 独占窗口；OCI 改用 rootfs 可写副本/COW，禁止 `--rootfs` 直指冻结工件；Packet 记录 drift/cleanup，不得写“全程 NO_DRIFT”|
 | P2-01 | P2（evidence integrity，低）| `_read_use_record` 校验 schema/epoch 但不校验 body `authorization_id` == 路径 `sha256(id)`；Reviewer 探针实测“schema 合法但属其它授权 id 的记录”判 `AUTHORIZATION_REPLAYED`（保守拒绝，无第二成功）| 无授权放宽；审计上错配记录与真实 replay 不可区分。建议读取时交叉校验 body id，不符→INVALID |
 | P2-02 | P2（scope gap）| production `src/` 内 `consume_execution_authorization()` **无 Controller/launcher 调用方**（仅测试/`scripts/g4` 探针），R1 修复为模块级；dispatch 前链路端到端单次授权强制未接线 | 不得把模块级 PASS 外推 Live 链 PASS；G4-H1 前需接线并 L2 复验 |
 | P2-03 | P2（已修复，待最终确认）| delta 前 `tests/g4r_packet/support.py` 裸 import 与 `g4_f2/support.py` 名称遮蔽（2 collection error）；builder 拒绝 40-hex git commit | delta `d33e0aa` 已修：collection 1420 exit0、builder/verifier identity 三字段、delta ruff 通过；**Reviewer 独立复验通过**（§1.2）→ 可 CLOSED |
@@ -295,8 +305,10 @@ Reviewer **不修改冻结工件**；建议处置见 §9 P1 与给 Lead 的报�
 - `docs/g4r_review_evidence/r_rev4_registry_{observe2,attack}.{log,summary.json,events.jsonl}` — Reviewer 独立执行的 registry probe。
 - `docs/g4r_review_evidence/r_rev7_*.log` — LiveGate/run_live/CLI/env/added-lines 负例。
 - `docs/g4r_review_evidence/r_rev8_{collect_only_final,g4r_targeted_final,packet_f2_final,unit,ruff_*,scanner}.log` — 回归/计数。
-- 探针脚本：`scripts/g4r_review/r_rev2_race_probe.py`（自建）；最终 Packet 独立遍历器将追加到
-  `scripts/g4r_review/`。
+- `docs/g4r_review_evidence/r_rev5_verifier_selftest.log` — 自建 Packet 遍历器在合成包上的自测
+  （clean issues=[]；8 类 mutation 全部检出）。
+- 探针脚本：`scripts/g4r_review/r_rev2_race_probe.py`（自建）、
+  `scripts/g4r_review/r_rev5_packet_verifier.py`（自建独立 Packet 遍历器 + mutation 注入）。
 
 ---
 
