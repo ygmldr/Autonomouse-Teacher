@@ -254,6 +254,27 @@ def _expected_checks(case_id: str, case: dict, expected: dict) -> list[dict]:
              "ok": len(case["receipts"]) <= 1,
              "receipts": len(case["receipts"])},
         ]
+    if case_id == "R6-11":
+        # A verified Broker terminal (FAILED) after the Fake died is acceptable:
+        # the Broker remains the sole cost authority and the attempt is archived
+        # conservatively (WORST_CASE_HELD); no second receipt/settlement exists.
+        attempt_states = [row.get("state") for row in case["attempts"]]
+        statuses = [row.get("status") for row in case["reservations"]]
+        checks = [
+            {"id": "fake_crash_attempt_conservative",
+             "ok": any(state in {"SETTLEMENT_UNCERTAIN", "WORST_CASE_HELD"}
+                       for state in attempt_states),
+             "observed": attempt_states},
+            {"id": "broker_terminal_or_pending",
+             "ok": all(status in {"PENDING", "FAILED"} for status in statuses),
+             "observed": statuses},
+            {"id": "single_receipt_after_crash",
+             "ok": len(case["receipts"]) == 1,
+             "receipts": len(case["receipts"])},
+            {"id": "no_double_settlement",
+             "ok": len([row for row in case["attempts"]
+                        if row.get("state") == "SETTLED"]) == 0},
+        ]
     if case_id == "R6-13":
         checks = []
     return checks

@@ -66,6 +66,7 @@ CASES: list[dict] = [
         {"label": "t2", "scenario": "echo", "prompt": REPLAY_PROMPT}],
      "session": "a-next-r6-04"},
     {"id": "R6-04B", "args": ["--candidate-mode", "hold", "--scenario", "echo",
+                              "--label", "r6-04b",
                               "--steps", "valid,replay", "--max-calls", "8"]},
     {"id": "R6-05", "args": ["--scenario", "echo", "--deadline-ms", "800",
                              "--test-delay-hook", "before_reserve",

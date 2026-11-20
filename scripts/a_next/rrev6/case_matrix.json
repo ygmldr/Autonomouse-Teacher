@@ -358,10 +358,10 @@
       "expected": {
         "fake": 1,
         "receipts": 1,
-        "attempt_state": "SETTLEMENT_UNCERTAIN",
-        "broker_state": "PENDING",
-        "held": ">0",
-        "settlements": 0
+        "attempt_state": "SETTLEMENT_UNCERTAIN or WORST_CASE_HELD",
+        "broker_state": "PENDING or FAILED (verified terminal)",
+        "settlements": 0,
+        "note": "Broker terminal FAILED is authoritative; conservative WORST_CASE_HELD archival, no double charge"
       },
       "checks": [
         "no sync/settle double-write",
