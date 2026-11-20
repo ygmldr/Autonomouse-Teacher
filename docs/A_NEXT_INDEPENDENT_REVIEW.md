@@ -221,7 +221,12 @@ A_NEXT_RUN_ADMISSION_DESIGN.md  (a-impl-fix)    -> NOT PRESENT
 a-next-* 工作树 HEAD 均 = fd1d3a6（未提交设计文档）
 ```
 
-因此本版本**不能**对 A-PR0/A-PR1/A-PR2/A-PR3 给出 PASS/PARTIAL/FAIL 结论——**Owner 设计文档缺失即
+观察到的在制品（**无设计文档、未提交 ⇒ 不构成本阶段可审材料**）：`a-next-oci-hygiene/scripts/a_next/`
+（`rootfs_guard.py`/`oci_guard.py`/`ci_guard.py`/`_common.py`，untracked，mtime 19:41-19:42）与
+`a-next-registry/scripts/a_next/registry/`（`run_matrix.py`/`fake_bridge.py`/`probe_plugin/`，untracked）；
+A-PR0/A-PR2 设计门在这些文档提交前保持 BLOCKED。
+
+因此本版本**不能**对 A-PR0/A-PR2/A-PR3 给出 PASS/PARTIAL/FAIL 结论——**Owner 设计文档缺失即
 设计门未满足**：
 
 | PR | 设计文档 | 本版本裁定 | 是否允许进入实现 |
@@ -287,8 +292,9 @@ Owner 文档出现后 Reviewer 将逐份审阅并给出：**每 PR PASS/PARTIAL/
 
 | 对象 | 位置/提交 | 状态 |
 |---|---|---|
-| A1 设计报告 | `worktrees/a-next-auth-record/docs/A_NEXT_AUTH_RECORD_REPORT.md`（mtime 19:38，**未跟踪草稿**，worktree `fix/a-next-auth-record` @ fd1d3a6 + 2 untracked test files） | **未提交 → 证据仅绑定工作树，不构成可归档 SHA**（见 C1） |
-| A1 设计测试骨架 | `tests/integration/a_next_auth/{conftest,test_a1_use_record_integrity}.py`（untracked） | Reviewer 亲自运行：**24 passed / 15 xfailed / 93.70s**（`xfail(strict=True)` 表示设计契约在基线未实现，符合预期；不是 PASS 结果） |
+| A1 设计报告 | `worktrees/a-next-auth-record/docs/A_NEXT_AUTH_RECORD_REPORT.md`，branch `fix/a-next-auth-record` @ **`0df36de765b510feeadf52c54706d4559f651c1d`**（design commit，parent fd1d3a6；111 行） | **已提交（C1 已满足）**；Reviewer 审阅内容 = 该 commit blob |
+| A1 设计测试骨架 | 同 commit `0df36de`：`tests/integration/a_next_auth/{conftest,test_a1_use_record_integrity}.py`（共 553 行；Reviewer 基线运行 **24 passed / 15 xfailed / 93.70s**，`xfail(strict=True)` 符合“未实现契约”预期） | 已提交；**不是实现通过证据** |
+| A1 实现（进行中） | 同 worktree `git diff --stat`：`src/…/authorization.py` M（+69/-?）、测试文件 M（-11 行，取消 xfail）；**未提交** | Stage-2 在实现 commit 上独立复跑验收（不得以未提交工作树判 PASS） |
 | A2 设计 ADR | `worktrees/a-next-run-admission/docs/A_NEXT_RUN_ADMISSION_DESIGN.md`，branch `feat/a-next-run-admission` @ **`960724b37bab31a017786cff28c0cbf85ee172e9`**（parent fd1d3a6，仅 docs 1 文件） | 已提交，DESIGN_ONLY |
 
 ### 7.2 现网证据独立复核（A2 §1 声明，Reviewer 亲自 grep）
