@@ -1,0 +1,54 @@
+{
+  "artifacts": [],
+  "branch": "b-next/pr5-e2e-eval",
+  "case_id": "X-01-scope-diff",
+  "collector": {
+    "name": "m1b.collect-evidence",
+    "sha256": "84e3f6b3e3768f97ce85d883fa09e6723b3664e23a12d8f4f1edf16bde97f2f8",
+    "version": "m1b.collect-evidence.v0"
+  },
+  "command": "git diff --name-only 3e7afee077845a071cd364e93ab209cac20b2d5f..HEAD",
+  "command_argv": [
+    "git",
+    "diff",
+    "--name-only",
+    "3e7afee077845a071cd364e93ab209cac20b2d5f..HEAD"
+  ],
+  "cwd": "/root/m1b/pr5",
+  "environment": {
+    "PYTHONHASHSEED": null,
+    "TZ": null,
+    "cwd": "/root/m1b/pr5",
+    "machine": "x86_64",
+    "platform": "Linux-6.17.13-2-pve-x86_64-with-glibc2.39",
+    "python_executable": "/root/Autonomous Teacher/.venv/bin/python",
+    "python_implementation": "CPython",
+    "python_version": "3.11.15",
+    "repo_root": "/root/m1b/pr5",
+    "system": "Linux"
+  },
+  "evidence_class": "DETERMINISTIC",
+  "exit_code": 0,
+  "expected_exit": 0,
+  "git_available": true,
+  "git_sha": "9c383e5870ba628c17cd695944878d2b631fd59d",
+  "git_sha_source": "git",
+  "limitation": "P1-2 regeneration: generated against clean worktree HEAD 9c383e5870ba628c17cd695944878d2b631fd59d (tree 333828d38fe8988df6d4a9ef98715b5d0e9f06e3); worktree_clean_at_generation_start=True; supersedes earlier final entries generated against c420d19 with uncommitted evidence; evidence committed in the following commit",
+  "run_id": "X-01-scope-diff-20261120T234837017321Z-c7f167f3",
+  "status": "EXECUTED_PASS",
+  "stderr": {
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "tail": "",
+    "truncated": false
+  },
+  "stdout": {
+    "bytes": 15255,
+    "sha256": "270380466548ba09573694d00187ae8f75fabcd97b3e7c83b234f8f66777d99b",
+    "tail": "rner/history.py\nm1_teacher/learner/model.py\nm1_teacher/learner/repository.py\nm1_teacher/planner/__init__.py\nm1_teacher/planner/planner.py\nm1_teacher/session/__init__.py\nm1_teacher/session/engine.py\nm1_teacher/session/vertical.py\nscripts/m1b/collect_evidence.py\nscripts/m1b/run_safety_ci.sh\ntests/m1_teacher/conftest.py\ntests/m1_teacher/guard_support.py\ntests/m1_teacher/judge_os_gate.py\ntests/m1_teacher/test_assessment_scorer.py\ntests/m1_teacher/test_b4_durability_replay.py\ntests/m1_teacher/test_b4_e2e.py\ntests/m1_teacher/test_b5_e2e.py\ntests/m1_teacher/test_cli_smoke.py\ntests/m1_teacher/test_concurrency.py\ntests/m1_teacher/test_contracts.py\ntests/m1_teacher/test_crash_recovery.py\ntests/m1_teacher/test_curriculum_planner.py\ntests/m1_teacher/test_diagnostic_engine.py\ntests/m1_teacher/test_domain_adapter.py\ntests/m1_teacher/test_e2e_resume_idempotency.py\ntests/m1_teacher/test_e2e_student_ab.py\ntests/m1_teacher/test_evidence_collector.py\ntests/m1_teacher/test_fixtures_cf.py\ntests/m1_teacher/test_freshness_service.py\ntests/m1_teacher/test_hidden_leakage_scan.py\ntests/m1_teacher/test_history.py\ntests/m1_teacher/test_interview_domain.py\ntests/m1_teacher/test_interview_fixtures.py\ntests/m1_teacher/test_interview_judge.py\ntests/m1_teacher/test_judge_ci_gate.py\ntests/m1_teacher/test_judge_correctness.py\ntests/m1_teacher/test_judge_fixture_integrity.py\ntests/m1_teacher/test_judge_negatives.py\ntests/m1_teacher/test_judge_sandbox.py\ntests/m1_teacher/test_judge_supervisor.py\ntests/m1_teacher/test_judge_worker.py\ntests/m1_teacher/test_knowledge_graph.py\ntests/m1_teacher/test_learner_model.py\ntests/m1_teacher/test_planner_policy.py\ntests/m1_teacher/test_repository_sqlite.py\ntests/m1_teacher/test_scope_migration.py\ntests/m1_teacher/test_scoped_idempotency.py\ntests/m1_teacher/test_session_engine.py\ntests/m1_teacher/test_session_transitions.py\ntests/m1_teacher/test_turn_transaction.py\ntests/m1_teacher/test_vertical_policy.py\ntests/m1_teacher/txn_child.py\ntests/m1_teacher/txn_support.py\n",
+    "truncated": false
+  },
+  "timed_out": false,
+  "tree_sha": "333828d38fe8988df6d4a9ef98715b5d0e9f06e3",
+  "utc": "2026-11-20T23:48:37Z"
+}

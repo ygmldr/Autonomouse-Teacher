@@ -27,3 +27,20 @@ used as PASS evidence.
 - 生成与提交 SHA 的绑定在 `docs/M1_B_EVALUATION_REPORT.md` §13 与本文件下方 provenance 块给出：
   生成时工作树必须 `git status --porcelain` 为空（生成过程只修改 `docs/m1b_evidence/**` 证据文件），
   被测量代码与 `git_sha`/`tree_sha` 由 collector 记录；evidence 文件由后续 commit 提交。
+
+### Provenance block (P1-2 regeneration, 2026-11-20 UTC)
+
+- **Generation SHA**: `9c383e5870ba628c17cd695944878d2b631fd59d` (tree `333828d38fe8988df6d4a9ef98715b5d0e9f06e3`).
+- **Cleanliness proof**: at generation start `git status --porcelain` was empty (0 lines); only
+  `docs/m1b_evidence/**` outputs were written during generation; measured code paths
+  (`m1_teacher/`, `tests/m1_teacher/`, `fixtures/`, `scripts/m1b/`) were not modified.
+- **Append-only**: entries 1–27 (earlier snapshots, including the 16 pre-final and 11 earlier
+  final entries generated against `c420d19` with uncommitted evidence) are preserved byte-for-byte;
+  entries 28–38 (11 new final entries) record `git_sha=9c383e5…`, `tree_sha=333828d…`,
+  `git_available=true`, and the limitation text notes the clean generation SHA. The new entries
+  **supersede** the earlier final entries for provenance; nothing was deleted or rewritten.
+- **Prompt artifact manifest**: `m1_teacher/e2e_b5.py` records
+  `implementation_commit=12f6290c43523d5c3930915fe18810adca8609a4` (last behavioral code SHA;
+  the generation commit `9c383e5` only bumps this provenance constant + docs/README).
+- **Committed in**: the evidence commit immediately following generation (final PR5 SHA recorded in
+  `docs/M1_B_EVALUATION_REPORT.md` §13 and reported by Lead).

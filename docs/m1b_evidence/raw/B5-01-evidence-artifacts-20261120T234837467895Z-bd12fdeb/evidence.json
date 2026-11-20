@@ -1,0 +1,55 @@
+{
+  "artifacts": [],
+  "branch": "b-next/pr5-e2e-eval",
+  "case_id": "B5-01-evidence-artifacts",
+  "collector": {
+    "name": "m1b.collect-evidence",
+    "sha256": "84e3f6b3e3768f97ce85d883fa09e6723b3664e23a12d8f4f1edf16bde97f2f8",
+    "version": "m1b.collect-evidence.v0"
+  },
+  "command": "'/root/Autonomous Teacher/.venv/bin/python' -m m1_teacher.e2e_b5 --write-evidence /tmp/b5_p12_check",
+  "command_argv": [
+    "/root/Autonomous Teacher/.venv/bin/python",
+    "-m",
+    "m1_teacher.e2e_b5",
+    "--write-evidence",
+    "/tmp/b5_p12_check"
+  ],
+  "cwd": "/root/m1b/pr5",
+  "environment": {
+    "PYTHONHASHSEED": null,
+    "TZ": null,
+    "cwd": "/root/m1b/pr5",
+    "machine": "x86_64",
+    "platform": "Linux-6.17.13-2-pve-x86_64-with-glibc2.39",
+    "python_executable": "/root/Autonomous Teacher/.venv/bin/python",
+    "python_implementation": "CPython",
+    "python_version": "3.11.15",
+    "repo_root": "/root/m1b/pr5",
+    "system": "Linux"
+  },
+  "evidence_class": "DETERMINISTIC",
+  "exit_code": 0,
+  "expected_exit": 0,
+  "git_available": true,
+  "git_sha": "9c383e5870ba628c17cd695944878d2b631fd59d",
+  "git_sha_source": "git",
+  "limitation": "P1-2 regeneration: generated against clean worktree HEAD 9c383e5870ba628c17cd695944878d2b631fd59d (tree 333828d38fe8988df6d4a9ef98715b5d0e9f06e3); worktree_clean_at_generation_start=True; supersedes earlier final entries generated against c420d19 with uncommitted evidence; evidence committed in the following commit",
+  "run_id": "B5-01-evidence-artifacts-20261120T234837467895Z-bd12fdeb",
+  "status": "EXECUTED_PASS",
+  "stderr": {
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "tail": "",
+    "truncated": false
+  },
+  "stdout": {
+    "bytes": 4691,
+    "sha256": "c555114ab4536a7d84f59ae6993473b82dd271a97a987ce1dc081dc00074da4e",
+    "tail": "al_correctness\"] final_phase=REVIEW\n[interview:jd_change] jd:rec v1->v2 affects_running_sessions=False affects_new_plans=True old_session_unchanged=True\n[cross-domain] learner=b5.cross_domain.learner cf_session=b5.cross.cf.session interview_session=b5.cross.interview.session paused_turn=4 resumed_phase=REVIEW final_cf_phase=REVIEW seq_contiguous=True domains=[\"cf_binary_search\", \"interview_coach\"] session_count=2 verify_rebuild=True\n[freshness] decision_counts={\"KEEP\": 2, \"RECHECK\": 5, \"UPDATE\": 2} blocked_knowledge=5 blocked_jd=3 eligible_updates=2 silent_imports=0 gate_enforced=True\n[freshness:blocked] k-recheck-community-001 RECHECK reason=RECHECK_UNAUTHORITATIVE_SOURCE map=MAP-E09_KNOWLEDGE_CONFLICT_BLOCKED rejected=True events=0\n[freshness:blocked] k-recheck-conflict-001 RECHECK reason=RECHECK_CONFLICT map=MAP-E09_KNOWLEDGE_CONFLICT_BLOCKED rejected=True events=0\n[freshness:blocked] k-recheck-expired-001 RECHECK reason=RECHECK_EXPIRED map=MAP-E08_KNOWLEDGE_RECHECK_BLOCKED rejected=True events=0\n[freshness:blocked] k-recheck-futuredate-001 RECHECK reason=RECHECK_FUTURE_DATED map=MAP-E08_KNOWLEDGE_RECHECK_BLOCKED rejected=True events=0\n[freshness:blocked] k-recheck-older-001 RECHECK reason=RECHECK_OLDER_SOURCE map=MAP-E08_KNOWLEDGE_RECHECK_BLOCKED rejected=True events=0\n[freshness:jd_blocked] jd-rec-expired reason=RECHECK_JD_EXPIRED rejected=True events=0\n[freshness:jd_blocked] jd-rec-not-yet-active reason=RECHECK_JD_NOT_YET_ACTIVE rejected=True events=0\n[freshness:jd_blocked] jd-overlap-conflict reason=RECHECK_JD_CONFLICT rejected=True events=0\n[freshness:eligible] k-update-001 change=UPDATE events=4\n[freshness:eligible] k-update-002 change=UPDATE events=4\n[journal] learners=5 all_verify_rebuild=True one_sqlite_file=True\n[evidence-class] MOCK=synthetic students/interview/JD/knowledge; DETERMINISTIC=state machine/ids/replay/rubric; NOT_VERIFIED=real teaching effect\n[boundary] offline synthetic only, not real teaching effect; no network, no Key, no real resume/JD\n",
+    "truncated": false
+  },
+  "timed_out": false,
+  "tree_sha": "333828d38fe8988df6d4a9ef98715b5d0e9f06e3",
+  "utc": "2026-11-20T23:48:37Z"
+}

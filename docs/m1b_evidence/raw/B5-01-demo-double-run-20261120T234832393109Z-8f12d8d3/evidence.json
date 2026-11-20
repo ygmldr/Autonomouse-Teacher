@@ -1,0 +1,53 @@
+{
+  "artifacts": [],
+  "branch": "b-next/pr5-e2e-eval",
+  "case_id": "B5-01-demo-double-run",
+  "collector": {
+    "name": "m1b.collect-evidence",
+    "sha256": "84e3f6b3e3768f97ce85d883fa09e6723b3664e23a12d8f4f1edf16bde97f2f8",
+    "version": "m1b.collect-evidence.v0"
+  },
+  "command": "'/root/Autonomous Teacher/.venv/bin/python' -c 'import hashlib, subprocess, sys, os; once=lambda a: hashlib.sha256(subprocess.run([sys.executable,*a],capture_output=True,text=True,check=True,cwd=os.getcwd()).stdout.encode()).hexdigest(); a=once(['\"'\"'-m'\"'\"','\"'\"'m1_teacher.e2e_b5'\"'\"']); b=once(['\"'\"'-m'\"'\"','\"'\"'m1_teacher.e2e_b5'\"'\"']); print('\"'\"'e2e_b5_stdout_sha256'\"'\"',a); print('\"'\"'e2e_b5_stdout_sha256_2'\"'\"',b); print('\"'\"'identical'\"'\"',a==b); assert a==b'",
+  "command_argv": [
+    "/root/Autonomous Teacher/.venv/bin/python",
+    "-c",
+    "import hashlib, subprocess, sys, os; once=lambda a: hashlib.sha256(subprocess.run([sys.executable,*a],capture_output=True,text=True,check=True,cwd=os.getcwd()).stdout.encode()).hexdigest(); a=once(['-m','m1_teacher.e2e_b5']); b=once(['-m','m1_teacher.e2e_b5']); print('e2e_b5_stdout_sha256',a); print('e2e_b5_stdout_sha256_2',b); print('identical',a==b); assert a==b"
+  ],
+  "cwd": "/root/m1b/pr5",
+  "environment": {
+    "PYTHONHASHSEED": null,
+    "TZ": null,
+    "cwd": "/root/m1b/pr5",
+    "machine": "x86_64",
+    "platform": "Linux-6.17.13-2-pve-x86_64-with-glibc2.39",
+    "python_executable": "/root/Autonomous Teacher/.venv/bin/python",
+    "python_implementation": "CPython",
+    "python_version": "3.11.15",
+    "repo_root": "/root/m1b/pr5",
+    "system": "Linux"
+  },
+  "evidence_class": "DETERMINISTIC",
+  "exit_code": 0,
+  "expected_exit": 0,
+  "git_available": true,
+  "git_sha": "9c383e5870ba628c17cd695944878d2b631fd59d",
+  "git_sha_source": "git",
+  "limitation": "P1-2 regeneration: generated against clean worktree HEAD 9c383e5870ba628c17cd695944878d2b631fd59d (tree 333828d38fe8988df6d4a9ef98715b5d0e9f06e3); worktree_clean_at_generation_start=True; supersedes earlier final entries generated against c420d19 with uncommitted evidence; evidence committed in the following commit",
+  "run_id": "B5-01-demo-double-run-20261120T234832393109Z-8f12d8d3",
+  "status": "EXECUTED_PASS",
+  "stderr": {
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "tail": "",
+    "truncated": false
+  },
+  "stdout": {
+    "bytes": 189,
+    "sha256": "34899e55814ada08371c66f42f5cb94949fdd9e82fc481704d4ca3b7fe2fb33c",
+    "tail": "e2e_b5_stdout_sha256 4d0e0c851f4ff4d745127932aa62fcfabeca47da2f7d23ae434cae1ab300a2fc\ne2e_b5_stdout_sha256_2 4d0e0c851f4ff4d745127932aa62fcfabeca47da2f7d23ae434cae1ab300a2fc\nidentical True\n",
+    "truncated": false
+  },
+  "timed_out": false,
+  "tree_sha": "333828d38fe8988df6d4a9ef98715b5d0e9f06e3",
+  "utc": "2026-11-20T23:48:32Z"
+}
