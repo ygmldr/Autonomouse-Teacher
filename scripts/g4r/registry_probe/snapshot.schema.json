@@ -1,0 +1,78 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://autonomous-teacher.local/schemas/g4r.registry.probe.v1.schema.json",
+  "title": "G4-R R3 instrumented registry snapshot (L1-INSTRUMENTED-OBSERVATION)",
+  "description": "Test-only observation emitted by the probe plugin loaded into the frozen DSH 0.2.2-rc.2 runtime. Contains ONLY tool names and canonical schema digests plus binding identifiers. It MUST NOT contain prompts, tool-call arguments, user/session text, provider payloads or secrets. This is a self-report from the runtime process, NOT OS attestation; it is only trustworthy when a Trusted Controller binds the run identity (runtime/stage/profile SHA, run id) and treats a missing/duplicate/rolled-back snapshot as DENY.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "kind", "epoch", "pid", "utc"],
+  "properties": {
+    "schema": { "const": "g4r.registry.probe.v1" },
+    "kind": {
+      "enum": ["registry_snapshot", "dispatch_tool_face", "attack_result", "probe_error"]
+    },
+    "epoch": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Monotonic registration epoch, incremented on every tools/change event observed by the probe."
+    },
+    "pid": { "type": "integer", "minimum": 1 },
+    "utc": { "type": "string", "format": "date-time" },
+    "mode": { "enum": ["observe", "enforce"] },
+    "attack": {
+      "enum": ["none", "late_extra_bash", "duplicate_name", "schema_drift"]
+    },
+    "why": { "type": "string", "maxLength": 128 },
+    "definitions": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Complete registered tool names from tools.definitions() at the snapshot point."
+    },
+    "schemas": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/toolDigest" },
+      "description": "Complete model-facing registry contribution: name + canonical schema digest."
+    },
+    "purpose": { "type": ["string", "null"] },
+    "provider": { "type": ["string", "null"] },
+    "model": { "type": ["string", "null"] },
+    "tool_names": { "type": "array", "items": { "type": "string" } },
+    "tool_digests": { "type": "array", "items": { "$ref": "#/$defs/toolDigest" } },
+    "registry_names": { "type": "array", "items": { "type": "string" } },
+    "registry_digests": { "type": "array", "items": { "$ref": "#/$defs/toolDigest" } },
+    "registry_error": { "type": ["string", "null"] },
+    "approved_registry_names": { "type": "array", "items": { "type": "string" } },
+    "face_equals_registry": { "type": "boolean" },
+    "approved_face": { "type": "boolean" },
+    "approved_registry": { "type": "boolean" },
+    "unknown": { "type": "array", "items": { "$ref": "#/$defs/toolDigest" } },
+    "registry_unknown": { "type": "array", "items": { "$ref": "#/$defs/toolDigest" } },
+    "result": { "type": "string" },
+    "tool": { "type": "string" },
+    "version": { "type": "string" },
+    "message": { "type": "string" }
+  },
+  "$defs": {
+    "toolDigest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "sha256"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    }
+  },
+  "x-g4r-provenance": {
+    "runtime_sha256": "1cc41d5a8745a5b9d47c8604e44f23eb8af2d8ca02b2afa0be101d5f71be6ea4",
+    "runtime_version": "0.2.2-rc.2",
+    "sdk_version": "0.2.2rc2",
+    "profile": "sdk-minimal",
+    "frozen_patch": "config/g3d/candidate/bridge.patch.yml",
+    "frozen_patch_sha256": "0cf5d340830856450540a4d74b2ae0d555d1ba40150a6e7942c8d7222dbe7d7b",
+    "approved_tool_schema_source": "config/g4/runtime-policy.json approved_tools[0]",
+    "approved_tool_sha256": "c984bef0ae31771da16a12ef2e7972b289cde6014b7f8ad12349f16c4f77b704",
+    "evidence_level": "L1-INSTRUMENTED-OBSERVATION",
+    "trust_boundary": "runtime-process self-report; SHA is integrity only, not identity/attestation"
+  }
+}
