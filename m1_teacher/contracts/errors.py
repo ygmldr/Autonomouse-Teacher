@@ -19,7 +19,34 @@ __all__ = [
     "NotFoundError",
     "ConflictError",
     "UnsupportedOperationError",
+    "IDEMPOTENCY_CONFLICT",
+    "INVALID_RESULT_ID",
+    "IDEMPOTENCY_UNSUPPORTED",
 ]
+
+# ---------------------------------------------------------------------------
+# B-NEXT (B-PR3) additive error codes for scoped idempotency.
+#
+# These are *codes* (strings passed via ``M1AError(code=...)``), not new
+# exception classes: callers keep catching ``ConflictError`` /
+# ``ValidationError`` / ``UnsupportedOperationError`` exactly as before, and
+# the frozen class-level defaults are unchanged.  Codes are append-only.
+# ---------------------------------------------------------------------------
+
+#: ``ConflictError.code``: the same scoped idempotency key was reused with a
+#: different request/scope, or a result_id already belongs to another scope.
+#: ``details`` only ever contains the *requesting* scope and a stable reason
+#: (never another learner's/session's data).
+IDEMPOTENCY_CONFLICT = "IDEMPOTENCY_CONFLICT"
+
+#: ``ValidationError.code``: a caller-supplied ``result_id`` is not a safe,
+#: well-formed idempotency token (empty, too long, path/control characters).
+INVALID_RESULT_ID = "INVALID_RESULT_ID"
+
+#: ``UnsupportedOperationError.code``: the repository has no scoped-idempotency
+#: extension, so a safe idempotent replay cannot be verified (fail closed
+#: instead of falling back to a global lookup).
+IDEMPOTENCY_UNSUPPORTED = "IDEMPOTENCY_UNSUPPORTED"
 
 
 class M1AError(Exception):
