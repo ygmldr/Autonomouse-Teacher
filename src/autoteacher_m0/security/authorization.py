@@ -20,12 +20,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
+import errno
 import hashlib
 import json
 import os
 from pathlib import Path, PurePosixPath
 import re
 from stat import S_ISDIR, S_ISREG, S_IWGRP, S_IWOTH
+import time
 from typing import Any, Mapping
 
 from autoteacher_m0.contracts import ErrorCode, RuntimeFailure
@@ -39,6 +41,20 @@ MAX_REVOCATION_BYTES = 64 * 1024
 MAX_BUDGET_POLICY_BYTES = 16 * 1024
 MAX_USE_RECORD_BYTES = 4 * 1024
 MAX_AUTHORIZATION_USES = 4096
+# A publisher crash can leave at most one temporary file per interrupted call.
+# Temps are never use records: the capacity count above deliberately ignores
+# them, they have their own bound, and stale ones are reaped so crash residue
+# can neither block nor deny service indefinitely.
+MAX_USE_RECORD_TEMPS = 256
+_USE_RECORD_TEMP_PREFIX = ".use-record-tmp-"
+_USE_RECORD_TEMP_SUFFIX = ".tmp"
+_USE_RECORD_TEMP_TTL_SECONDS = 300
+# A record is published atomically, so an existing record is already complete.
+# The bounded retry only keeps the replay classification stable if a record
+# written by an older (non-atomic) publisher is still settling; a persistently
+# malformed/replaced record still fails closed with USE_RECORD_INVALID.
+_USE_RECORD_READ_ATTEMPTS = 5
+_USE_RECORD_READ_DELAY_SECONDS = 0.01
 # Host uid of the G3-D candidate process (uid_map 0 65534 1). A trusted file
 # owned by this uid, or writable by group/other, is candidate-writable.
 CANDIDATE_HOST_UID = 65534
@@ -784,18 +800,41 @@ class AuthorizationUse:
 
 
 def _read_use_record(path: Path) -> str:
-    if path.is_symlink():
-        raise AuthorizationRejected(("AUTHORIZATION_USE_RECORD_INVALID",))
+    """Read one complete use record, or fail closed with a precise reason.
+
+    Publication is atomic, so an existing record is already complete. The read
+    itself still validates the node: ``O_NOFOLLOW`` rejects a symlink, the size
+    bound rejects partial/oversized documents, ``nlink > 2`` rejects a record
+    that has been hardlinked elsewhere (``nlink == 2`` is tolerated because a
+    crash between link and temp cleanup leaves the final plus its own temp), and
+    a group/world-writable record is never trusted.
+    """
     try:
-        info = path.stat()
+        descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
+    except OSError as error:
+        if error.errno == errno.ELOOP:
+            raise AuthorizationRejected(("AUTHORIZATION_USE_RECORD_INVALID",)) from None
+        raise AuthorizationRejected(("AUTHORIZATION_USE_RECORD_UNREADABLE",)) from None
+    try:
+        info = os.fstat(descriptor)
+        if (not S_ISREG(info.st_mode) or not 0 < info.st_size <= MAX_USE_RECORD_BYTES
+                or info.st_nlink > 2 or info.st_mode & (S_IWGRP | S_IWOTH)):
+            raise AuthorizationRejected(("AUTHORIZATION_USE_RECORD_INVALID",))
+        chunks: list[bytes] = []
+        remaining = MAX_USE_RECORD_BYTES + 1
+        while remaining > 0:
+            chunk = os.read(descriptor, min(remaining, 65536))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            remaining -= len(chunk)
     except OSError:
         raise AuthorizationRejected(("AUTHORIZATION_USE_RECORD_UNREADABLE",)) from None
-    if not S_ISREG(info.st_mode) or not 0 < info.st_size <= MAX_USE_RECORD_BYTES:
+    finally:
+        os.close(descriptor)
+    raw = b"".join(chunks)
+    if len(raw) != info.st_size:
         raise AuthorizationRejected(("AUTHORIZATION_USE_RECORD_INVALID",))
-    try:
-        raw = path.read_bytes()
-    except OSError:
-        raise AuthorizationRejected(("AUTHORIZATION_USE_RECORD_UNREADABLE",)) from None
     try:
         parsed = _parse_json_object(raw, label="authorization use record")
     except ValueError:
@@ -808,9 +847,142 @@ def _read_use_record(path: Path) -> str:
     return epoch
 
 
+def _read_use_record_settled(path: Path) -> str:
+    """Read a record, tolerating a transiently partial legacy publisher.
+
+    Records published by this module are complete before they become visible, so
+    the retry can only matter for a record produced by the old create-then-write
+    publisher that is still settling. It can never weaken a decision: a record
+    that stays malformed, symlinked or replaced still fails closed with
+    ``AUTHORIZATION_USE_RECORD_INVALID``.
+    """
+    attempts = max(1, _USE_RECORD_READ_ATTEMPTS)
+    for attempt in range(attempts):
+        try:
+            return _read_use_record(path)
+        except AuthorizationRejected as error:
+            if (attempt + 1 >= attempts
+                    or error.reasons != ("AUTHORIZATION_USE_RECORD_INVALID",)
+                    or path.is_symlink()):
+                raise
+            time.sleep(_USE_RECORD_READ_DELAY_SECONDS)
+    raise AuthorizationRejected(("AUTHORIZATION_USE_RECORD_INVALID",))  # pragma: no cover
+
+
 def _replay_reason(previous_epoch: str, run_epoch: str) -> str:
     return ("AUTHORIZATION_EPOCH_MISMATCH" if previous_epoch != run_epoch
             else "AUTHORIZATION_REPLAYED")
+
+
+def _use_record_temp_path(directory: Path) -> Path:
+    """A same-directory temporary name that can never collide with a final record."""
+    return directory / (_USE_RECORD_TEMP_PREFIX + os.urandom(16).hex()
+                        + _USE_RECORD_TEMP_SUFFIX)
+
+
+def _open_use_record_temp(temporary: Path) -> int:
+    """Create the private same-directory temporary record (O_EXCL, no follow)."""
+    return os.open(temporary,
+                   os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW
+                   | os.O_CLOEXEC, 0o600)
+
+
+def _write_use_record_body(descriptor: int, body: bytes) -> None:
+    """Write the complete canonical body; zero progress is an I/O failure."""
+    written = 0
+    while written < len(body):
+        progress = os.write(descriptor, body[written:])
+        if progress <= 0:
+            raise OSError(errno.EIO, "authorization use record write made no progress")
+        written += progress
+
+
+def _link_use_record_no_replace(temporary: Path, record_path: Path) -> bool:
+    """Atomically publish ``record_path`` without ever replacing an existing name.
+
+    ``link(2)`` is the only linearization point: the final name either does not
+    exist or already refers to the complete, fsynced record. It returns
+    ``False`` when a concurrent consumer published first. Unsupported or
+    cross-device links fail closed as ``OSError``: there is deliberately no
+    fallback to direct final-name creation, which is the racy old path.
+    """
+    try:
+        os.link(temporary, record_path, follow_symlinks=False)
+    except FileExistsError:
+        return False
+    except NotImplementedError:
+        raise OSError(errno.ENOTSUP, "atomic no-replace link is unsupported") from None
+    return True
+
+
+def _fsync_directory(directory: Path) -> None:
+    """Persist the directory entry created by the publish; failure is fatal."""
+    descriptor = os.open(directory, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
+                         | os.O_CLOEXEC)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
+def _safe_unlink_temp(temporary: Path) -> None:
+    """Remove only our temporary inode; a failure must not change a decision."""
+    try:
+        os.unlink(temporary)
+    except FileNotFoundError:
+        pass
+    except OSError:
+        # A leftover temp is not a use record and is excluded from the capacity
+        # count; stale temps are reaped later. Cleanup failure must not turn a
+        # successful consumption into a caller-visible I/O failure, and must
+        # never touch the published final.
+        pass
+
+
+def _count_use_log_entries(directory: Path) -> tuple[int, int]:
+    """Count complete use records and temps separately within one bounded scan."""
+    finals = 0
+    temps = 0
+    try:
+        with os.scandir(directory) as entries:
+            for entry in entries:
+                if entry.name.startswith(_USE_RECORD_TEMP_PREFIX):
+                    temps += 1
+                    continue
+                try:
+                    is_regular = entry.is_file(follow_symlinks=False)
+                except OSError:
+                    is_regular = False
+                if is_regular:
+                    finals += 1
+    except OSError:
+        raise AuthorizationRejected(("AUTHORIZATION_USE_LOG_UNREADABLE",)) from None
+    return finals, temps
+
+
+def _reap_stale_use_record_temps(directory: Path) -> None:
+    """Best-effort reap of stale publisher temps; a published final is never touched.
+
+    Only names with the reserved temp prefix are candidates, and only after a
+    grace period, so a concurrent live publisher's fresh temp is left alone.
+    Crash residue therefore cannot accumulate into a denial of service.
+    """
+    deadline = time.time() - _USE_RECORD_TEMP_TTL_SECONDS
+    try:
+        with os.scandir(directory) as entries:
+            for entry in entries:
+                if not entry.name.startswith(_USE_RECORD_TEMP_PREFIX):
+                    continue
+                try:
+                    if not entry.is_file(follow_symlinks=False):
+                        continue
+                    if entry.stat(follow_symlinks=False).st_mtime > deadline:
+                        continue
+                    os.unlink(entry.path)
+                except OSError:
+                    continue
+    except OSError:
+        return
 
 
 def consume_execution_authorization(*, use_log_dir: Path, run_epoch: str,
@@ -820,10 +992,25 @@ def consume_execution_authorization(*, use_log_dir: Path, run_epoch: str,
     """Consume the single use of an authorization at the pre-Reserve checkpoint.
 
     The full offline verification is repeated here (files, pinned keys,
-    revocation, bindings, time window) and only an accepted decision may create
-    one immutable use record. The record is created with ``O_CREAT|O_EXCL`` so
-    two concurrent admissions cannot both consume the same authorization; a
-    later run must present a newly signed authorization id, never reuse this one.
+    revocation, bindings, time window) and only an accepted decision may publish
+    one immutable use record. The body is written completely to a same-directory
+    temporary file, ``fsync``-ed, atomically published with ``os.link`` (which
+    can never replace an existing name), and the directory entry is ``fsync``-ed
+    before success is returned. Therefore:
+
+    * at most one concurrent consumer returns success; every loser observes an
+      already complete record and is classified as REPLAYED / EPOCH_MISMATCH,
+      never as a half-written INVALID record;
+    * a record is either invisible or complete, so a malformed persisted record
+      still fails closed with USE_RECORD_INVALID;
+    * a directory ``fsync`` failure after the publish is a fail-closed
+      ``DURABILITY_UNKNOWN`` rejection: the use is spent, so a later attempt sees
+      the complete final and is classified as replay, and no dispatch proceeds;
+    * a crash at any point leaves either no final (nothing was consumed) or a
+      complete final (one use consumed), never a partial final.
+
+    This function has no Broker/Ledger/Reserve/Claim path at all: it cannot send
+    or account for anything, so the link is the only consumption event.
     """
     moment = now or datetime.now(timezone.utc)
     if moment.tzinfo is None:
@@ -845,15 +1032,21 @@ def consume_execution_authorization(*, use_log_dir: Path, run_epoch: str,
         raise AuthorizationRejected((f"AUTHORIZATION_USE_LOG_INVALID:{error}",)) from None
     record_path = directory / (hashlib.sha256(
         authorization.authorization_id.encode("ascii")).hexdigest() + ".json")
+    # Fast path: an already published final is classified before touching the
+    # log. The authoritative classification for a racing publish is the
+    # EEXIST branch of the atomic link below.
     if record_path.exists() or record_path.is_symlink():
-        raise AuthorizationRejected((_replay_reason(_read_use_record(record_path),
-                                                    run_epoch),))
-    try:
-        entries = sum(1 for _ in directory.iterdir())
-    except OSError:
-        raise AuthorizationRejected(("AUTHORIZATION_USE_LOG_UNREADABLE",)) from None
-    if entries >= MAX_AUTHORIZATION_USES:
+        raise AuthorizationRejected((_replay_reason(
+            _read_use_record_settled(record_path), run_epoch),))
+    _reap_stale_use_record_temps(directory)
+    finals, temps = _count_use_log_entries(directory)
+    if finals >= MAX_AUTHORIZATION_USES:
         raise AuthorizationRejected(("AUTHORIZATION_USE_LOG_FULL",))
+    if temps >= MAX_USE_RECORD_TEMPS:
+        # Extraordinary crash/concurrency residue: fail closed rather than
+        # allowing unbounded temp growth. Stale temps are reaped above, so a
+        # normal crash restarts without this being reachable.
+        raise AuthorizationRejected(("AUTHORIZATION_USE_LOG_WRITE_FAILED",))
     consumed = moment.strftime("%Y-%m-%dT%H:%M:%SZ")
     body = _canonical_payload({
         "schema": _USE_LOG_SCHEMA,
@@ -861,22 +1054,44 @@ def consume_execution_authorization(*, use_log_dir: Path, run_epoch: str,
         "run_epoch": run_epoch,
         "consumed_utc": consumed,
     })
+    temporary = _use_record_temp_path(directory)
     try:
-        descriptor = os.open(record_path,
-                             os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW
-                             | os.O_CLOEXEC, 0o600)
-    except FileExistsError:
-        raise AuthorizationRejected((_replay_reason(_read_use_record(record_path),
-                                                    run_epoch),)) from None
+        descriptor = _open_use_record_temp(temporary)
     except OSError:
         raise AuthorizationRejected(("AUTHORIZATION_USE_LOG_WRITE_FAILED",)) from None
     try:
-        written = 0
-        while written < len(body):
-            written += os.write(descriptor, body[written:])
+        _write_use_record_body(descriptor, body)
         os.fsync(descriptor)
     except OSError:
+        _safe_unlink_temp(temporary)
         raise AuthorizationRejected(("AUTHORIZATION_USE_LOG_WRITE_FAILED",)) from None
     finally:
-        os.close(descriptor)
+        try:
+            os.close(descriptor)
+        except OSError:
+            pass
+    try:
+        linked = _link_use_record_no_replace(temporary, record_path)
+    except OSError:
+        # Unsupported link / cross-device / permission failure: fail closed. The
+        # final name is untouched and there is no direct-write fallback.
+        _safe_unlink_temp(temporary)
+        raise AuthorizationRejected(("AUTHORIZATION_USE_LOG_WRITE_FAILED",)) from None
+    if not linked:
+        # A concurrent consumer won the atomic publish. Its record was complete
+        # before it became visible, so classification is stable; our unborn
+        # temp is removed and can never become a second record.
+        _safe_unlink_temp(temporary)
+        raise AuthorizationRejected((_replay_reason(
+            _read_use_record_settled(record_path), run_epoch),))
+    try:
+        _fsync_directory(directory)
+    except OSError:
+        # The final name is already visible, so the single use is spent: never
+        # remove it and never report success. Durability is unknown, therefore
+        # this is a fail-closed rejection and no dispatch may follow. A later
+        # attempt observes the complete final and is classified as replay.
+        _safe_unlink_temp(temporary)
+        raise AuthorizationRejected(("AUTHORIZATION_USE_LOG_DURABILITY_UNKNOWN",)) from None
+    _safe_unlink_temp(temporary)
     return AuthorizationUse(authorization.authorization_id, run_epoch, consumed, record_path)
