@@ -1,0 +1,1611 @@
+"""Teaching-session state machine for the M1-A offline teacher (B-PR4).
+
+The engine turns the frozen components into a persistent, replayable teaching
+loop:
+
+``DIAGNOSE -> TEACH -> PRACTICE -> ASSESS -> UPDATE -> REVIEW -> ...``
+
+plus the terminal/parked phases ``COMPLETE`` and ``PAUSED``.  All state lives in
+the shared persistent records (``SessionState`` in the session repository,
+``HistoryEvent`` in the append-only learner history, ``LearnerSnapshot`` as the
+materialised evidence state), so a fresh engine instance attached to the same
+repository can continue a paused or interrupted session.
+
+Transition contract (every rule has a test in ``tests/m1_teacher``)
+-------------------------------------------------------------------
+* ``start_session``: validate goal/objective, persist the goal, load the
+  learner snapshot (canonical empty snapshot when none exists), write
+  ``SESSION_STARTED`` (+ ``PLAN_CREATED``) and generate the first teaching
+  action.  A goal whose success criteria are already met by *observed* evidence
+  starts directly in ``COMPLETE`` (significant ``TEACH`` skip).
+* ``DIAGNOSE``: while fewer than ``diagnosis_min_items`` diagnostic items have
+  been attempted and the diagnostic engine returns ``READY``, the next action is
+  a diagnostic item.  When the diagnostic engine reports
+  ``INSUFFICIENT_EVIDENCE`` (or the minimum is reached) the session moves on to
+  the plan.
+* ``TEACH`` / ``REVIEW`` actions are *content* actions (no pending item).  The
+  caller acknowledges them with :meth:`advance_session`; the engine returns to
+  ``REVIEW`` and selects the next step.  Steps already presented for the same
+  snapshot revision are skipped, so a content action cannot loop forever.
+* ``PRACTICE`` / ``ASSESS`` present one item at a time (``pending_item_id``);
+  the learner must answer via :meth:`submit_response`.
+* ``submit_response``: ``RESPONSE_SUBMITTED`` (-> ASSESS) -> independent scorer
+  (-> ASSESSED / ERROR) -> ``UPDATE`` (mastery only from observed
+  ``CORRECT``/``INCORRECT``/``PARTIAL`` via ``LearningHistory``) -> ``REVIEW``
+  (or ``COMPLETE`` when the objective is met).  ``NEEDS_REVIEW`` is recorded but
+  never updates mastery; ``EVAL_ERROR`` is explicitly **not** learner evidence:
+  the snapshot, mastery and error counters stay untouched, an ``ERROR`` event is
+  recorded, and the same item is retried up to ``eval_error_retry_limit`` times
+  before the engine hands the session back to ``REVIEW``.
+* Repeated ``INCORRECT`` outcomes escalate the hint ladder
+  (``HINT_L1`` -> ``HINT_L2`` -> ``HINT_L3``; never a fourth level) before the
+  next practice/reassessment action.
+* ``pause_session`` / ``resume_session`` persist the phase and pending item; a
+  new engine instance resumes with identical state and history, and
+  ``LearningHistory.verify_rebuild`` stays true.
+* Idempotency: a repeated ``submit_response`` with the same ``result_id``
+  returns the first ``AssessmentResult`` and writes no new events / no second
+  mastery update.
+
+The engine is offline and deterministic.  It never reads hidden scoring
+material itself (only the injected scorer does), never imports M0 code and never
+touches the network.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+from dataclasses import dataclass
+from typing import Any, Callable, Mapping, Sequence
+
+from ..assessment.scorer import AssessmentScorer, DeterministicScorer
+from ..contracts.domain import DomainAdapter
+from ..contracts.errors import ConflictError, NotFoundError, ValidationError
+from ..contracts.repository import LearnerRepository, SessionRepository
+from ..contracts.types import (
+    SESSION_PHASE_VALUES,
+    AssessmentItem,
+    AssessmentResult,
+    HistoryEvent,
+    LearnerGoal,
+    LearnerSnapshot,
+    LearningObjective,
+    Reason,
+    SessionState,
+    TeachingAction,
+    now_utc,
+)
+from ..diagnostic.engine import INSUFFICIENT_EVIDENCE, READY, DiagnosticEngine
+from ..knowledge.graph import KnowledgeGraph
+from ..learner.history import (
+    LearningHistory,
+    assessed_event_id,
+    mastery_updated_event_id,
+)
+from ..planner.planner import CurriculumPlanner
+
+__all__ = ["SessionPolicy", "TeachingSessionEngine", "SESSION_POLICY_VERSION"]
+
+SESSION_POLICY_VERSION = "m1a.session.v0"
+
+#: Session phases (subset of the frozen ``SESSION_PHASE_VALUES`` enum).
+PHASE_DIAGNOSE = "DIAGNOSE"
+PHASE_TEACH = "TEACH"
+PHASE_PRACTICE = "PRACTICE"
+PHASE_ASSESS = "ASSESS"
+PHASE_UPDATE = "UPDATE"
+PHASE_REVIEW = "REVIEW"
+PHASE_COMPLETE = "COMPLETE"
+PHASE_PAUSED = "PAUSED"
+
+_MUTATING_STATUSES = frozenset({"CORRECT", "INCORRECT", "PARTIAL"})
+_NON_EVIDENCE_STATUSES = frozenset({"NEEDS_REVIEW", "EVAL_ERROR"})
+_CONTENT_ACTIONS = frozenset({"EXPLAIN", "RETEACH", "HINT", "REVIEW"})
+_ITEM_ACTION_PHASES = {
+    "DIAGNOSE": PHASE_DIAGNOSE,
+    "PRACTICE": PHASE_PRACTICE,
+    "REASSESS": PHASE_ASSESS,
+    "ASSESS": PHASE_ASSESS,
+    "DIAGNOSE_ITEM": PHASE_ASSESS,
+}
+_EVAL_ERROR_EVENT_PREFIX = "evt.evalerror."
+_GOAL_COMPLETED_EVENT_PREFIX = "evt.goalcompleted."
+_KEEP = object()
+
+
+# ---------------------------------------------------------------------------
+# Session policy
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class SessionPolicy:
+    """Deterministic, injectable constants of the teaching-session state machine.
+
+    Every threshold is explicit so the transition rules are reviewable and
+    testable; the defaults are the frozen ``m1a.session.v0`` policy.
+    """
+
+    policy_version: str = SESSION_POLICY_VERSION
+    #: Minimum number of diagnostic items before the plan is allowed to start.
+    diagnosis_min_items: int = 2
+    #: Consecutive INCORRECT outcomes needed per additional hint rung.
+    hint_escalation_threshold: int = 1
+    #: Maximum hint level the session engine will emit (never beyond L3).
+    max_hint_level: int = 3
+    #: EVAL_ERROR retries of the same item before returning to REVIEW.
+    eval_error_retry_limit: int = 2
+    #: Hard cap on session turns handled by ``run_until_goal``/the engine.
+    max_turns: int = 32
+    #: Consecutive INCORRECT threshold that forces a reassessment action
+    #: instead of more teaching/practice (also mirrored by the planner rule).
+    reassess_after_incorrect: int = 2
+    #: Maximum practice actions for one node between two observed assessments;
+    #: beyond it the engine surfaces the assessment step instead of drilling.
+    max_practice_attempts: int = 3
+    #: Upper bound on the number of actions ``run_until_goal`` may generate.
+    max_actions_per_run: int = 64
+
+    def __post_init__(self) -> None:
+        if type(self.policy_version) is not str or not self.policy_version.strip():
+            raise ValidationError("SessionPolicy.policy_version: expected a non-blank string")
+        for name in (
+            "diagnosis_min_items",
+            "hint_escalation_threshold",
+            "eval_error_retry_limit",
+            "max_turns",
+            "reassess_after_incorrect",
+            "max_practice_attempts",
+            "max_actions_per_run",
+        ):
+            value = getattr(self, name)
+            if type(value) is not int or value < 1:
+                raise ValidationError(f"SessionPolicy.{name}: expected an int >= 1")
+        if not 1 <= self.max_hint_level <= 3:
+            raise ValidationError("SessionPolicy.max_hint_level: expected 1..3")
+
+
+# ---------------------------------------------------------------------------
+# Small helpers
+# ---------------------------------------------------------------------------
+
+
+def _require_nonempty_str(value: Any, where: str) -> str:
+    if type(value) is not str or not value.strip():
+        raise ValidationError(f"{where}: expected a non-blank string")
+    return value
+
+
+def _require_int(value: Any, where: str, *, minimum: int = 0) -> int:
+    if type(value) is not int or value < minimum:
+        raise ValidationError(f"{where}: expected an int >= {minimum}")
+    return value
+
+
+def _fingerprint(*parts: Any) -> str:
+    payload = json.dumps(parts, ensure_ascii=False, sort_keys=True, default=str)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
+
+
+def _canonical_response(response: Any) -> str:
+    if isinstance(response, (dict, list)):
+        return json.dumps(response, ensure_ascii=False, sort_keys=True, allow_nan=False)
+    return str(response)
+
+
+def _response_kind(response: Any) -> str:
+    if isinstance(response, str):
+        return "text"
+    if isinstance(response, dict):
+        return "structured"
+    return type(response).__name__
+
+
+# ---------------------------------------------------------------------------
+# Engine
+# ---------------------------------------------------------------------------
+
+
+class TeachingSessionEngine:
+    """Persistent, deterministic teaching-session state machine."""
+
+    def __init__(
+        self,
+        domain: DomainAdapter,
+        graph: KnowledgeGraph,
+        repository: LearnerRepository | SessionRepository,
+        *,
+        history: LearningHistory | None = None,
+        diagnostic: DiagnosticEngine | None = None,
+        planner: CurriculumPlanner | None = None,
+        scorer: AssessmentScorer | None = None,
+        policy: SessionPolicy | None = None,
+    ) -> None:
+        if not isinstance(domain, DomainAdapter):
+            raise ValidationError(
+                "TeachingSessionEngine(domain=...): expected a DomainAdapter implementation"
+            )
+        if not isinstance(graph, KnowledgeGraph):
+            raise ValidationError("TeachingSessionEngine(graph=...): expected a KnowledgeGraph")
+        missing = [
+            name
+            for name in (
+                "get_snapshot",
+                "upsert_snapshot",
+                "append_event",
+                "get_event",
+                "list_events",
+                "get_goal",
+                "upsert_goal",
+                "save_session",
+                "load_session",
+            )
+            if not callable(getattr(repository, name, None))
+        ]
+        if missing:
+            raise ValidationError(
+                "TeachingSessionEngine(repository=...): object is missing required "
+                f"repository method(s): {', '.join(missing)}"
+            )
+        if history is not None and not isinstance(history, LearningHistory):
+            raise ValidationError("TeachingSessionEngine(history=...): expected LearningHistory")
+        if diagnostic is not None and not isinstance(diagnostic, DiagnosticEngine):
+            raise ValidationError("TeachingSessionEngine(diagnostic=...): expected DiagnosticEngine")
+        if planner is not None and not isinstance(planner, CurriculumPlanner):
+            raise ValidationError("TeachingSessionEngine(planner=...): expected CurriculumPlanner")
+        if scorer is not None and not callable(getattr(scorer, "score", None)):
+            raise ValidationError(
+                "TeachingSessionEngine(scorer=...): expected an AssessmentScorer implementation"
+            )
+        if policy is not None and not isinstance(policy, SessionPolicy):
+            raise ValidationError("TeachingSessionEngine(policy=...): expected SessionPolicy")
+        self._domain = domain
+        self._graph = graph
+        self._repository = repository
+        self._history = history if history is not None else LearningHistory(repository)
+        self._diagnostic = diagnostic if diagnostic is not None else DiagnosticEngine(domain, graph)
+        self._planner = planner if planner is not None else CurriculumPlanner(domain, graph)
+        self._scorer: AssessmentScorer = scorer if scorer is not None else DeterministicScorer()
+        self._policy = policy if policy is not None else SessionPolicy()
+        self._items_by_id = {item.item_id: item for item in domain.assessment_items()}
+        self._objectives_by_id = {
+            objective.objective_id: objective for objective in domain.objectives()
+        }
+        self._nodes_by_id = {node.node_id: node for node in domain.knowledge_nodes()}
+        self._practice_items_by_node: dict[str, list[str]] = {}
+        for node_id in self._nodes_by_id:
+            raw = domain.teaching_content(node_id, "PRACTICE")
+            try:
+                parsed = json.loads(raw)
+            except (TypeError, json.JSONDecodeError) as exc:  # pragma: no cover - adapter validates
+                raise ValidationError(
+                    f"TeachingSessionEngine: PRACTICE content for node {node_id!r} is not JSON"
+                ) from exc
+            if type(parsed) is not list or not all(
+                type(entry) is str and entry in self._items_by_id for entry in parsed
+            ):
+                raise ValidationError(
+                    f"TeachingSessionEngine: PRACTICE content for node {node_id!r} is invalid"
+                )
+            self._practice_items_by_node[node_id] = list(parsed)
+
+    # -- properties --------------------------------------------------------
+    @property
+    def domain(self) -> DomainAdapter:
+        return self._domain
+
+    @property
+    def graph(self) -> KnowledgeGraph:
+        return self._graph
+
+    @property
+    def history(self) -> LearningHistory:
+        return self._history
+
+    @property
+    def scorer(self) -> AssessmentScorer:
+        return self._scorer
+
+    @property
+    def policy(self) -> SessionPolicy:
+        return self._policy
+
+    @property
+    def repository(self) -> LearnerRepository | SessionRepository:
+        return self._repository
+
+    # -- session lifecycle -------------------------------------------------
+    def start_session(
+        self,
+        learner_id: str,
+        goal: LearnerGoal,
+        objective: LearningObjective,
+        *,
+        session_id: str | None = None,
+    ) -> SessionState:
+        """Create (or idempotently return) the teaching session and first action."""
+
+        learner_id = _require_nonempty_str(
+            learner_id, "TeachingSessionEngine.start_session(learner_id)"
+        )
+        if not isinstance(goal, LearnerGoal):
+            raise ValidationError("start_session(goal=...): expected a LearnerGoal")
+        if not isinstance(objective, LearningObjective):
+            raise ValidationError("start_session(objective=...): expected a LearningObjective")
+        if goal.learner_id != learner_id:
+            raise ValidationError(
+                "start_session(): goal.learner_id "
+                f"{goal.learner_id!r} does not match learner {learner_id!r}"
+            )
+        if goal.objective_id != objective.objective_id:
+            raise ValidationError(
+                "start_session(): goal.objective_id "
+                f"{goal.objective_id!r} does not match objective {objective.objective_id!r}"
+            )
+        if objective.domain_id != self._domain.domain_id:
+            raise ValidationError(
+                "start_session(): objective.domain_id "
+                f"{objective.domain_id!r} does not match domain {self._domain.domain_id!r}"
+            )
+        self._graph.validate_objective(objective)
+        if session_id is None:
+            session_id = f"session:{learner_id}:{goal.goal_id}"
+        else:
+            session_id = _require_nonempty_str(
+                session_id, "TeachingSessionEngine.start_session(session_id)"
+            )
+        existing = self._repository.load_session(session_id)
+        if existing is not None:
+            if (
+                existing.learner_id != learner_id
+                or existing.goal_id != goal.goal_id
+                or existing.objective_id != objective.objective_id
+            ):
+                raise ConflictError(
+                    f"start_session(): session {session_id!r} already exists for a different "
+                    "learner/goal/objective"
+                )
+            return existing
+
+        self._repository.upsert_goal(goal)
+        snapshot = self._current_snapshot(learner_id)
+        complete, completion_reason = self._planner.check_goal_completion(objective, snapshot)
+        phase = PHASE_COMPLETE if complete else PHASE_DIAGNOSE
+        state = SessionState(
+            session_id=session_id,
+            learner_id=learner_id,
+            goal_id=goal.goal_id,
+            objective_id=objective.objective_id,
+            phase=phase,
+            turn_index=0,
+            pending_item_id=None,
+        )
+        self._repository.save_session(state)
+        self._append_event(
+            state,
+            "SESSION_STARTED",
+            {
+                "learner_id": learner_id,
+                "goal_id": goal.goal_id,
+                "objective_id": objective.objective_id,
+                "phase": phase,
+                "snapshot_revision": snapshot.revision,
+                "session_policy_version": self._policy.policy_version,
+            },
+        )
+        plan = self._planner.plan(goal, objective, snapshot, history=self._events(learner_id))
+        self._append_event(
+            state,
+            "PLAN_CREATED",
+            {
+                "plan_id": plan.plan_id,
+                "objective_id": plan.objective_id,
+                "step_count": len(plan.steps),
+                "policy_version": plan.policy_version,
+            },
+        )
+        if complete:
+            self._record_goal_completed(state, objective, completion_reason)
+            return self._load_session(session_id)
+        new_state, _action = self._generate_and_persist(state)
+        return new_state
+
+    def current_action(self, session_id: str) -> TeachingAction:
+        """Return the action for the current turn (idempotent per turn)."""
+
+        state = self._load_session(session_id)
+        if state.phase == PHASE_PAUSED:
+            raise ConflictError(
+                f"current_action({session_id!r}): session is PAUSED; resume it first"
+            )
+        if state.phase == PHASE_COMPLETE:
+            return self._complete_action(state)
+        existing = self._action_for_current_turn(state)
+        if existing is not None:
+            return existing
+        _new_state, action = self._generate_and_persist(state)
+        return action
+
+    def advance_session(self, session_id: str) -> SessionState:
+        """Acknowledge a content action (TEACH/HINT/REVIEW) and advance one turn."""
+
+        state = self._load_session(session_id)
+        if state.phase == PHASE_PAUSED:
+            raise ConflictError(f"advance_session({session_id!r}): session is PAUSED")
+        if state.phase == PHASE_COMPLETE:
+            raise ConflictError(f"advance_session({session_id!r}): session is COMPLETE")
+        if state.pending_item_id is not None:
+            raise ConflictError(
+                f"advance_session({session_id!r}): pending item "
+                f"{state.pending_item_id!r} must be answered with submit_response()"
+            )
+        return self._save_state(
+            state,
+            phase=PHASE_REVIEW,
+            turn_index=state.turn_index + 1,
+            pending_item_id=None,
+        )
+
+    def pause_session(self, session_id: str) -> SessionState:
+        """Persist a pause without losing the pending item or the phase."""
+
+        state = self._load_session(session_id)
+        if state.phase == PHASE_PAUSED:
+            return state
+        if state.phase == PHASE_COMPLETE:
+            raise ConflictError(f"pause_session({session_id!r}): session is COMPLETE")
+        self._append_event(
+            state,
+            "SESSION_PAUSED",
+            {
+                "previous_phase": state.phase,
+                "pending_item_id": state.pending_item_id,
+                "turn_index": state.turn_index,
+            },
+        )
+        return self._save_state(state, phase=PHASE_PAUSED)
+
+    def resume_session(self, session_id: str) -> SessionState:
+        """Resume a paused session, restoring its previous phase and pending item."""
+
+        state = self._load_session(session_id)
+        if state.phase != PHASE_PAUSED:
+            raise ConflictError(
+                f"resume_session({session_id!r}): session is not PAUSED "
+                f"(phase={state.phase!r})"
+            )
+        previous_phase = self._last_pause_phase(state)
+        if previous_phase is None:
+            raise ValidationError(
+                f"resume_session({session_id!r}): no SESSION_PAUSED event with a valid "
+                "previous phase was found"
+            )
+        self._append_event(state, "SESSION_RESUMED", {"phase": previous_phase})
+        return self._save_state(state, phase=previous_phase)
+
+    # -- response handling -------------------------------------------------
+    def submit_response(
+        self,
+        session_id: str,
+        item_id: str,
+        response: str | dict,
+        *,
+        result_id: str | None = None,
+    ) -> AssessmentResult:
+        """Score one submission and run ASSESS -> UPDATE -> REVIEW atomically enough."""
+
+        state = self._load_session(session_id)
+        item_id = _require_nonempty_str(
+            item_id, "TeachingSessionEngine.submit_response(item_id)"
+        )
+        if state.phase == PHASE_PAUSED:
+            raise ConflictError(f"submit_response({session_id!r}): session is PAUSED")
+        if state.phase == PHASE_COMPLETE:
+            raise ConflictError(f"submit_response({session_id!r}): session is COMPLETE")
+        item = self._items_by_id.get(item_id)
+        if item is None:
+            raise NotFoundError(f"submit_response(): unknown item_id {item_id!r}")
+        # Idempotency first: an explicit result_id that was already applied
+        # returns the first result without re-validating the (already advanced)
+        # turn/pending state or writing any event.
+        if result_id is not None:
+            result_id = _require_nonempty_str(
+                result_id, "TeachingSessionEngine.submit_response(result_id)"
+            )
+            existing = self._find_existing_result(result_id)
+            if existing is not None:
+                return existing
+        if state.pending_item_id is None:
+            raise ConflictError(
+                f"submit_response({session_id!r}): no item is pending; call "
+                "current_action() first"
+            )
+        if state.pending_item_id != item_id:
+            raise ConflictError(
+                f"submit_response(): pending item is {state.pending_item_id!r}, "
+                f"not {item_id!r}"
+            )
+        if result_id is None:
+            result_id = self._default_attempt_result_id(state, item_id, response)
+            existing = self._find_existing_result(result_id)
+            if existing is not None:
+                return existing
+
+        snapshot = self._current_snapshot(state.learner_id)
+        result = self._score_safely(item, state.learner_id, response, result_id)
+        existing = self._find_existing_result(result.result_id)
+        if existing is not None:
+            return existing
+
+        self._append_event(
+            state,
+            "RESPONSE_SUBMITTED",
+            {
+                "item_id": item.item_id,
+                "result_id": result.result_id,
+                "response_digest": hashlib.sha256(
+                    _canonical_response(response).encode("utf-8")
+                ).hexdigest()[:16],
+                "response_kind": _response_kind(response),
+                "attempt": state.turn_index,
+            },
+        )
+        if result.status == "EVAL_ERROR":
+            new_state = self._handle_eval_error(state, item, result)
+        elif result.status == "NEEDS_REVIEW":
+            new_state = self._handle_needs_review(state, item, result, snapshot)
+        elif result.status in _MUTATING_STATUSES:
+            new_state = self._handle_observed_result(state, item, result, snapshot)
+        else:  # pragma: no cover - scorer contract is closed
+            raise ValidationError(f"submit_response(): unsupported status {result.status!r}")
+        self._repository.save_session(new_state)
+        return result
+
+    # -- convenience loop --------------------------------------------------
+    def run_until_goal(
+        self,
+        session_id: str,
+        max_turns: int | None = None,
+        responder: Callable[[AssessmentItem, SessionState], str | dict] | None = None,
+    ) -> SessionState:
+        """Drive the session deterministically (used by E2E tests/demo).
+
+        ``responder`` is a deterministic mock learner: it receives the presented
+        item and the current session state and returns a response.  Without a
+        responder the loop stops at the first pending item and returns the state
+        so the caller can submit the answer itself.
+        """
+
+        limit = _require_int(
+            self._policy.max_turns if max_turns is None else max_turns,
+            "run_until_goal(max_turns)",
+            minimum=1,
+        )
+        if responder is not None and not callable(responder):
+            raise ValidationError("run_until_goal(responder=...): expected a callable or None")
+        actions = 0
+        while actions < self._policy.max_actions_per_run:
+            state = self._load_session(session_id)
+            if state.phase in {PHASE_COMPLETE, PHASE_PAUSED}:
+                return state
+            if state.turn_index >= limit:
+                return state
+            if state.pending_item_id is not None:
+                if responder is None:
+                    return state
+                item = self._items_by_id.get(state.pending_item_id)
+                if item is None:  # pragma: no cover - pending ids are validated on write
+                    raise NotFoundError(
+                        f"run_until_goal(): pending item {state.pending_item_id!r} is unknown"
+                    )
+                response = responder(item, state)
+                self.submit_response(session_id, item.item_id, response)
+                actions += 1
+                continue
+            action = self.current_action(session_id)
+            if action.kind == "GOAL_COMPLETE":
+                return self._load_session(session_id)
+            if action.item_id is not None:
+                actions += 1
+                continue
+            self.advance_session(session_id)
+            actions += 1
+        return self._load_session(session_id)
+
+    # -- introspection helpers ---------------------------------------------
+    def phase_history(self, session_id: str) -> list[str]:
+        """Recorded phase sequence of a session (for tests and audit traces).
+
+        ``ASSESS`` and ``UPDATE`` are internal phases executed inside
+        :meth:`submit_response`; they are reconstructed from the event log
+        (``RESPONSE_SUBMITTED`` -> ASSESS, ``ASSESSED`` -> UPDATE).
+        """
+
+        state = self._load_session(session_id)
+        phases: list[str] = []
+        for event in self._events(state.learner_id):
+            if event.session_id != session_id:
+                continue
+            if event.event_type == "SESSION_STARTED":
+                phase = event.payload.get("phase")
+                if phase in SESSION_PHASE_VALUES:
+                    phases.append(phase)
+            elif event.event_type == "DIAGNOSIS_COMPLETED":
+                phases.append(PHASE_DIAGNOSE)
+            elif event.event_type == "ACTION_TAKEN":
+                phase = event.payload.get("phase")
+                if phase in SESSION_PHASE_VALUES:
+                    phases.append(phase)
+            elif event.event_type == "RESPONSE_SUBMITTED":
+                phases.append(PHASE_ASSESS)
+            elif event.event_type == "ASSESSED":
+                phases.append(PHASE_UPDATE)
+            elif event.event_type == "MASTERY_UPDATED":
+                phases.append(PHASE_REVIEW)
+            elif event.event_type == "GOAL_COMPLETED":
+                phases.append(PHASE_COMPLETE)
+            elif event.event_type == "SESSION_PAUSED":
+                phases.append(PHASE_PAUSED)
+            elif event.event_type == "SESSION_RESUMED":
+                phase = event.payload.get("phase")
+                if phase in SESSION_PHASE_VALUES:
+                    phases.append(phase)
+        return phases
+
+    # ------------------------------------------------------------------
+    # Internal: persistence helpers
+    # ------------------------------------------------------------------
+    def _load_session(self, session_id: str) -> SessionState:
+        session_id = _require_nonempty_str(
+            session_id, "TeachingSessionEngine(session_id)"
+        )
+        state = self._repository.load_session(session_id)
+        if state is None:
+            raise NotFoundError(f"unknown session_id {session_id!r}")
+        return state
+
+    def _current_snapshot(self, learner_id: str) -> LearnerSnapshot:
+        snapshot = self._repository.get_snapshot(learner_id)
+        if snapshot is not None:
+            return snapshot
+        return self._history.model.initial_snapshot(learner_id)
+
+    def _events(self, learner_id: str) -> list[HistoryEvent]:
+        events = self._repository.list_events(learner_id)
+        if type(events) is not list or not all(
+            isinstance(event, HistoryEvent) for event in events
+        ):  # pragma: no cover - protocol invariant
+            raise ValidationError("repository.list_events() must return list[HistoryEvent]")
+        return sorted(events, key=lambda event: event.seq)
+
+    def _session_events(self, state: SessionState) -> list[HistoryEvent]:
+        return [event for event in self._events(state.learner_id) if event.session_id == state.session_id]
+
+    def _save_state(
+        self,
+        state: SessionState,
+        *,
+        phase: str | None = None,
+        turn_index: int | None = None,
+        pending_item_id: Any = _KEEP,
+    ) -> SessionState:
+        new_pending = state.pending_item_id if pending_item_id is _KEEP else pending_item_id
+        new_state = SessionState(
+            session_id=state.session_id,
+            learner_id=state.learner_id,
+            goal_id=state.goal_id,
+            objective_id=state.objective_id,
+            phase=state.phase if phase is None else phase,
+            turn_index=state.turn_index if turn_index is None else turn_index,
+            pending_item_id=new_pending,
+            created_at=state.created_at,
+            updated_at=now_utc(),
+        )
+        self._repository.save_session(new_state)
+        return new_state
+
+    def _append_event(
+        self, state: SessionState, event_type: str, payload: Mapping[str, Any]
+    ) -> HistoryEvent:
+        return self._history.append_event(
+            state.learner_id, state.session_id, event_type, dict(payload)
+        )
+
+    def _record_deterministic_events(
+        self,
+        state: SessionState,
+        entries: Sequence[tuple[str, str, Mapping[str, Any]]],
+    ) -> list[bool]:
+        """Append events with caller-chosen (deterministic) event ids."""
+
+        events = self._events(state.learner_id)
+        next_seq = max((event.seq for event in events), default=-1) + 1
+        built: list[HistoryEvent] = []
+        for offset, (event_id, event_type, payload) in enumerate(entries):
+            built.append(
+                HistoryEvent(
+                    event_id=event_id,
+                    learner_id=state.learner_id,
+                    session_id=state.session_id,
+                    seq=next_seq + offset,
+                    event_type=event_type,
+                    payload=dict(payload),
+                    created_at=now_utc(),
+                )
+            )
+        batch = getattr(self._repository, "append_events", None)
+        if callable(batch):
+            return list(batch(built))
+        return [self._history.record_event(event) for event in built]
+
+    def _record_goal_completed(
+        self, state: SessionState, objective: LearningObjective, reason: Reason
+    ) -> bool:
+        event_id = f"{_GOAL_COMPLETED_EVENT_PREFIX}{objective.objective_id}"
+        if self._repository.get_event(event_id) is not None:
+            return False
+        return self._record_deterministic_events(
+            state,
+            [
+                (
+                    event_id,
+                    "GOAL_COMPLETED",
+                    {
+                        "objective_id": objective.objective_id,
+                        "reason": reason.to_dict(),
+                        "policy_version": self._policy.policy_version,
+                    },
+                )
+            ],
+        )[0]
+
+    # ------------------------------------------------------------------
+    # Internal: goal / objective / events helpers
+    # ------------------------------------------------------------------
+    def _goal(self, state: SessionState) -> LearnerGoal:
+        goal = self._repository.get_goal(state.goal_id)
+        if goal is None:
+            raise NotFoundError(f"session {state.session_id!r}: goal {state.goal_id!r} is missing")
+        return goal
+
+    def _objective(self, state: SessionState) -> LearningObjective:
+        objective = self._objectives_by_id.get(state.objective_id)
+        if objective is None:
+            raise NotFoundError(
+                f"session {state.session_id!r}: objective {state.objective_id!r} is unknown"
+            )
+        return objective
+
+    # ------------------------------------------------------------------
+    # Internal: scoring
+    # ------------------------------------------------------------------
+    def _default_attempt_result_id(
+        self, state: SessionState, item_id: str, response: Any
+    ) -> str:
+        digest = hashlib.sha256(_canonical_response(response).encode("utf-8")).hexdigest()[:16]
+        return (
+            f"result:{state.session_id}:{state.turn_index}:{item_id}:{digest}"
+        )
+
+    @staticmethod
+    def _fallback_result(
+        item: AssessmentItem,
+        learner_id: str,
+        result_id: str,
+        failure_reason: str,
+    ) -> AssessmentResult:
+        max_score = float(item.max_score) if item.max_score > 0.0 else 1.0
+        return AssessmentResult(
+            result_id=result_id,
+            item_id=item.item_id,
+            learner_id=learner_id,
+            status="EVAL_ERROR",
+            score=None,
+            max_score=max_score,
+            scorer_id="m1a.session.scorer-fallback",
+            failure_reason=failure_reason,
+            evidence_refs=[f"item:{item.item_id}"],
+            created_at=now_utc(),
+        )
+
+    def _score_safely(
+        self,
+        item: AssessmentItem,
+        learner_id: str,
+        response: Any,
+        result_id: str | None,
+    ) -> AssessmentResult:
+        fallback_id = result_id or (
+            f"result:{item.item_id}:"
+            f"{hashlib.sha256(_canonical_response(response).encode('utf-8')).hexdigest()[:16]}"
+        )
+        try:
+            result = self._scorer.score(item, learner_id, response, result_id=result_id)
+        except BaseException:  # noqa: BLE001 - scorer failures are EVAL_ERROR, not e
+            return self._fallback_result(item, learner_id, fallback_id, "SCORER_EXCEPTION")
+        if not isinstance(result, AssessmentResult):  # pragma: no cover - defensive
+            return self._fallback_result(item, learner_id, fallback_id, "SCORER_INVALID_RESULT")
+        if result.item_id != item.item_id or result.learner_id != learner_id:
+            return self._fallback_result(item, learner_id, fallback_id, "SCORER_RESULT_MISMATCH")
+        return result
+
+    def _find_existing_result(self, result_id: str) -> AssessmentResult | None:
+        for event_id in (
+            assessed_event_id(result_id),
+            f"{_EVAL_ERROR_EVENT_PREFIX}{result_id}",
+        ):
+            event = self._repository.get_event(event_id)
+            if event is None:
+                continue
+            raw = event.payload.get("result")
+            if not isinstance(raw, Mapping):
+                continue
+            try:
+                return AssessmentResult.from_dict(dict(raw))
+            except ValidationError:  # pragma: no cover - corrupted log fails closed
+                raise ValidationError(
+                    f"stored assessment result {result_id!r} is corrupted"
+                ) from None
+        return None
+
+    # ------------------------------------------------------------------
+    # Internal: response branches
+    # ------------------------------------------------------------------
+    def _handle_eval_error(
+        self, state: SessionState, item: AssessmentItem, result: AssessmentResult
+    ) -> SessionState:
+        events = self._session_events(state)
+        retries = self._eval_error_streak(events, item.item_id)
+        retries += 1
+        exhausted = retries > self._policy.eval_error_retry_limit
+        self._record_deterministic_events(
+            state,
+            [
+                (
+                    f"{_EVAL_ERROR_EVENT_PREFIX}{result.result_id}",
+                    "ERROR",
+                    {
+                        "stage": "ASSESS",
+                        "status": "EVAL_ERROR",
+                        "item_id": item.item_id,
+                        "result_id": result.result_id,
+                        "result": result.to_dict(),
+                        "failure_reason": result.failure_reason,
+                        "retry_attempt": retries,
+                        "retry_exhausted": exhausted,
+                        "mastery_unchanged": True,
+                    },
+                )
+            ],
+        )
+        if exhausted:
+            return self._save_state(
+                state,
+                phase=PHASE_REVIEW,
+                turn_index=state.turn_index + 1,
+                pending_item_id=None,
+            )
+        return self._save_state(
+            state,
+            phase=state.phase,
+            turn_index=state.turn_index + 1,
+            pending_item_id=item.item_id,
+        )
+
+    def _handle_needs_review(
+        self,
+        state: SessionState,
+        item: AssessmentItem,
+        result: AssessmentResult,
+        snapshot: LearnerSnapshot,
+    ) -> SessionState:
+        self._record_deterministic_events(
+            state,
+            [
+                (
+                    assessed_event_id(result.result_id),
+                    "ASSESSED",
+                    {
+                        "result_id": result.result_id,
+                        "item_id": item.item_id,
+                        "status": result.status,
+                        "result": result.to_dict(),
+                        "item": item.to_dict(),
+                    },
+                ),
+                (
+                    mastery_updated_event_id(result.result_id),
+                    "MASTERY_UPDATED",
+                    {
+                        "result_id": result.result_id,
+                        "status": result.status,
+                        "applied": False,
+                        "snapshot": snapshot.to_dict(),
+                        "policy_version": self._history.model.policy.policy_version,
+                        "reason": "NEEDS_REVIEW is not observed mastery evidence",
+                    },
+                ),
+            ],
+        )
+        return self._save_state(
+            state,
+            phase=PHASE_REVIEW,
+            turn_index=state.turn_index + 1,
+            pending_item_id=None,
+        )
+
+    def _handle_observed_result(
+        self,
+        state: SessionState,
+        item: AssessmentItem,
+        result: AssessmentResult,
+        snapshot: LearnerSnapshot,
+    ) -> SessionState:
+        updated = self._history.apply_assessment(
+            state.learner_id, state.session_id, item, result, snapshot=snapshot
+        )
+        objective = self._objective(state)
+        complete, completion_reason = self._planner.check_goal_completion(objective, updated)
+        if complete:
+            self._record_goal_completed(state, objective, completion_reason)
+            return self._save_state(
+                state,
+                phase=PHASE_COMPLETE,
+                turn_index=state.turn_index + 1,
+                pending_item_id=None,
+            )
+        return self._save_state(
+            state,
+            phase=PHASE_REVIEW,
+            turn_index=state.turn_index + 1,
+            pending_item_id=None,
+        )
+
+    def _eval_error_streak(self, events: Sequence[HistoryEvent], item_id: str) -> int:
+        last_assessed = -1
+        for index, event in enumerate(events):
+            if event.event_type == "ASSESSED" and event.payload.get("item_id") == item_id:
+                last_assessed = index
+        streak = 0
+        for event in events[last_assessed + 1 :]:
+            if (
+                event.event_type == "ERROR"
+                and event.payload.get("status") == "EVAL_ERROR"
+                and event.payload.get("item_id") == item_id
+            ):
+                streak += 1
+        return streak
+
+    # ------------------------------------------------------------------
+    # Internal: action generation
+    # ------------------------------------------------------------------
+    def _action_for_current_turn(self, state: SessionState) -> TeachingAction | None:
+        for event in reversed(self._session_events(state)):
+            if event.event_type != "ACTION_TAKEN":
+                continue
+            if event.payload.get("turn_index") != state.turn_index:
+                continue
+            raw = event.payload.get("action")
+            if not isinstance(raw, Mapping):
+                continue
+            try:
+                action = TeachingAction.from_dict(dict(raw))
+            except ValidationError:
+                continue
+            if action.action_id:
+                return action
+        return None
+
+    def _generate_and_persist(
+        self, state: SessionState
+    ) -> tuple[SessionState, TeachingAction]:
+        snapshot = self._current_snapshot(state.learner_id)
+        events = self._events(state.learner_id)
+        selection = self._select_action(state, snapshot, events)
+        action, phase, pending_item_id, extra_events = selection
+        self._append_event(
+            state,
+            "ACTION_TAKEN",
+            {
+                "action": action.to_dict(),
+                "action_kind": action.kind,
+                "node_ids": list(action.node_ids),
+                "item_id": action.item_id,
+                "phase": phase,
+                "turn_index": state.turn_index,
+                "snapshot_revision": snapshot.revision,
+                "session_policy_version": self._policy.policy_version,
+            },
+        )
+        for event_type, payload in extra_events:
+            self._append_event(state, event_type, payload)
+        if phase == PHASE_COMPLETE:
+            objective = self._objective(state)
+            _complete, reason = self._planner.check_goal_completion(objective, snapshot)
+            self._record_goal_completed(state, objective, reason)
+        new_state = self._save_state(
+            state,
+            phase=phase,
+            turn_index=state.turn_index,
+            pending_item_id=pending_item_id,
+        )
+        return new_state, action
+
+    def _select_action(
+        self,
+        state: SessionState,
+        snapshot: LearnerSnapshot,
+        events: Sequence[HistoryEvent],
+    ) -> tuple[TeachingAction, str, str | None, list[tuple[str, dict[str, Any]]]]:
+        """Choose the next action and its target phase (pure, no writes)."""
+
+        goal = self._goal(state)
+        objective = self._objective(state)
+        extra_events: list[tuple[str, dict[str, Any]]] = []
+
+        # 1) Resume/retry of an item that is still pending (pause or EVAL_ERROR).
+        if state.pending_item_id is not None:
+            item = self._items_by_id.get(state.pending_item_id)
+            if item is None:
+                raise NotFoundError(
+                    f"session {state.session_id!r}: pending item "
+                    f"{state.pending_item_id!r} is unknown"
+                )
+            kind = self._pending_action_kind(state)
+            phase = _ITEM_ACTION_PHASES.get(kind, PHASE_PRACTICE)
+            action = self._item_action(
+                state,
+                snapshot,
+                item=item,
+                kind=kind,
+                phase=phase,
+                reason=self._reason(
+                    state,
+                    "RETRY_PENDING_ITEM",
+                    item.node_ids,
+                    "the pending item was not scored successfully yet; retry it",
+                ),
+            )
+            return action, phase, item.item_id, []
+
+        # 2) Completes the objective as soon as the observed criteria are met.
+        complete, completion_reason = self._planner.check_goal_completion(objective, snapshot)
+        if complete:
+            return (
+                self._complete_action(state),
+                PHASE_COMPLETE,
+                None,
+                [],
+            )
+
+        # 3) Hint escalation after repeated INCORRECT outcomes (before the next
+        #    diagnostic/plan step, so a struggling learner gets support first).
+        hint = self._hint_selection(state, events)
+        if hint is not None:
+            level, node_ids = hint
+            action = self._hint_action(state, snapshot, level=level, node_ids=node_ids)
+            return action, PHASE_REVIEW, None, extra_events
+
+        # 4) Diagnostic phase (first ``diagnosis_min_items`` observations).
+        diagnostic_attempts = self._diagnostic_attempt_count(state)
+        attempted_items = self._attempted_item_ids(state, events)
+        diagnosis = self._diagnostic.select_next_item(
+            goal,
+            objective,
+            snapshot,
+            history=list(events),
+            exclude_item_ids=attempted_items,
+        )
+        if diagnosis.status == READY and diagnostic_attempts < self._policy.diagnosis_min_items:
+            item_id = diagnosis.selected_item_id
+            if item_id is not None and item_id in self._items_by_id:
+                item = self._items_by_id[item_id]
+                extra_events.append(
+                    ("DIAGNOSIS_COMPLETED", {"diagnosis": diagnosis.to_dict()})
+                )
+                action = self._item_action(
+                    state,
+                    snapshot,
+                    item=item,
+                    kind="DIAGNOSE",
+                    phase=PHASE_DIAGNOSE,
+                    reason=self._reason(
+                        state,
+                        "DIAGNOSTIC_ITEM",
+                        [diagnosis.target_node_id],
+                        diagnosis.hypothesis or "diagnostic item selected",
+                    ),
+                )
+                return action, PHASE_DIAGNOSE, item.item_id, extra_events
+        if diagnosis.status == INSUFFICIENT_EVIDENCE and diagnostic_attempts == 0:
+            # No evidence gap remains at all: the plan/evidence state decides.
+            extra_events.append(
+                ("DIAGNOSIS_COMPLETED", {"diagnosis": diagnosis.to_dict()})
+            )
+
+        # 5) Sustained INCORRECT outcomes force a reassessment of the struggling
+        #    node(s) before any further teaching/practice.
+        streak, struggling_nodes = self._consecutive_incorrect(state)
+        if streak >= self._policy.reassess_after_incorrect and struggling_nodes:
+            attempted = self._attempted_item_ids(state, events)
+            for node_id in struggling_nodes:
+                for item in self._domain.assessment_items(node_id):
+                    if item.item_id in attempted:
+                        continue
+                    action = self._item_action(
+                        state,
+                        snapshot,
+                        item=item,
+                        kind="REASSESS",
+                        phase=PHASE_ASSESS,
+                        reason=self._reason(
+                            state,
+                            "REASSESS_STUCK_NODE",
+                            [node_id],
+                            f"{streak} consecutive INCORRECT outcomes; reassess before "
+                            "drilling the same content again",
+                        ),
+                    )
+                    return action, PHASE_ASSESS, item.item_id, extra_events
+
+        # 6) Plan-driven selection (skip steps already presented for this revision).
+        plan = self._planner.plan(goal, objective, snapshot, history=list(events))
+        extra_events.append(
+            ("PLAN_CREATED", {"plan_id": plan.plan_id, "step_count": len(plan.steps),
+                              "policy_version": plan.policy_version})
+        )
+        taken = self._taken_step_signatures(state, snapshot.revision)
+        for step in plan.steps:
+            if step.action_kind == "GOAL_COMPLETE":
+                return self._complete_action(state), PHASE_COMPLETE, None, []
+            signature = (
+                step.phase,
+                step.action_kind,
+                tuple(step.node_ids),
+                step.item_id,
+            )
+            if signature in taken:
+                continue
+            if step.action_kind == "PRACTICE" and self._practice_actions_since_assessment(
+                state, step.node_ids
+            ) >= self._policy.max_practice_attempts:
+                # Too much drilling without observed evidence: skip the practice
+                # step so the following assessment step is surfaced instead.
+                continue
+            mapped = self._action_from_plan_step(state, plan.plan_id, step, snapshot)
+            if mapped is None:
+                continue
+            action, phase, pending_item_id = mapped
+            return action, phase, pending_item_id, extra_events
+
+        # 6) Fallback: keep the session moving with an untried practice item.
+        fallback = self._fallback_action(state, snapshot, plan.plan_id)
+        if fallback is not None:
+            action, phase, pending_item_id = fallback
+            return action, phase, pending_item_id, extra_events
+        raise ConflictError(
+            f"session {state.session_id!r}: no actionable plan step remains and the "
+            "objective is not complete"
+        )
+
+    def _diagnostic_attempt_count(self, state: SessionState) -> int:
+        """Observed diagnostic items (EVAL_ERROR retries are not extra attempts)."""
+
+        diagnostic_item_ids: set[str] = set()
+        for event in self._session_events(state):
+            if (
+                event.event_type == "ACTION_TAKEN"
+                and event.payload.get("phase") == PHASE_DIAGNOSE
+                and type(event.payload.get("item_id")) is str
+            ):
+                diagnostic_item_ids.add(event.payload["item_id"])
+        if not diagnostic_item_ids:
+            return 0
+        assessed: set[str] = set()
+        for event in self._session_events(state):
+            if event.event_type == "ASSESSED" and type(event.payload.get("item_id")) is str:
+                assessed.add(event.payload["item_id"])
+        return len(diagnostic_item_ids & assessed)
+
+    def _practice_actions_since_assessment(
+        self, state: SessionState, node_ids: Sequence[str]
+    ) -> int:
+        count = 0
+        for event in reversed(self._session_events(state)):
+            if event.event_type in {"ASSESSED", "MASTERY_UPDATED"}:
+                break
+            if (
+                event.event_type == "ACTION_TAKEN"
+                and event.payload.get("action_kind") == "PRACTICE"
+                and event.payload.get("item_id") is not None
+            ):
+                payload_nodes = event.payload.get("node_ids")
+                if not isinstance(payload_nodes, list):
+                    continue
+                if set(payload_nodes) & set(node_ids):
+                    count += 1
+        return count
+
+    def _pending_action_kind(self, state: SessionState) -> str:
+        for event in reversed(self._session_events(state)):
+            if event.event_type != "ACTION_TAKEN":
+                continue
+            if event.payload.get("item_id") != state.pending_item_id:
+                continue
+            kind = event.payload.get("action_kind")
+            if type(kind) is str and kind in _ITEM_ACTION_PHASES:
+                return kind
+        if state.phase == PHASE_DIAGNOSE:
+            return "DIAGNOSE"
+        return "PRACTICE"
+
+    def _attempted_item_ids(
+        self, state: SessionState, events: Sequence[HistoryEvent]
+    ) -> set[str]:
+        attempted: set[str] = set()
+        for event in events:
+            if event.event_type != "ASSESSED":
+                continue
+            item_id = event.payload.get("item_id")
+            if type(item_id) is str:
+                attempted.add(item_id)
+        if state.pending_item_id is not None:
+            attempted.add(state.pending_item_id)
+        return attempted
+
+    def _taken_step_signatures(
+        self, state: SessionState, revision: int
+    ) -> set[tuple[str, str, tuple[str, ...], str | None]]:
+        taken: set[tuple[str, str, tuple[str, ...], str | None]] = set()
+        for event in self._session_events(state):
+            if event.event_type != "ACTION_TAKEN":
+                continue
+            if event.payload.get("snapshot_revision") != revision:
+                continue
+            phase = event.payload.get("phase")
+            kind = event.payload.get("action_kind")
+            raw_nodes = event.payload.get("node_ids")
+            raw_item = event.payload.get("item_id")
+            if type(phase) is not str or type(kind) is not str or type(raw_nodes) is not list:
+                continue
+            taken.add(
+                (
+                    phase,
+                    kind,
+                    tuple(node for node in raw_nodes if type(node) is str),
+                    raw_item if type(raw_item) is str else None,
+                )
+            )
+        return taken
+
+    # -- action builders ---------------------------------------------------
+    def _reason(
+        self,
+        state: SessionState,
+        code: str,
+        node_ids: Sequence[str],
+        detail: str,
+    ) -> Reason:
+        return Reason(
+            code=code,
+            node_ids=[node for node in node_ids if type(node) is str],
+            detail=detail,
+            policy_version=self._policy.policy_version,
+            created_at=state.updated_at,
+        )
+
+    def _action_id(
+        self,
+        state: SessionState,
+        kind: str,
+        node_ids: Sequence[str],
+        item_id: str | None,
+        discriminator: str = "",
+    ) -> str:
+        return "action:" + _fingerprint(
+            state.session_id,
+            state.turn_index,
+            kind,
+            list(node_ids),
+            item_id,
+            discriminator,
+            self._policy.policy_version,
+        )
+
+    def _build_action(
+        self,
+        state: SessionState,
+        *,
+        kind: str,
+        node_ids: Sequence[str],
+        content: str,
+        reason: Reason,
+        item_id: str | None = None,
+        evidence_refs: Sequence[str] = (),
+        discriminator: str = "",
+    ) -> TeachingAction:
+        return TeachingAction(
+            action_id=self._action_id(state, kind, node_ids, item_id, discriminator),
+            kind=kind,
+            node_ids=list(node_ids),
+            content=content,
+            reason=reason,
+            item_id=item_id,
+            evidence_refs=list(evidence_refs),
+        )
+
+    def _item_action(
+        self,
+        state: SessionState,
+        snapshot: LearnerSnapshot,
+        *,
+        item: AssessmentItem,
+        kind: str,
+        phase: str,
+        reason: Reason,
+    ) -> TeachingAction:
+        return self._build_action(
+            state,
+            kind=kind,
+            node_ids=list(item.node_ids),
+            content=item.prompt,
+            item_id=item.item_id,
+            reason=reason,
+            evidence_refs=[
+                f"snapshot:{state.learner_id}:revision={snapshot.revision}",
+                f"item:{item.item_id}",
+            ],
+            discriminator=phase,
+        )
+
+    def _hint_action(
+        self,
+        state: SessionState,
+        snapshot: LearnerSnapshot,
+        *,
+        level: int,
+        node_ids: Sequence[str],
+    ) -> TeachingAction:
+        node_id = sorted(node_ids)[0] if node_ids else self._objective(state).target_node_ids[0]
+        content = self._domain.teaching_content(node_id, f"HINT_L{level}")
+        reason = self._reason(
+            state,
+            f"HINT_LEVEL_{level}",
+            [node_id],
+            f"escalated hint to level {level} after repeated INCORRECT outcomes",
+        )
+        return self._build_action(
+            state,
+            kind="HINT",
+            node_ids=[node_id],
+            content=content,
+            reason=reason,
+            evidence_refs=[f"snapshot:{state.learner_id}:revision={snapshot.revision}"],
+            discriminator=f"HINT_L{level}",
+        )
+
+    def _complete_action(self, state: SessionState) -> TeachingAction:
+        objective = self._objective(state)
+        snapshot = self._current_snapshot(state.learner_id)
+        _complete, reason = self._planner.check_goal_completion(objective, snapshot)
+        return self._build_action(
+            state,
+            kind="GOAL_COMPLETE",
+            node_ids=list(reason.node_ids),
+            content=(
+                f"目标 {objective.objective_id} 的成功标准已由观测证据满足；会话结束。"
+            ),
+            reason=reason,
+            evidence_refs=[f"snapshot:{state.learner_id}:revision={snapshot.revision}"],
+            discriminator="GOAL_COMPLETE",
+        )
+
+    def _action_from_plan_step(
+        self,
+        state: SessionState,
+        plan_id: str,
+        step: Any,
+        snapshot: LearnerSnapshot,
+    ) -> tuple[TeachingAction, str, str | None] | None:
+        node_ids = list(step.node_ids)
+        if not node_ids:
+            return None
+        primary = node_ids[0]
+        refs = [f"plan:{plan_id}", f"step:{step.step_id}"]
+        if step.action_kind in {"EXPLAIN", "RETEACH"}:
+            content = self._domain.teaching_content(primary, "EXPLAIN")
+            reason = step.rationale
+            action = self._build_action(
+                state,
+                kind=step.action_kind,
+                node_ids=node_ids,
+                content=content,
+                reason=reason,
+                evidence_refs=refs,
+                discriminator=step.step_id,
+            )
+            return action, PHASE_TEACH, None
+        if step.action_kind == "REVIEW":
+            content = self._domain.teaching_content(primary, "REVIEW")
+            action = self._build_action(
+                state,
+                kind="REVIEW",
+                node_ids=node_ids,
+                content=content,
+                reason=step.rationale,
+                evidence_refs=refs,
+                discriminator=step.step_id,
+            )
+            return action, PHASE_REVIEW, None
+        item_id = step.item_id or self._assigned_item_id(step, snapshot)
+        if item_id is None or item_id not in self._items_by_id:
+            return None
+        item = self._items_by_id[item_id]
+        if step.action_kind == "PRACTICE":
+            phase = PHASE_PRACTICE
+            action_kind = "PRACTICE"
+        else:  # DIAGNOSE / REASSESS / ASSESS plan steps present an item in ASSESS
+            phase = PHASE_ASSESS
+            action_kind = step.action_kind if step.action_kind in _ITEM_ACTION_PHASES else "REASSESS"
+        action = self._item_action(
+            state,
+            snapshot,
+            item=item,
+            kind=action_kind,
+            phase=phase,
+            reason=step.rationale,
+        )
+        return action, phase, item.item_id
+
+    def _assigned_item_id(self, step: Any, snapshot: LearnerSnapshot) -> str | None:
+        for node_id in step.node_ids:
+            candidates = [
+                item_id
+                for item_id in self._practice_items_by_node.get(node_id, [])
+                if item_id not in set(snapshot.completed_item_ids)
+            ]
+            if candidates:
+                return candidates[0]
+            practice = self._practice_items_by_node.get(node_id) or []
+            if practice:
+                return practice[0]
+        return None
+
+    def _fallback_action(
+        self, state: SessionState, snapshot: LearnerSnapshot, plan_id: str
+    ) -> tuple[TeachingAction, str, str | None] | None:
+        objective = self._objective(state)
+        attempted = self._attempted_item_ids(state, self._events(state.learner_id))
+        ranked_nodes = sorted(
+            objective.target_node_ids,
+            key=lambda node_id: (
+                snapshot.masteries.get(node_id).value
+                if snapshot.masteries.get(node_id) is not None
+                else 0.0,
+                node_id,
+            ),
+        )
+        for node_id in ranked_nodes:
+            for item in self._domain.assessment_items(node_id):
+                if item.item_id in attempted:
+                    continue
+                action = self._item_action(
+                    state,
+                    snapshot,
+                    item=item,
+                    kind="REASSESS",
+                    phase=PHASE_ASSESS,
+                    reason=self._reason(
+                        state,
+                        "SESSION_CONTINUE",
+                        [node_id],
+                        "continue the session with an untried observed-evidence item",
+                    ),
+                )
+                return action, PHASE_ASSESS, item.item_id
+        node_id = ranked_nodes[0]
+        content = self._domain.teaching_content(node_id, "REVIEW")
+        action = self._build_action(
+            state,
+            kind="REVIEW",
+            node_ids=[node_id],
+            content=content,
+            reason=self._reason(
+                state,
+                "SESSION_CONTINUE_REVIEW",
+                [node_id],
+                "no untried item remains; revisit the invariant before re-planning",
+            ),
+            evidence_refs=[f"plan:{plan_id}"],
+            discriminator="fallback-review",
+        )
+        return action, PHASE_REVIEW, None
+
+    # -- hint escalation helpers ------------------------------------------
+    def _consecutive_incorrect(
+        self, state: SessionState
+    ) -> tuple[int, list[str]]:
+        streak = 0
+        nodes: list[str] = []
+        for event in self._session_events(state):
+            if event.event_type != "ASSESSED":
+                continue
+            status = event.payload.get("status")
+            if status == "INCORRECT":
+                streak += 1
+                item_id = event.payload.get("item_id")
+                item = self._items_by_id.get(item_id) if type(item_id) is str else None
+                if item is not None:
+                    for node_id in item.node_ids:
+                        if node_id not in nodes:
+                            nodes.append(node_id)
+            elif status in {"CORRECT", "PARTIAL"}:
+                streak = 0
+                nodes = []
+            # NEEDS_REVIEW / EVAL_ERROR are not learner evidence: streak unchanged.
+        return streak, nodes
+
+    def _offered_hint_level(self, state: SessionState) -> int:
+        offered = 0
+        reset_index = 0
+        session_events = self._session_events(state)
+        for index, event in enumerate(session_events):
+            if event.event_type == "ASSESSED" and event.payload.get("status") in {
+                "CORRECT",
+                "PARTIAL",
+            }:
+                reset_index = index + 1
+                offered = 0
+        for event in session_events[reset_index:]:
+            if event.event_type != "ACTION_TAKEN":
+                continue
+            raw = event.payload.get("action")
+            if not isinstance(raw, Mapping):
+                continue
+            raw_reason = raw.get("reason")
+            if not isinstance(raw_reason, Mapping):
+                continue
+            code = raw_reason.get("code")
+            if type(code) is str and code.startswith("HINT_LEVEL_"):
+                try:
+                    offered = max(offered, int(code.rsplit("_", 1)[1]))
+                except (ValueError, IndexError):  # pragma: no cover - defensive
+                    continue
+        return offered
+
+    def _hint_selection(
+        self, state: SessionState, events: Sequence[HistoryEvent]
+    ) -> tuple[int, list[str]] | None:
+        streak, nodes = self._consecutive_incorrect(state)
+        if streak < 1:
+            return None
+        desired = min(
+            self._policy.max_hint_level,
+            1 + streak // self._policy.hint_escalation_threshold,
+        )
+        if desired <= self._offered_hint_level(state):
+            return None
+        if not nodes:
+            objective = self._objective(state)
+            nodes = list(objective.target_node_ids[:1]) or ["cf.search.binary"]
+        return desired, nodes
+
+    # ------------------------------------------------------------------
+    # Internal: pause helpers
+    # ------------------------------------------------------------------
+    def _last_pause_phase(self, state: SessionState) -> str | None:
+        for event in reversed(self._session_events(state)):
+            if event.event_type != "SESSION_PAUSED":
+                continue
+            phase = event.payload.get("previous_phase")
+            if phase in SESSION_PHASE_VALUES and phase != PHASE_PAUSED:
+                return phase
+        return None
+
+
+def stream_item(event: HistoryEvent) -> str | None:
+    """Return the ``item_id`` referenced by an assessment event payload."""
+
+    item_id = event.payload.get("item_id")
+    return item_id if type(item_id) is str else None
