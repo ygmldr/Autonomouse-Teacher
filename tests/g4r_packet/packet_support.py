@@ -19,7 +19,9 @@ BUILDER = REPO_ROOT / "scripts" / "g4r" / "build_packet_g4r.py"
 VERIFIER = REPO_ROOT / "scripts" / "g4r" / "verify_packet_g4r.py"
 V1_PACKET = (Path("/root/Autonomous Teacher/artifacts")
              / "review-packet-g4f-e7d92967ec0ece80de4a1a3705f637e8eb9bde99")
-IMPL_SHA = "a" * 64
+IMPL_SHA = "a" * 64  # synthetic 64-hex impl identity (legacy form)
+GIT_IMPL_SHA = "0123456789abcdef0123456789abcdef01234567"  # synthetic 40-hex commit
+IMPL_CONTENT_SHA = "9" * 64  # synthetic canonical source-tree sha256
 FROZEN_UTC = "2026-11-20T00:00:00Z"
 GIT_HEAD = "3e7afee0" + "0" * 56  # TEST_ONLY 64-hex stand-in for the frozen base commit
 LIVEGATE_REASONS = [
@@ -49,9 +51,10 @@ def write_json(path: Path, document: object) -> None:
     path.write_text(json.dumps(document, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
-def metadata_document() -> dict:
-    return {
-        "impl_sha": IMPL_SHA,
+def metadata_document(*, impl_id: str = IMPL_SHA,
+                      impl_content_sha256: str | None = None) -> dict:
+    document = {
+        "impl_sha": impl_id,
         "base_sha": GIT_HEAD,
         "parent_sha": GIT_HEAD,
         "code_sha": "b" * 64,
@@ -71,6 +74,9 @@ def metadata_document() -> dict:
         "live_gate": "BLOCKED",
         "limitations": ["TEST_ONLY synthetic packet; no key/provider/network"],
     }
+    if impl_content_sha256 is not None:
+        document["impl_content_sha256"] = impl_content_sha256
+    return document
 
 
 def livegate_document() -> dict:
@@ -125,16 +131,19 @@ def staging_tree(root: Path) -> Path:
     return staging
 
 
-def build_packet(tmp_path: Path, *, packet_name: str = "review-packet-g4r-v2-test",
+def build_packet(tmp_path: Path, *, packet_name: str | None = None,
                  staging: Path | None = None,
                  metadata: dict | None = None,
                  livegate: dict | None = None,
                  sqlite_source: Path | None = None,
+                 impl_sha: str = IMPL_SHA,
+                 impl_content_sha256: str | None = None,
                  extra_args: list[str] | None = None) -> tuple[Path, dict]:
-    root = tmp_path / packet_name
+    root = tmp_path / (packet_name or f"review-packet-g4r-v2-{impl_sha}")
     staging = staging or staging_tree(tmp_path)
     metadata_path = tmp_path / "metadata.json"
-    write_json(metadata_path, metadata or metadata_document())
+    write_json(metadata_path, metadata or metadata_document(
+        impl_id=impl_sha, impl_content_sha256=impl_content_sha256))
     livegate_path = tmp_path / "livegate.json"
     write_json(livegate_path, livegate or livegate_document())
     sqlite_path = sqlite_source or (tmp_path / "source.sqlite3")
@@ -142,7 +151,7 @@ def build_packet(tmp_path: Path, *, packet_name: str = "review-packet-g4r-v2-tes
         make_sqlite_source(sqlite_path)
     argv = [
         sys.executable, str(BUILDER),
-        "--impl-sha", IMPL_SHA,
+        "--impl-sha", impl_sha,
         "--staging", str(staging),
         "--metadata", str(metadata_path),
         "--livegate-snapshot", str(livegate_path),
@@ -151,6 +160,8 @@ def build_packet(tmp_path: Path, *, packet_name: str = "review-packet-g4r-v2-tes
         "--frozen-utc", FROZEN_UTC,
         "--git-head", GIT_HEAD,
     ]
+    if impl_content_sha256 is not None:
+        argv.extend(["--impl-content-sha256", impl_content_sha256])
     argv.extend(extra_args or [])
     completed = run(argv)
     assert completed.returncode == 0, (completed.stdout, completed.stderr)
