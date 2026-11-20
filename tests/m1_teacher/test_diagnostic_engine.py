@@ -404,9 +404,18 @@ def test_behaviour_unchanged_without_hidden_scoring_directory(
     copy_graph = KnowledgeGraph(
         copy_adapter.knowledge_nodes(), copy_adapter.prerequisite_edges()
     )
-    assert (
-        copy_adapter.objectives()[0].to_dict() == objective.to_dict()
-    )
+    # ``created_at`` is load-time wall-clock metadata (the frozen contract
+    # validates the format, not a fixed value): the module-scoped ``adapter``
+    # fixture may have been loaded in a previous wall-clock second than the
+    # copy in this test, so the semantic objective content is compared without
+    # that non-behavioural field.  This is a determinism fix for a pre-existing
+    # flaky assertion, not a weakening: every behavioural field is compared.
+    def _semantic_objective(record):
+        payload = record.to_dict()
+        payload.pop("created_at", None)
+        return payload
+
+    assert _semantic_objective(copy_adapter.objectives()[0]) == _semantic_objective(objective)
     original = DiagnosticEngine(adapter, graph).select_next_item(
         make_goal(objective), objective, evidenced_snapshot(**{"cf.search.boundary": (0.2, 1, 0.3)})
     )

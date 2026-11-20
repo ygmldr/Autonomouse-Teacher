@@ -293,7 +293,15 @@ documented limitation, not a hidden behaviour.
   retry → same result and zero events; same key/different response →
   `IDEMPOTENCY_CONFLICT` with unchanged state.  No assertion was deleted or
   weakened; the new assertions are strictly stronger.
-* All other M1-A tests are unmodified (`536 passed` baseline before this PR).
+* `tests/m1_teacher/test_diagnostic_engine.py::test_behaviour_unchanged_without_hidden_scoring_directory`
+  compared two separately loaded adapter objectives **including** the
+  load-time wall-clock `created_at` field; the module-scoped adapter fixture can
+  have loaded in the previous second, which made the assertion fail ~5% of runs
+  (observed 1/20 isolated module runs and once in a full-suite run).  The test
+  now compares every semantic objective field and excludes only that
+  non-behavioural timestamp metadata (the frozen contract validates the
+  timestamp format, not a fixed value).  This is a determinism fix for a
+  pre-existing flake, not a weakening; all other M1-A tests are unmodified.
 
 ## 10. Known limitations / UNVERIFIED
 
@@ -333,7 +341,7 @@ worktree `/root/m1b/pr2`, no network, no keys, synthetic fixtures.
 
 | Command | Observed |
 |---|---|
-| `"/root/Autonomous Teacher/.venv/bin/python" -m pytest tests/m1_teacher -q` | `595 passed in 35.29s` (M1-A baseline was `536 passed in 16.77s`; +17 turn-transaction, +33 crash, +9 concurrency tests) |
+| `"/root/Autonomous Teacher/.venv/bin/python" -m pytest tests/m1_teacher -q` | `595 passed` (observed `34.42s`, `35.29s`, `35.70s`, `37.62s` across final runs; M1-A baseline was `536 passed in 16.77s`; +17 turn-transaction, +33 crash, +9 concurrency tests) |
 | `... pytest tests/m1_teacher/test_turn_transaction.py -q` | `17 passed in 0.94s` |
 | `... pytest tests/m1_teacher/test_crash_recovery.py -q` | `33 passed in 14.10s` |
 | `... pytest tests/m1_teacher/test_concurrency.py -q` | `9 passed in 2.91s` |
