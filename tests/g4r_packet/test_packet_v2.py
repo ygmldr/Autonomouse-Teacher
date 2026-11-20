@@ -16,7 +16,7 @@ import sys
 
 import pytest
 
-import support
+import packet_support as support
 
 MANIFEST = "manifest.json"
 HASHES = "hashes.sha256"
@@ -78,7 +78,7 @@ def test_r4_01_builder_refuses_existing_root_and_bad_staging(tmp_path) -> None:
     metadata = tmp_path / "metadata.json"
     livegate = tmp_path / "livegate.json"
     staging = support.staging_tree(tmp_path / "second")
-    second_root = tmp_path / "review-packet-g4r-v2-test"
+    second_root = packet  # refuse to rebuild/modify the existing root
     completed = support.run([
         sys.executable, str(support.BUILDER),
         "--impl-sha", support.IMPL_SHA, "--staging", str(staging),
@@ -379,3 +379,83 @@ def test_v1_packet_is_untouched_by_v2_build(tmp_path) -> None:
     hashes_after = hashlib.sha256(
         (support.V1_PACKET / "hashes.sha256").read_bytes()).hexdigest()
     assert hashes_after == hashes_before
+
+
+# ---------------------------------------------------------------------------
+# Packet impl identity: authoritative 40-hex git commit plus content digest.
+# ---------------------------------------------------------------------------
+def test_impl_id_accepts_40hex_git_commit_with_content_sha(tmp_path) -> None:
+    root, summary = support.build_packet(
+        tmp_path, impl_sha=support.GIT_IMPL_SHA,
+        impl_content_sha256=support.IMPL_CONTENT_SHA)
+    assert root.name.endswith(support.GIT_IMPL_SHA)
+    identity = support.read_json(root / MANIFEST)["identity"]
+    assert identity["impl_sha"] == support.GIT_IMPL_SHA
+    assert identity["impl_git_commit"] == support.GIT_IMPL_SHA
+    assert identity["impl_content_sha256"] == support.IMPL_CONTENT_SHA
+    assert summary["impl_sha"] == support.GIT_IMPL_SHA
+    assert summary["impl_git_commit"] == support.GIT_IMPL_SHA
+    assert summary["impl_content_sha256"] == support.IMPL_CONTENT_SHA
+    assert support.verify_packet(
+        root, expected_impl_sha=support.GIT_IMPL_SHA)[0] == 0
+    assert support.verify_packet(
+        root, expected_impl_sha=support.IMPL_CONTENT_SHA)[0] == 0
+    exit_code, document = support.verify_packet(root, expected_impl_sha="f" * 64)
+    assert exit_code == 1
+    assert "IMPL_SHA_MISMATCH" in _issue_codes(document)
+
+
+def test_impl_id_rejects_non_hex_or_wrong_length(tmp_path) -> None:
+    staging = support.staging_tree(tmp_path)
+    metadata = tmp_path / "metadata.json"
+    livegate = tmp_path / "livegate.json"
+    support.write_json(metadata, support.metadata_document())
+    support.write_json(livegate, support.livegate_document())
+    source = tmp_path / "source.sqlite3"
+    support.make_sqlite_source(source)
+    invalid_ids = ["A" * 40, "a" * 39, "a" * 41, "g" * 40, "a" * 63, ""]
+    for position, bad in enumerate(invalid_ids):
+        completed = support.run([
+            sys.executable,
+            str(support.BUILDER),
+            "--impl-sha", bad,
+            "--staging", str(staging),
+            "--metadata", str(metadata),
+            "--livegate-snapshot", str(livegate),
+            "--sqlite", f"cases/r4-packet/ledger.sqlite3={source}",
+            "--packet-root", str(tmp_path / f"bad-{position}"),
+            "--frozen-utc", support.FROZEN_UTC,
+        ])
+        assert completed.returncode == 1, (bad, completed.stdout)
+        assert json.loads(completed.stdout)["code"] == "METADATA_INVALID"
+    completed = support.run([
+        sys.executable, str(support.BUILDER),
+        "--impl-sha", support.GIT_IMPL_SHA,
+        "--impl-content-sha256", "A" * 64,
+        "--staging", str(staging),
+        "--metadata", str(metadata),
+        "--livegate-snapshot", str(livegate),
+        "--sqlite", f"cases/r4-packet/ledger.sqlite3={source}",
+        "--packet-root", str(tmp_path / "bad-content"),
+        "--frozen-utc", support.FROZEN_UTC,
+    ])
+    assert completed.returncode == 1
+    assert json.loads(completed.stdout)["code"] == "METADATA_INVALID"
+    assert not (tmp_path / "bad-content").exists()
+
+
+def test_manifest_impl_identity_tamper_is_detected(tmp_path) -> None:
+    root, _ = support.build_packet(
+        tmp_path, impl_sha=support.GIT_IMPL_SHA,
+        impl_content_sha256=support.IMPL_CONTENT_SHA)
+    for index, forged in enumerate(("f" * 64, "0" * 40)):
+        copy = support.copy_packet(root, tmp_path / f"impl-tamper-{index}")
+        manifest = support.read_json(copy / MANIFEST)
+        manifest["identity"]["impl_git_commit"] = forged
+        support.force_write(copy / MANIFEST,
+                            json.dumps(manifest, indent=2, sort_keys=True).encode()
+                            + b"\n")
+        exit_code, document = support.verify_packet(copy)
+        assert exit_code == 1
+        codes = _issue_codes(document)
+        assert "MANIFEST_INVALID" in codes or "HASH_MISMATCH" in codes, codes

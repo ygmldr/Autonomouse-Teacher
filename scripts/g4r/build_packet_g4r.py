@@ -36,6 +36,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import shutil
 import sqlite3
 import stat
@@ -60,6 +61,8 @@ REQUIRED_METADATA = (
     "environment", "tests", "limitations",
 )
 SHA_FIELDS = ("rootfs_sha256", "deps_sha256")
+_GIT_COMMIT = re.compile(r"[a-f0-9]{40}\Z")
+_SHA256 = re.compile(r"[a-f0-9]{64}\Z")
 
 
 class BuildError(RuntimeError):
@@ -196,7 +199,29 @@ def _require_sha(value: object, *, field: str) -> str:
     return value
 
 
-def _load_metadata(path: Path, impl_sha: str) -> dict:
+def _require_impl_id(value: object, *, field: str) -> str:
+    """Accept the authoritative 40-hex git commit or a 64-hex impl identity.
+
+    The frozen policy convention is a lowercase 40-hex git commit; a 64-hex
+    value stays accepted for synthetic/testing packets. Anything else (length,
+    uppercase, non-hex) is refused.
+    """
+    if not isinstance(value, str) or not (_GIT_COMMIT.fullmatch(value)
+                                          or _SHA256.fullmatch(value)):
+        raise BuildError("METADATA_INVALID",
+                         f"{field} must be a lowercase 40-hex git commit or 64-hex sha256")
+    return value
+
+
+def _optional_sha256(value: object, *, field: str) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str) or not _SHA256.fullmatch(value):
+        raise BuildError("METADATA_INVALID", f"{field} must be a lowercase sha256 digest")
+    return value
+
+
+def _load_metadata(path: Path, impl_sha: str, impl_content_sha256: str | None) -> dict:
     document = _read_json_strict(path, code="METADATA_INVALID")
     for key in REQUIRED_METADATA:
         if key not in document:
@@ -223,8 +248,26 @@ def _load_metadata(path: Path, impl_sha: str) -> dict:
         raise BuildError("METADATA_INVALID", "external_network_calls must be 0")
     if document.get("live_gate") not in (None, "BLOCKED"):
         raise BuildError("METADATA_INVALID", "live_gate must be BLOCKED")
-    if document.get("impl_sha") not in (None, impl_sha):
-        raise BuildError("IMPL_SHA_MISMATCH", "metadata impl_sha differs from --impl-sha")
+    metadata_impl = document.get("impl_sha")
+    if metadata_impl is not None:
+        _require_impl_id(metadata_impl, field="metadata.impl_sha")
+        if metadata_impl != impl_sha:
+            raise BuildError("IMPL_SHA_MISMATCH",
+                             "metadata impl_sha differs from --impl-sha")
+    metadata_git = document.get("impl_git_commit")
+    if metadata_git is not None:
+        if not isinstance(metadata_git, str) or not _GIT_COMMIT.fullmatch(metadata_git):
+            raise BuildError("METADATA_INVALID",
+                             "metadata.impl_git_commit must be a 40-hex git commit")
+        if _GIT_COMMIT.fullmatch(impl_sha) and metadata_git != impl_sha:
+            raise BuildError("IMPL_SHA_MISMATCH",
+                             "metadata impl_git_commit differs from --impl-sha")
+    metadata_content = _optional_sha256(document.get("impl_content_sha256"),
+                                        field="metadata.impl_content_sha256")
+    if (metadata_content is not None and impl_content_sha256 is not None
+            and metadata_content != impl_content_sha256):
+        raise BuildError("IMPL_SHA_MISMATCH",
+                         "metadata impl_content_sha256 differs from CLI value")
     return document
 
 
@@ -400,13 +443,19 @@ def _self_check(build: Path, manifest: dict) -> None:
 
 def build(args: argparse.Namespace) -> dict:
     impl_sha = args.impl_sha
-    _require_sha(impl_sha, field="--impl-sha")
+    _require_impl_id(impl_sha, field="--impl-sha")
+    impl_content_sha256 = _optional_sha256(args.impl_content_sha256,
+                                           field="--impl-content-sha256")
     packet_root = Path(args.packet_root).resolve()
     if packet_root.exists():
         raise BuildError("PACKET_ROOT_EXISTS",
                          "refusing to modify an existing packet directory")
     frozen_utc = args.frozen_utc or utc_now()
-    metadata = _load_metadata(Path(args.metadata), impl_sha)
+    metadata = _load_metadata(Path(args.metadata), impl_sha, impl_content_sha256)
+    impl_git_commit = impl_sha if _GIT_COMMIT.fullmatch(impl_sha) else None
+    if impl_git_commit is None:
+        impl_git_commit = metadata.get("impl_git_commit")
+    impl_content_sha256 = impl_content_sha256 or metadata.get("impl_content_sha256")
     snapshot = _load_livegate_snapshot(Path(args.livegate_snapshot))
     staging = Path(args.staging).resolve()
     if not staging.is_dir():
@@ -437,7 +486,13 @@ def build(args: argparse.Namespace) -> dict:
                 "frozen_utc": frozen_utc,
             },
             "identity": {
+                # ``impl_sha`` is the CLI packet impl id (40-hex git commit or
+                # 64-hex synthetic id); the two semantic fields below are kept
+                # explicit so a git commit can never be confused with a content
+                # digest.
                 "impl_sha": impl_sha,
+                "impl_git_commit": impl_git_commit,
+                "impl_content_sha256": impl_content_sha256,
                 "base_sha": metadata["base_sha"],
                 "parent_sha": metadata.get("parent_sha"),
                 "code_sha": metadata.get("code_sha"),
@@ -495,6 +550,8 @@ def build(args: argparse.Namespace) -> dict:
             "status": "BUILT_AND_SELF_CHECKED",
             "packet_root": str(packet_root),
             "impl_sha": impl_sha,
+            "impl_git_commit": impl_git_commit,
+            "impl_content_sha256": impl_content_sha256,
             "frozen_utc": frozen_utc,
             "payload_count": manifest["inventory"]["payload_count"],
             "total_regular_files": manifest["inventory"]["total_regular_files"],
@@ -526,7 +583,10 @@ def build(args: argparse.Namespace) -> dict:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--impl-sha", required=True)
+    parser.add_argument("--impl-sha", required=True,
+                        help="frozen 40-hex git commit (or 64-hex synthetic id)")
+    parser.add_argument("--impl-content-sha256", default=None,
+                        help="optional 64-hex sha256 of the canonical impl source tree")
     parser.add_argument("--staging", required=True, help="input payload tree")
     parser.add_argument("--metadata", required=True, help="identity/test metadata JSON")
     parser.add_argument("--livegate-snapshot", required=True,

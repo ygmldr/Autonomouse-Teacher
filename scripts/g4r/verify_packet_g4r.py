@@ -30,6 +30,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import stat
 import sys
 from pathlib import Path
@@ -42,6 +43,8 @@ REPORT = "packet-integrity-report.txt"
 FIXED_METADATA_EXCEPTIONS = frozenset({MANIFEST, HASHES, REPORT})
 FILE_MODE = 0o444
 LIVEGATE_SNAPSHOT_PATH = "identity/livegate.json"
+_GIT_COMMIT = re.compile(r"[a-f0-9]{40}\Z")
+_SHA256 = re.compile(r"[a-f0-9]{64}\Z")
 REPORT_KEYS = frozenset({
     "schema", "packet", "impl_sha", "frozen_utc", "payload_count",
     "hash_manifest_entry_count", "total_regular_files", "payload_tree_sha256",
@@ -304,9 +307,33 @@ def verify(packet_root: Path, *, expected_impl_sha: str | None = None) -> dict:
     if manifest and manifest.get("schema") != SCHEMA:
         result.add("MANIFEST_INVALID", MANIFEST, "unknown schema")
     identity = manifest.get("identity") if isinstance(manifest.get("identity"), dict) else {}
-    if expected_impl_sha is not None and identity.get("impl_sha") != expected_impl_sha:
-        result.add("IMPL_SHA_MISMATCH", MANIFEST,
-                   f"impl_sha {identity.get('impl_sha')!r}")
+    impl_sha = identity.get("impl_sha")
+    impl_git_commit = identity.get("impl_git_commit")
+    impl_content_sha256 = identity.get("impl_content_sha256")
+    if not isinstance(impl_sha, str) or not (_GIT_COMMIT.fullmatch(impl_sha)
+                                             or _SHA256.fullmatch(impl_sha)):
+        result.add("MANIFEST_INVALID", MANIFEST,
+                   "identity.impl_sha is not a 40-hex git commit / 64-hex sha256")
+    if impl_git_commit is not None and (
+            not isinstance(impl_git_commit, str)
+            or not _GIT_COMMIT.fullmatch(impl_git_commit)):
+        result.add("MANIFEST_INVALID", MANIFEST,
+                   "identity.impl_git_commit is not a 40-hex git commit")
+    if impl_content_sha256 is not None and (
+            not isinstance(impl_content_sha256, str)
+            or not _SHA256.fullmatch(impl_content_sha256)):
+        result.add("MANIFEST_INVALID", MANIFEST,
+                   "identity.impl_content_sha256 is not a 64-hex sha256")
+    if (isinstance(impl_sha, str) and _GIT_COMMIT.fullmatch(impl_sha)
+            and impl_git_commit != impl_sha):
+        result.add("MANIFEST_INVALID", MANIFEST,
+                   "identity.impl_git_commit must equal the 40-hex impl_sha")
+    if expected_impl_sha is not None:
+        candidates = {value for value in (impl_sha, impl_git_commit,
+                                          impl_content_sha256) if value is not None}
+        if expected_impl_sha not in candidates:
+            result.add("IMPL_SHA_MISMATCH", MANIFEST,
+                       f"expected {expected_impl_sha!r} not among {sorted(candidates)}")
 
     hashes = {}
     hashes_digest = None
