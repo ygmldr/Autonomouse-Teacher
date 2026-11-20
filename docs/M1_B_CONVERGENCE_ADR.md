@@ -11,6 +11,7 @@
 | 历史数字纪律 | **536 与 365 是两条独立分支上的历史冻结参考，不可相加，也不存在“统一 901 tests”**；新集成必须重新独立验收（见 §10） |
 | 硬边界 | 离线、无 Key、无真实 Provider/网络、无真实学习者数据、不触碰 M0/security/bridge/config/g*/scripts/g4*/LiveGate |
 | 相关交付 | 同批 `docs/M1_B_PORTS.md`（端口与迁移）、`docs/M1_B_CI_AND_DEMO.md`（冻结 CI/Demo/静态隔离命令） |
+| 独立预审响应 | 本修订回应 `docs/M1_B_BOUNDARY_PRE_REVIEW.md`（`PRE_REVIEW_PASS_WITH_ACTIONS`，0 P0 / 8 P1 / 13 P2）：逐条处置见 `docs/M1_B_PR0_REVIEW_RESPONSE.md`；修订仍为 `DESIGN_ONLY`，未改实现/测试 |
 
 ---
 
@@ -121,7 +122,7 @@ A 线 `PASS_FOR_M1A_OFFLINE_MVP`、B 线 `PASS_FOR_M1_OFFLINE_DESIGN_AND_EVALUAT
 | SessionId | `SessionState.session_id`（`contracts/types.py:824`）；`HistoryEvent.session_id`（`:813`）；DB `sessions.session_id` PK（`learner/repository.py:125`） | **不存在教学 session 标识**。仅有 `RuntimeRequest.session_id`（`types.py:640`）与 `RuntimeResponse.session_id`（`:660`），是 mock runtime 的请求作用域；`EvidenceEvent` **没有** `session_id`（`:426-435`） | A required；B 仅 runtime 作用域 | 同名但语义不同 | A session `updated_at`；B runtime 无 | A `sessions` 表无版本列（schema_meta 全局） | A = 跨轮持久状态机单元（pause/resume/重启恢复）；B = 单次 mock 请求作用域。**禁止把 B runtime request id 当 A session id** | `REJECT`（B 证据/Session 缺失 session 绑定）：`MIGRATION_MISSING_SESSION`；A session 只能由 canonical SessionEngine 新建 |
 | GoalId | `LearnerGoal.goal_id`（`types.py:795`）；DB `goals.goal_id` PK（`learner/repository.py:116`） | `LearningGoal.goal_id`（`m1_offline/types.py:473`） | required 非空 str | `goal_id` | A/B 均有 created_at | 无 | A goal 绑定 `objective_id`（领域目标）；B goal 绑定 `target_skills[]`（任意技能 id），无 objective 概念 | `MAP`（B→A 需 objective 映射表；无映射→`MIGRATION_UNSUPPORTED_GOAL_MAPPING`） |
 | EventId | `HistoryEvent.event_id`（`types.py:811`）PK；确定性格式 `evt.<learner_id>.<seq>`（`learner/history.py:193`） | `EvidenceEvent.event_id`（`m1_offline/types.py:427`）生产方自定；`TraceEvent.event_id`（`:684`） | required 非空 str | `event_id` | A/B 均 created_at | A 事件集枚举；B kind 枚举 | A 事件 id 由历史层生成 + `UNIQUE(learner_id, seq)`；B 无 seq、无 session、生产者自定 id；两者都以 event_id 幂等 | `REJECT`（直接 id 复用会与 A 生成规则冲突）：`MIGRATION_EVENT_ID_CONFLICT`；历史导入需改写为 A 事件并在 payload 保留 `source_event_id`+校验和 |
-| ResultId | `AssessmentResult.result_id`（`types.py:692`）；幂等事件 id `evt.assessed.<result_id>`（`learner/history.py:109-118`） | `AssessmentResult.assessment_id`（`m1_offline/types.py:602`），确定性 `asmt_...`（`cf/teacher.py` 约 `:718`） | required 非空 str | 不同名 | created_at | 无 | A 用它做全局/待修复的幂等键（B-03 缺陷：跨 learner/session 查重）；B 无学习状态写入链 | `REJECT`（在 B-PR3 作用域修复完成前）：`IDEMPOTENCY_SCOPE_UNSAFE`；统一合同要求 composite key（learner, session, item, turn, result_id）+ request digest |
+| ResultId | `AssessmentResult.result_id`（`types.py:692`）；幂等事件 id `evt.assessed.<result_id>`（`learner/history.py:109-118`） | `AssessmentResult.assessment_id`（`m1_offline/types.py:602`），确定性 `asmt_...`（`cf/teacher.py:729-731`） | required 非空 str | 不同名 | created_at | 无 | A 用它做全局/待修复的幂等键（B-03 缺陷：跨 learner/session 查重）；B 无学习状态写入链 | `REJECT`（在 B-PR3 作用域修复完成前）：`IDEMPOTENCY_SCOPE_UNSAFE`；统一合同要求 composite key（learner, session, item, turn, result_id）+ request digest |
 | TaskId / ItemId | `AssessmentItem.item_id`（`types.py:668`）；`AssessmentResult.item_id`（`:693`） | `LearningTask.task_id`（`types.py:496`）；`AssessmentResult.task_id`（`:603`）；`EvidenceEvent.task_id`（`:429`） | required | 不同名 | — | — | A 的“item”是领域适配器提供的具体评估题；B 的“task”是任务库条目（含 fixture_ref）。二者是不同粒度 | `MAP`（需 fixture/任务映射表；缺失→`MIGRATION_UNSUPPORTED_TASK_MAPPING`） |
 
 ### 4.2 KnowledgeNode vs SkillNode（+ PrerequisiteEdge）
@@ -131,9 +132,10 @@ A 线 `PASS_FOR_M1A_OFFLINE_MVP`、B 线 `PASS_FOR_M1_OFFLINE_DESIGN_AND_EVALUAT
 | 节点主键 | `KnowledgeNode.node_id`（`contracts/types.py:582`） | `SkillNode.skill_id`（`types.py:340`） | required 非空 str | 不同名 | A created_at；B 无 | 无 | A 有全局唯一节点 + 领域 id；B 是技能图节点 | `MAP`（skill_id→node_id，需映射表；无映射→`MIGRATION_UNSUPPORTED_SKILL_MAPPING`） |
 | 名称/描述 | `title`（`:584`，非空）、`description`（`:585`） | `name`（`:341`，非空）、`description`（`:344`，可空） | required | 不同名 | — | — | 基本对应 | `PASS`（字段改名映射） |
 | 领域 | `domain_id`（`:583`） | `domain`（`:342`） | required | 不同名 | — | A 有 `domain_version`（adapter 级，`domains/cf_binary_search.py:573`）；B 无领域版本 | B 的 domain 是字符串标签，无版本/注册表 | `MAP`（domain 原样；domain_version 由 A adapter 决定；B→A 需人工声明 `MIGRATION_DOMAIN_VERSION_UNSPECIFIED` 或显式参数） |
-| 难度 | `difficulty: int` 1..5（`:586`，`_range_meta(minimum=1, maximum=5)`） | **无对应字段** | A required | `difficulty` | — | — | B 无难度标签 | `REJECT`（不得编造）：`MIGRATION_UNSUPPORTED_FIELD:difficulty`；或由维护者提供显式 `skill_id→difficulty` 映射表（记录在 manifest） |
-| 考核方式 | `assessment_mode` ∈ `DETERMINISTIC_JUDGE/RULE_RUBRIC/HUMAN_REVIEW_REQUIRED`（`:587`） | **无对应字段**（B 由 vertical 具体判定器决定） | A required | `assessment_mode` | — | — | B 无评估模式声明 | `REJECT`：`MIGRATION_UNSUPPORTED_FIELD:assessment_mode`；提供显式映射参数才可迁移 |
-| 标签/内容引用 | `tags: list[str]` 默认 `[]`（`:588`）；`content_ref: str` 默认 `""`（`:589`） | **无对应字段**（B 的 content 在 fixtures/vertical 内部） | A default | `tags`,`content_ref` | — | — | B 无 tags/content_ref | `MAP`（默认空值 + 显式可选映射；记录 `lossy_default_filled`） |
+| 难度 | `difficulty: int` 1..5（`:586`，`_range_meta(minimum=1, maximum=5)`） | **无对应字段** | A required | `difficulty` | — | — | B 无难度标签 | `REJECT`（默认，不得编造）：`MIGRATION_UNSUPPORTED_FIELD:difficulty`；仅当维护者批准显式 `skill_id→difficulty` 映射表时按 `LOSSY` 输入并记录，不静默填充 |
+| 考核方式 | `assessment_mode` ∈ `DETERMINISTIC_JUDGE/RULE_RUBRIC/HUMAN_REVIEW_REQUIRED`（`:587`） | **无对应字段**（B 由 vertical 具体判定器决定） | A required | `assessment_mode` | — | — | B 无评估模式声明 | `REJECT`：`MIGRATION_UNSUPPORTED_FIELD:assessment_mode`（显式映射参数仅由维护者批准时按 `LOSSY` 输入） |
+| 标签 | `tags: list[str]` 默认 `[]`（`:588`） | **无对应字段** | A default | `tags` | — | — | B 无标签 | `LOSSY`：默认 `[]`，manifest 记 `lossy_default_filled:tags`（显式 lossy action，非 unsupported） |
+| 内容引用 | `content_ref: str` 默认 `""`（`:589`） | **无对应字段**（B 的 content 在 fixtures/vertical 内部） | A default | `content_ref` | — | — | B 无内容引用 | `REJECT`：`MIGRATION_UNSUPPORTED_FIELD:content_ref`（无法表达内容定位；sidecar 不得伪装 canonical 引用） |
 | 前置关系 | 独立记录 `PrerequisiteEdge{source_node_id,target_node_id,kind ∈ HARD/SOFT,weight 0..1}`（`types.py:594-601`）；图校验/环检测在 `knowledge/graph.py:40` | `SkillNode.prerequisites: list[str]` 默认 `[]`（`types.py:343`） | A required；B default [] | `prerequisites`（B 内嵌） vs 独立 edge | — | — | A 有向 edge + HARD/SOFT + 权重 + DAG 校验；B 仅无向/未分级的 skill id 列表，无环校验、无权重 | `MAP`（保守映射为 `HARD` + `weight=1.0` 并在 manifest 记 `lossy:prerequisite_kind_defaulted`；或拒绝→`MIGRATION_UNSUPPORTED_PREREQUISITE_KIND`）。**不得**把 B 前置默认当成 SOFT |
 | 时间戳 | `created_at`（`:590`） | 无时间戳字段 | A default now_utc | `created_at` | 见 4.12 | — | B SkillNode 无法追溯创建时间 | `MAP`（迁移时间由 manifest 记录，不从 B 记录伪造） |
 
@@ -144,7 +146,7 @@ A 线 `PASS_FOR_M1A_OFFLINE_MVP`、B 线 `PASS_FOR_M1_OFFLINE_DESIGN_AND_EVALUAT
 | 事件主键 | `HistoryEvent.event_id`（`types.py:811`） | `EvidenceEvent.event_id`（`m1_offline/types.py:427`） | required | `event_id` | A created_at；B created_at（空→now） | — | 见 4.1 | `REJECT`（id 冲突）→ 新 A 事件 + `source_event_id` payload |
 | 归属 | `learner_id`（`:812`）+ `session_id`（`:813`） | `learner_id`（`:428`）+ `task_id`（`:429`）；**无 session_id** | required | 不同 | — | — | A 事件属于 learner+session；B 事件属于 learner+task | `MAP`（task→item 映射+显式 session 绑定；缺失→`MIGRATION_MISSING_SESSION`） |
 | 顺序 | `seq: int >=0`（`:814`）；DB `UNIQUE(learner_id, seq)`（`repository.py:104`） | **无 seq**；顺序 = 生产者 append 顺序（`_applied_event_ids` 去重，`learner_model.py:178` 附近） | A required | `seq` | — | — | A 可在 DB 中严格重排/重放；B 仅内存顺序 + JSONL 行序 | `MAP`（按 manifest 中的 source order 重新赋 seq；映射结果必须可重复生成相同 checksum） |
-| 类型 | `event_type` ∈ `HISTORY_EVENT_TYPE_VALUES` 12 值（`types.py:101-118`） | `kind` ∈ `EVIDENCE_KIND_VALUES` 6 值（`types.py:43-51`） | required | 不同名 | — | — | A 是教学/会话事件流（含 SESSION_STARTED/PLAN_CREATED/…/GOAL_COMPLETED/ERROR）；B 是证据类型（ANSWER/CODE_SUBMISSION/…/HINT_REQUEST） | `MAP`（映射表见 §5.1；不可映射值→`MIGRATION_UNSUPPORTED_EVENT_KIND`） |
+| 类型 | `event_type` ∈ `HISTORY_EVENT_TYPE_VALUES` 12 值（`types.py:101-118`） | `kind` ∈ `EVIDENCE_KIND_VALUES` 6 值（`types.py:43-51`） | required | 不同名 | — | — | A 是教学/会话事件流（含 SESSION_STARTED/PLAN_CREATED/…/GOAL_COMPLETED/ERROR）；B 是证据类型（ANSWER/CODE_SUBMISSION/…/HINT_REQUEST） | `MAP`：**逐项映射表见 §5.1.1**（6→A event_type，含 payload 约束与拒绝码）；不可映射/未来 kind→`MIGRATION_UNSUPPORTED_EVENT_KIND`（REJECT） |
 | 载荷 | `payload: dict` JSON（`:816`） | `payload: dict`（`:431`）+ `observed_score: float\|None`（`:432`）+ `error_codes: list[str]`（`:433`）+ `provenance: Provenance\|None`（`:434`） | A default `{}`；B payload 必填 | `payload` | — | — | B 把“分数/错误码/来源”提升为一级字段；A 放在 payload | `MAP`（B 一级字段写入 A payload 的 `migrated_v0` 子对象；保留 provenance 的 `experiment_id/source/created_at`） |
 | 来源 | A `EvidenceReference`（`:744`，`source ∈ OBSERVED/INFERRED`，`event_id` 指针，`detail`） | B `Provenance`（`types.py:327`，`experiment_id` 必填，`source`，`created_at`） | — | 不同名 | A created_at；B created_at | — | A 的证据来源是枚举 + 事件指针；B 是实验/来源标签 | `MAP`（provenance.source→`EvidenceReference.detail` 文本；无法表达的字段→`MIGRATION_UNSUPPORTED_FIELD:provenance.*`） |
 | 循环追踪 | A 用事件流本身（session/event）；无独立 loop 表 | B `TraceEvent`（`types.py:683`：event_id/loop_id/round/step/payload/timestamp），用于评测 loop 回放 | — | 不同 | — | — | B 的 TraceEvent 是 vertical/评测遥测，不是 canonical 教学事件 | `REJECT`（不进入 canonical 事件表）：`UNSUPPORTED_TRACE_EVENT_MIGRATION`；仅作为 sidecar 证据保留（如 trace 文件 sha256 写入 manifest） |
@@ -158,7 +160,7 @@ A 线 `PASS_FOR_M1A_OFFLINE_MVP`、B 线 `PASS_FOR_M1_OFFLINE_DESIGN_AND_EVALUAT
 | 题目/任务 | `item_id`（`:693`） | `task_id`（`:603`） | required | 不同名 | — | — | item vs task 粒度 | `MAP` |
 | Learner | `learner_id`（`:694`） | `learner_id`（`:604`） | required | 同名 | — | — | 一致 | `PASS` |
 | Scorer | `scorer_id`（`:698`，kw-only required） | `scorer_id`（`:605`） | required | 同名 | — | — | B 值为 `independent_cf_judge_v0`（`cf/teacher.py:69`）或 `InterviewRubric:…`（`interview/rubric.py:48`）；A 由 scorer 实现提供 | `MAP`（scorer_id 原样保留；跨线不得混合 scorer 语义，见 4.11） |
-| 结果语义 | `status` ∈ `CORRECT/INCORRECT/PARTIAL/NEEDS_REVIEW/EVAL_ERROR`（`:695`）+ `score: float\|None`（`:696`）+ `max_score`（`:697`） | `passed: bool`（`:606`）+ `score: float`（`:607`，0..1）+ `dimensions: dict[str,float]`（`:608`）+ `failure_modes: list[str]`（`:609`）+ `hidden_cases_passed/total`（`:610/611`） | A status required, score nullable；B passed/score/dimensions required | 不同 | — | — | A 表达“独立评估状态”，明确区分 `NEEDS_REVIEW`/`EVAL_ERROR`；B 是 bool 通过 + 多维度分数（CF 的 dimensions = correctness/edge_case_accuracy/efficiency，`cf/teacher.py:700-703`） | `MAP`（passed=True→`CORRECT`+score；passed=False→`INCORRECT`；B 无 `NEEDS_REVIEW/EVAL_ERROR/PARTIAL` 语义 → 需 vertical 适配层显式产生新状态；`dimensions`/`hidden_cases_*` 不可映射 → 保留在 A `HistoryEvent.payload.migrated_v0`，拒绝码 `MIGRATION_UNSUPPORTED_FIELD:dimensions`） |
+| 结果语义 | `status` ∈ `CORRECT/INCORRECT/PARTIAL/NEEDS_REVIEW/EVAL_ERROR`（`:695`）+ `score: float\|None`（`:696`）+ `max_score`（`:697`） | `passed: bool`（`:606`）+ `score: float`（`:607`，0..1）+ `dimensions: dict[str,float]`（`:608`）+ `failure_modes: list[str]`（`:609`）+ `hidden_cases_passed/total`（`:610/611`） | A status required, score nullable；B passed/score/dimensions required | 不同 | — | — | A 表达“独立评估状态”，明确区分 `NEEDS_REVIEW`/`EVAL_ERROR`；B 是 bool 通过 + 多维度分数（CF 的 dimensions = correctness/edge_case_accuracy/efficiency，`cf/teacher.py:723-727`） | `MAP`+`LOSSY`：passed/score 走确定性 status 映射（`NEEDS_REVIEW/EVAL_ERROR/PARTIAL` 由 vertical 适配层显式产生）；`dimensions`/`hidden_cases_*`/`failure_modes` 作为 **lossy sidecar** 保留在 `ASSESSED.payload.migrated_v0`（canonical JSON+digest，不含隐藏材料），**不计入** unsupported；仅 sidecar 禁用时 `MAP-E07_KNOWLEDGE_PROVENANCE_LOSS`。Interview 4 维 rubric 的 canonical 载体见 PORTS §3.2.1 `AssessmentAudit`/`RubricResult`（P1-07 修订） |
 | 证据引用 | `evidence_refs: list[str]`（`:700`） | 无对应字段（`dimensions`/`failure_modes` 承担解释） | default [] | `evidence_refs` | — | — | A 指向事件/隐藏 spec 摘要（如 `spec-sha256:`），B 无 | `MAP`（B failure_modes→A payload；不得把 hidden expected 写入 evidence_refs） |
 | 失败原因 | `failure_reason: str`（`:699`，默认空） | 无对应字段 | default "" | `failure_reason` | — | — | A 用码/计数；B 用 `failure_modes` + `dimensions` | `MAP`（failure_modes 序列化到 A `failure_reason` 有损 → 建议 payload sidecar + `MIGRATION_LOSSY_FIELD` 记录） |
 
@@ -166,8 +168,8 @@ A 线 `PASS_FOR_M1A_OFFLINE_MVP`、B 线 `PASS_FOR_M1_OFFLINE_DESIGN_AND_EVALUAT
 
 | 字段 | A 线 `m1a.v0` | B 线 `m1.offline.v0` | 可空性 / 默认 | 序列化名 | 时间戳 | 版本 | 语义差异 | 迁移动作 |
 |---|---|---|---|---|---|---|---|---|
-| 容器 | `LearnerSnapshot.masteries: dict[str,MasteryEstimate]`（`types.py:771`） | `LearnerState.mastery: dict[str,float]`（`m1_offline/types.py:456`） | A default {}；B required | 不同名 | A created/updated；B updated_at（空→now） | — | A 每节点带 confidence/evidence_count；B 每节点仅 float，evidence_count 是全局 | `REJECT`（默认禁止双写/自动迁移）：`MIGRATION_LEARNER_STATE_DENIED`。若维护者未来授权单向导入：`confidence`/`evidence_count` 无源→必须显式缺省并记 `lossy_unknown_fields`，不得伪造置信度 |
-| 单节点掌握 | `MasteryEstimate{node_id,value:0..1,confidence:0..1,evidence_count:>=0,created_at,updated_at}`（`types.py:755-763`） | `LearnerState.mastery[node]`（无结构） | A required | `node_id/value/confidence/evidence_count` | A created+updated；B global updated_at | — | A 有不确定性建模（heuristic），B 无 | `REJECT`（同上） |
+| 容器 | `LearnerSnapshot.masteries: dict[str,MasteryEstimate]`（`types.py:771`） | `LearnerState.mastery: dict[str,float]`（`m1_offline/types.py:456`） | A default {}；B required | 不同名 | A created/updated；B updated_at（空→now） | — | A 每节点带 confidence/evidence_count；B 每节点仅 float，evidence_count 是全局 | **永久拒绝直接 mastery/state 导入**：`MIGRATION_LEARNER_STATE_DENIED`（P1-05）。B 掌握信息只能以其底层证据（`EvidenceEvent`/独立 `AssessmentResult`）导入，由 A `MasteryModel` 重算；迁移后 `verify_rebuild=true` 为硬门 |
+| 单节点掌握 | `MasteryEstimate{node_id,value:0..1,confidence:0..1,evidence_count:>=0,created_at,updated_at}`（`types.py:755-763`） | `LearnerState.mastery[node]`（无结构） | A required | `node_id/value/confidence/evidence_count` | A created+updated；B global updated_at | — | A 有不确定性建模（heuristic），B 无 | `REJECT`（永久）：不得伪造 confidence/evidence_count/revision；只能由 A 证据重算产生 |
 | 错误计数 | `LearnerSnapshot.error_counts: dict[str,int]`（`:775`，非负） | `LearnerState.error_counts: dict[str,int]`（`:457`） | default {} | 同名 | — | — | A 键约定为错误码（B 线文档记录“两种键约定”问题 Q2，`docs/m1/ADR-TEACHER-CORE.md` 未决问题 Q2）；B 同类 | `MAP`（概念可映射；但键语义未统一，需维护者裁定 Q2 后再迁移） |
 | 已完成题目 | `LearnerSnapshot.completed_item_ids: list[str]`（`:774`） | **无对应字段** | default [] | `completed_item_ids` | — | — | B 无完成题记录 | `MAP`（从 A→B 导出时丢弃并记 `lossy_dropped`；B→A 需从 EvidenceEvent task_id 推导，禁止臆造） |
 | 版本/修订 | `revision: int >=0`（`:778`） | **无对应字段** | default 0 | `revision` | A updated_at；B updated_at | — | A 支持乐观并发/缓存重建；B 无 | `MAP`（导入时由 A 重新生成 revision；不得复制） |
@@ -203,7 +205,7 @@ A 线 `PASS_FOR_M1A_OFFLINE_MVP`、B 线 `PASS_FOR_M1_OFFLINE_DESIGN_AND_EVALUAT
 | 维度 | A 线 | B 线 | 迁移动作 |
 |---|---|---|---|
 | 领域适配器 | `DomainAdapter` Protocol：`domain_id`、`domain_version`、`knowledge_nodes()`、`prerequisite_edges()`、`objectives()`、`assessment_items(node_id=None)`、`teaching_content(node_id, kind)`、`validate()`（`contracts/domain.py:24-57`）；`DomainRegistry`（`:61`，重复→ConflictError，缺失→NotFoundError） | **无 DomainAdapter/Registry**；CF 用 `CFTeacher`（`cf/teacher.py:133`），Interview 用 `InterviewCoach`（`interview/coach.py:173`），Freshness 用 `FreshnessManager`（`freshness.py:179`） | `DESIGN_ONLY`：canonical = A `DomainAdapter`；B 三个 vertical 通过新增 `DomainAdapterV1`/vertical 适配层接入（见 `M1_B_PORTS.md`）；B 现有类不改 |
-| 知识来源 | 无 `KnowledgeSource` 记录；知识内容由 adapter 的 `teaching_content` 提供 | `KnowledgeSource{source_id,uri,publisher,published_at,observed_at,valid_until,confidence,claim_status}`（`types.py:357-365`）；`KnowledgeRevision`（`:382-390`）；`FreshnessManager.classify`（`freshness.py:186`）KEEP/UPDATE/RECHECK | `DESIGN_ONLY`：新增 `KnowledgeSourcePort` 适配 B 记录；Freshness 决策只影响 planner 的候选材料，不直接写学习者状态 |
+| 知识来源 | 无 `KnowledgeSource` 记录；知识内容由 adapter 的 `teaching_content` 提供 | `KnowledgeSource{source_id,uri,publisher,published_at,observed_at,valid_until,confidence,claim_status}`（`types.py:357-365`）；`KnowledgeRevision`（`:382-390`）；`FreshnessManager.classify`（`freshness.py:186`）KEEP/UPDATE/RECHECK | `DESIGN_ONLY`：新增 `KnowledgeSourcePort` 适配 B 记录；**信任字段（`trust_tier`/`untrusted`/`claim_status`）不得由 claim 自报**，由可信 `KnowledgeSourceRegistry`/部署配置按 `source_id`/`uri` allow-list 派生（PORTS §3.3，P1-06）；Freshness 决策只影响 planner 候选材料，不直接写学习者状态 |
 | 评分边界 | `AssessmentScorer` Protocol（`assessment/scorer.py:191`）；`DeterministicScorer`（`:217`）是唯一 hidden-scoring reader；teacher 组件不读 hidden | `CFJudge`（`cf/judge.py:181`）独立判题，但 `JudgeResult.failures`（`:150-164`）包含 `expected=...`（runner 生成 `expected_repr`）；`CFTeacher` 同进程持有该结果 | `DESIGN_ONLY`：B-PR1 重做可信边界（TrustedJudgeSupervisor/UntrustedExecutionWorker，见 `M1_B_PORTS.md` §3）；在实现前不得对不可信 CODE 开放 |
 
 ### 4.10 Goal
@@ -220,7 +222,7 @@ A 线 `PASS_FOR_M1A_OFFLINE_MVP`、B 线 `PASS_FOR_M1_OFFLINE_DESIGN_AND_EVALUAT
 
 | 维度 | A 线 | B 线 | 语义差异 | 迁移动作 |
 |---|---|---|---|---|
-| Scorer 协议/身份 | `AssessmentScorer` Protocol（`scorer.py:191`），属性 `scorer_id: str`（`:199`），方法 `score(item, learner_id, response, *, result_id)`（`:201`）；结果 `AssessmentResult.scorer_id`（`types.py:698`） | 无统一 Protocol；CF：`JUDGE_VERSION="cf.hidden.judge.v0"`（`judge.py:41`）、`SCORER_ID="independent_cf_judge_v0"`（`cf/teacher.py:69`）；Interview：`SCORER_ID="InterviewRubric:m1.offline.v0"`（`rubric.py:48`） | A 是单一 trusted scorer 接口（当前实现有 B-01 安全缺陷）；B 是 vertical 各自 scorer 字符串常量 | `DESIGN_ONLY`：`AssessmentPort`（`M1_B_PORTS.md` §3.2）统一入口；scorer_id 作为不可伪造身份由 trusted 层产生；B vertical 的 scorer_id 保留为 `vertical:<id>:<version>` 命名空间 |
+| Scorer 协议/身份 | `AssessmentScorer` Protocol（`scorer.py:191`），属性 `scorer_id: str`（`:199`），方法 `score(item, learner_id, response, *, result_id)`（`:201`）；结果 `AssessmentResult.scorer_id`（`types.py:698`） | 无统一 Protocol；CF：`JUDGE_VERSION="cf.hidden.judge.v0"`（`judge.py:41`）、`SCORER_ID="independent_cf_judge_v0"`（`cf/teacher.py:69`）；Interview：`SCORER_ID="InterviewRubric:m1.offline.v0"`（`rubric.py:48`） | A 是单一 trusted scorer 接口（当前实现有 B-01 安全缺陷）；B 是 vertical 各自 scorer 字符串常量 | `DESIGN_ONLY`：`AssessmentPort`（`M1_B_PORTS.md` §3.2）统一入口；scorer_id 作为不可伪造身份由 trusted 层产生；B vertical 的 scorer_id 保留为 `vertical:<id>:<version>` 命名空间 ；**“仅 synthetic fixture/trusted test”能力位不得出现在 job/请求中**，只能来自 `AssessmentPort` 构造时注入的可信部署/构造配置（P1-01；PORTS §3.2） |
 | 隐藏材料位置 | 仅 `m1_teacher/assessment/scorer.py` 引用 hidden scoring 路径（`scorer.py:6,401`；静态扫描证据见 CI 文档） | CF hidden 用例在 fixtures `hidden/`（`cf/teacher.py:176-192` 解析 hidden_ref）；`JudgeResult.failures` 含 expected 摘要；Interview 隐藏答案在 fixtures/answers | A 的 teacher-visible 类型无 answer 字段（AST 扫描 + 正向泄漏测试）；B 的 judge 输出字段本身含 expected 摘要，且与 teacher 同进程 | `DESIGN_ONLY`：B-PR1 必须保证 expected 只在 trusted supervisor；worker 只接收输入；teacher-visible 输出仅错误码/聚合计数（见 `M1_B_PORTS.md` §3.2/§4） |
 
 ### 4.12 时间戳与版本策略
@@ -245,6 +247,31 @@ A 线 `PASS_FOR_M1A_OFFLINE_MVP`、B 线 `PASS_FOR_M1_OFFLINE_DESIGN_AND_EVALUAT
 | 状态机 | `SESSION_PHASE_VALUES` 8 值（`types.py:90-99`）：`DIAGNOSE→TEACH→PRACTICE→ASSESS→UPDATE→REVIEW`，`COMPLETE/PAUSED`；显式转换条件见 `session/engine.py:210` 文档 + 实现（`submit_response` `:488`、pause/resume `:450/469`、EVAL_ERROR 隔离 `:855`） | **无 session 状态机**；有 vertical 流程：CF `diagnose/next_action/assess`（`cf/teacher.py:213/551/660`）、Interview 5 阶段追问阶梯（`interview/coach.py:50-57`，`concept→hypothesis→complexity→experiment_design→online_triage`）、评测 closed loop（`evaluation/harness.py:1286`） | canonical = A 8 阶段状态机；Interview 5 阶段阶梯作为 **vertical 内部内容策略**，映射为 A `TEACH`/`REVIEW` 下的 action 内容，不新增 session phase（若未来要通用化，只能 additive 扩展 `SESSION_PHASE_VALUES` 并记录） |
 | 状态转移持久化 | `sessions` 表 + `SessionState.phase/pending_item_id/turn_index`（`types.py:821-832`） | 无持久状态；loop round 由评测 harness 内存推进 | canonical = A；B vertical 不持有 session 状态 |
 | 暂停/恢复 | `SESSION_PAUSED/SESSION_RESUMED` 事件 + `pause_session/resume_session`（`session/engine.py:450/469`） + 新 engine 同 DB 恢复（测试） | 无（需 vertical 自管） | canonical = A |
+
+### 5.1.1 B `EvidenceEvent.kind` → A `event_type` 逐项映射（P1-02 修订，`DESIGN_ONLY`）
+
+> 本节是 B-PR4/PR5 事件迁移的可实施规格；与 `/root/m1b/ivmap/docs/M1_B_INTERVIEW_FRESHNESS_MAPPING.md`
+> §7.2（事件映射）与 §3.9（`MAP-E**` 稳定拒绝码）对齐。所有映射都要求显式 **session 绑定**
+> （`session_id` + `turn_index`）；缺失 → `MIGRATION_MISSING_SESSION`。A `event_id`/`seq` 只能由 canonical
+> `LearningHistory` 分配（§7.3）；迁移不得复用 B `event_id` 作为 A `event_id`（只写 `payload.source_event_id`）。
+> 不得伪造 canonical 运行期事件（`SESSION_STARTED/PAUSED/RESUMED/PLAN_CREATED/DIAGNOSIS_COMPLETED/
+> ITEM_PRESENTED/GOAL_COMPLETED`）——它们只能由 A SessionEngine/Planner 真实产生。
+
+| # | B `kind` | A `event_type`（可一对多） | 触发/前置条件 | `payload` 必填键（canonical） | mastery 影响 | 拒绝码（fail-closed） |
+|---|---|---|---|---|---|---|
+| E1 | `ANSWER` | `RESPONSE_SUBMITTED` | item/task 映射 + session 绑定 | `item_id`、`response_digest`、`response_kind="ANSWER"`、`source_event_id`、`migrated_v0{observed_score,error_codes,provenance}` | **否**（审计事件；仅独立评估后可产生证据） | `MIGRATION_MISSING_SESSION`、`MIGRATION_UNSUPPORTED_TASK_MAPPING`、`MAP-E18_LEARNER_ID_MISMATCH` |
+| E2 | `CODE_SUBMISSION` | `RESPONSE_SUBMITTED` | 同上；CODE item 映射 + 代码摘要校验 | `item_id`、`response_digest`、`response_kind="CODE"`、`code_digest`、`source_event_id`、`migrated_v0{...}` | 否 | 同 E1；code 原文不进事件（只 digest + 受控 responses 存储） |
+| E3 | `EXPLANATION` | `RESPONSE_SUBMITTED` | 同上；open-ended item 映射 | `item_id`、`response_digest`、`response_kind="TEXT"`、`source_event_id`、`migrated_v0{...}` | 否 | 同 E1 |
+| E4 | `INTERVIEW_RESPONSE` | `RESPONSE_SUBMITTED` | Interview item 映射 + session 绑定；追问阶段由 `ACTION_TAKEN` 序列推导 | `item_id`、`response_digest`、`response_kind="TEXT"`、`vertical_id="interview_coach"`、`source_event_id`、`migrated_v0{...}` | 否 | 同 E1；未知 vertical → `MAP-E03_ENUM_VALUE_UNSUPPORTED` |
+| E5 | `ASSESSMENT` | `ASSESSED` + `MASTERY_UPDATED`（一对二，相邻 seq/同一事务） | 独立评估结果（`observed_score`）经 `AssessmentPort`/迁移校验；scorer 身份合法 | `ASSESSED`: `result_id/item_id/status/result/item/source_event_id/migrated_v0{...}`；`MASTERY_UPDATED`: `result_id/status/applied/snapshot/policy_version` | **是（重算后）**：A `MasteryModel` 基于证据重算，manifest 不写死数值 | `MIGRATION_UNSUPPORTED_EVENT_KIND`（缺 observed_score）、`MAP-E18`、`MAP-E15`、`MAP-E16_SCORE_OUT_OF_RANGE` |
+| E6 | `HINT_REQUEST` | `ACTION_TAKEN`（audit-only） | session 绑定；请求 hint level ∈ 1..4 | `event_role="LEARNER_HINT_REQUEST"`、`item_id`、`hint_level_requested`、`source_event_id`、`migrated_v0{...}` | 否 | `MIGRATION_MISSING_SESSION`、`MAP-E03_ENUM_VALUE_UNSUPPORTED`（level 非法） |
+
+**规则**
+
+1. 上表覆盖全部 6 个 `EVIDENCE_KIND_VALUES`；未来新增 kind → `MIGRATION_UNSUPPORTED_EVENT_KIND`（REJECT，不默认猜测）。
+2. `migrated_v0` 是 payload 内 sidecar（canonical JSON，含 B 一级字段与 provenance 摘要），**不得**包含 hidden expected/rubric 原文（`MAP-E05_HIDDEN_MATERIAL_LEAK_BLOCKED`）。
+3. 只有 E5 产生掌握度证据；E1–E4/E6 只进入审计事件，不能绕过独立评估更新 mastery（`MAP-E22_SCORING_NOT_INDEPENDENT`）。
+4. 事件顺序/id/seq 由 §7.3 staging 规则决定；B `event_id` 仅作为 `payload.source_event_id` 保留。
 
 ### 5.2 写入者差异（谁能写什么）
 
@@ -355,7 +382,9 @@ A 线 `PASS_FOR_M1A_OFFLINE_MVP`、B 线 `PASS_FOR_M1_OFFLINE_DESIGN_AND_EVALUAT
 2. 唯一 LearnerState 写入者/事件协议/Session 表/Replay = A；
 3. 禁止双写、禁止自动迁移真实 learner DB、禁止 vertical 直接写 canonical 状态；
 4. 历史 536/365 各自冻结、不相加；
-5. B-PR1..B-PR5 按 §12 顺序执行，且每个 PR 独立 Reviewer。
+5. B-PR1..B-PR5 按 §12 顺序执行，且每个 PR 独立 Reviewer；
+6. **`m1a.v0` 类型零 diff（P1-04）**：不得给冻结记录/枚举/协议新增任何字段（包括“带默认值的可选字段”）；
+   所有扩展只放在新 `m1b.*` 记录/端口/sidecar；需要字段时只能定义 `m1a.v1` 记录 + 显式迁移（非 B-PR0 范围）。
 
 ---
 
@@ -363,9 +392,11 @@ A 线 `PASS_FOR_M1A_OFFLINE_MVP`、B 线 `PASS_FOR_M1_OFFLINE_DESIGN_AND_EVALUAT
 
 ### 7.1 原则
 
-- **additive only**：新增模块（建议路径 `m1_teacher/ports/`、`m1_teacher/verticals/`）与新增记录/端口；
-  **不修改** `m1a.v0`/`m1.offline.v0` 既有字段/枚举/签名；若需 TeacherCore 记录新增字段，只允许“带默认值
-  的可选字段 + 版本记录”。
+- **additive only（P1-04 修订）**：新增模块（计划路径 `m1_teacher/ports/`、`m1_teacher/verticals/`）与新增
+  `m1b.*` 记录/端口/sidecar；**不修改** `m1a.v0`/`m1.offline.v0` 既有字段/枚举/签名——**v0 类型零 diff**。
+  禁止“给冻结记录加一个带默认值的可选字段”：A `Record.to_dict()` 输出全部字段，任何新增字段都会改变既有
+  证据的 canonical JSON/digest，并破坏严格 `from_dict` 语义。若确实需要新字段，只能新增 `m1a.v1` 记录 +
+  显式版本迁移（不在 B-PR0 范围）。
 - **单向收敛**：B→A 数据（evidence/assessment/goal/内容）经 adapter 转为 A 记录；A→B 只允许只读导出
   用于评测/展示，不允许回写。
 - **禁止双写**：adapter 只生产“待写入输入”；真正写 canonical 状态仍只由 A `LearningHistory`/SessionEngine
@@ -379,32 +410,75 @@ A 线 `PASS_FOR_M1A_OFFLINE_MVP`、B 线 `PASS_FOR_M1_OFFLINE_DESIGN_AND_EVALUAT
 
 | 函数（新增模块） | 输入 | 输出 | 可表达性 | 拒绝码（fail-closed） |
 |---|---|---|---|---|
-| `map_skill_node(skill: SkillNode, *, mapping: SkillMapping) -> KnowledgeNode` | B `SkillNode`（`types.py:339`）+ 显式映射表 | A `KnowledgeNode`（`types.py:579`） | 部分（difficulty/assessment_mode/tags/content_ref 无源） | `MIGRATION_UNSUPPORTED_FIELD:difficulty`、`...:assessment_mode`、`...:tags`、`...:content_ref`、`MIGRATION_UNSUPPORTED_SKILL_MAPPING` |
+| `map_skill_node(skill: SkillNode, *, mapping: SkillMapping) -> KnowledgeNode` | B `SkillNode`（`types.py:339`）+ 显式映射表 | A `KnowledgeNode`（`types.py:579`） | 部分：`tags` 为 `LOSSY`（默认 `[]`+记录）；`difficulty`/`assessment_mode`/`content_ref` 为 `REJECT`（除非维护者批准显式映射，按 `LOSSY` 记） | `MIGRATION_UNSUPPORTED_FIELD:difficulty / assessment_mode / content_ref`、`MIGRATION_UNSUPPORTED_SKILL_MAPPING`、`LOSSY:tags` |
 | `map_prerequisites(skills: list[SkillNode]) -> list[PrerequisiteEdge]` | B 内嵌 `prerequisites[]` | A `PrerequisiteEdge`（`types.py:594`） | 有损（kind/weight 无源） | `MIGRATION_UNSUPPORTED_PREREQUISITE_KIND`（默认保守 HARD 或显式映射，二选一，需维护者裁定） |
-| `map_evidence_event(event: EvidenceEvent, *, session_binding: SessionBinding, item_mapping) -> tuple[HistoryEvent, ...]` | B `EvidenceEvent`（`types.py:426`） | A `HistoryEvent`（`types.py:803`），由 canonical history 生成 id/seq | 部分（无 session/无 seq；kind 需映射） | `MIGRATION_MISSING_SESSION`、`MIGRATION_UNSUPPORTED_EVENT_KIND`、`MIGRATION_EVENT_ID_CONFLICT`、`MIGRATION_UNSUPPORTED_TASK_MAPPING` |
-| `map_assessment_result(b: BAssessmentResult, *, item: AssessmentItem, learner_id, result_scope) -> AssessmentResult` | B `AssessmentResult`（`types.py:601`） | A `AssessmentResult`（`types.py:683`） | 部分（dimensions/hidden_cases_* 不可表达；passed→status 需 vertical 状态语义） | `MIGRATION_UNSUPPORTED_FIELD:dimensions`、`...:hidden_cases_passed/total`、`MIGRATION_UNMAPPED_STATUS` |
+| `map_evidence_event(event, *, session_binding, item_mapping) -> EvidenceStaging`（P1-03 修订：**不返回 HistoryEvent**） | B `EvidenceEvent`（`types.py:426`） | `m1b.migration.evidence.v0` staging DTO：`schema_version/source_event_id/learner_id/session_binding/source_order/mapped_event_types/payload/source_created_at/source_digest` | 部分（无 session/无 seq；kind 按 §5.1.1 映射）；**A `event_id`/`seq` 由 canonical history 在写事务内分配**（§7.3） | `MIGRATION_MISSING_SESSION`、`MIGRATION_UNSUPPORTED_EVENT_KIND`、`MIGRATION_UNSUPPORTED_TASK_MAPPING`、`MIGRATION_DUPLICATE_SOURCE_ORDER` |
+| `map_assessment_result(b: BAssessmentResult, *, item, learner_id, result_scope) -> AssessmentResult` | B `AssessmentResult`（`types.py:601`） | A `AssessmentResult`（`types.py:683`） | 部分：`dimensions`/`hidden_cases_*`/`failure_modes` 为 `LOSSY` sidecar（`payload.migrated_v0`+digest；不允许时 `MAP-E07`）；passed→status 需 vertical 语义 | `MIGRATION_UNMAPPED_STATUS`、`MAP-E07_KNOWLEDGE_PROVENANCE_LOSS`（仅 sidecar 禁用时）、`MAP-E16_SCORE_OUT_OF_RANGE` |
 | `map_goal(goal: LearningGoal, *, objective_mapping) -> LearnerGoal` | B `LearningGoal`（`types.py:472`） | A `LearnerGoal`（`types.py:792`） | 部分（target_skills→objective_id 需映射；deadline/weekly 丢弃） | `MIGRATION_UNSUPPORTED_GOAL_MAPPING`、`MIGRATION_LOSSY_FIELD:deadline_days / weekly_minutes` |
-| `map_mastery_state(state: LearnerState) -> None`（**默认禁用**） | B `LearnerState`（`types.py:454`） | 不产出 canonical 写入 | 不可表达（confidence/evidence_count/revision 无源） | `MIGRATION_LEARNER_STATE_DENIED`（默认永久拒绝；仅维护者批准的一次性 offline 导入例外，且必须带显式完善映射与 manifest） |
+| `map_mastery_state(state: LearnerState) -> None`（**永久禁用**，P1-05） | B `LearnerState`（`types.py:454`） | 不产出 canonical 写入 | 不可表达（confidence/evidence_count/revision 无源） | `MIGRATION_LEARNER_STATE_DENIED`（无任何例外）；只能导入底层证据并由 A `MasteryModel` 重算，迁移后 `verify_rebuild=true` 为硬门 |
 | `map_trace_events(events) -> sidecar`（**不迁移**） | B `TraceEvent`（`types.py:683`） | 仅 sidecar JSONL + sha256 | 不可表达（非 canonical 事件协议） | `UNSUPPORTED_TRACE_EVENT_MIGRATION` |
 | `map_runtime_records(...)`（**不迁移**） | B `RuntimeRequest/Response`（`types.py:638/658`） | 不进入 canonical | 不迁移（vertical 内部） | `UNSUPPORTED_RUNTIME_RECORD` |
 
-### 7.3 Canonical JSON 与迁移 checksum 格式
+### 7.3 Canonical JSON、迁移 bundle 与 checksum 闭合链路（P1-03 / P2-07 修订）
 
-**Canonical JSON 规则（用于所有 sha256）**
+#### 7.3.1 canonical JSON
 
 ```
-canonical_json(record) =
-  json.dumps(record.to_dict(), ensure_ascii=False, sort_keys=True,
-             separators=(",", ":"), allow_nan=False)
-sha256_hex(canonical_json)
+canonical_json(value) = json.dumps(value, ensure_ascii=False, sort_keys=True,
+                                   separators=(",", ":"), allow_nan=False)
+sha256_hex(value) = sha256(canonical_json(value).encode("utf-8")).hexdigest()
 ```
 
-- `record.to_dict()` 必须已含 `schema_version`（A 严格序列化）；
-- 嵌套 Record/列表/字典递归规范化；`None`/`""` 保留（不省略键）；
-- 迁移前后各算一次 sha256：`source_sha256`（B 记录 canonical JSON，若 B 记录可无损序列化）、
-  `migrated_sha256`（A 记录 canonical JSON）。
+- 所有记录 `to_dict()` 必须已含 `schema_version`（A 严格序列化）；嵌套 Record/list/dict 递归规范化；
+  `None`/`""` 保留（不省略键）。
+- **digest 不含墙钟时间**：`created_at`/`updated_at` 只能来自源记录显式值或迁移配置固定值
+  （§7.3.3），不得写入“当前时间”。
 
-**迁移 manifest 记录（新增 `m1b.migration.v0`；示意 JSON，未实现）**
+#### 7.3.2 有序 bundle 序列化（可独立复算）
+
+| bundle | 内容 | 排序键 | 用途 |
+|---|---|---|---|
+| `source_bundle` | 每条 B 源记录 `{"record_type": str, "primary_id": str, "record": canonical_json(to_dict())}` | `(record_type, primary_id)` 升序 | 计算 `source_sha256` |
+| `evidence_staging_bundle` | staging DTO（§7.2 `map_evidence_event` 输出）：`schema_version/source_event_id/learner_id/session_binding/source_order/mapped_event_types/payload/source_created_at/source_digest` | `(learner_id, session_id, source_order, source_event_id)` 升序；`source_order` 在 `(learner_id, session_id)` 内唯一 | 校验 + 生成投影 |
+| `migrated_bundle` | A canonical 记录集合（`HistoryEvent`/`AssessmentResult` 等）的 `canonical_json(to_dict())` | 事件 `(learner_id, seq)`；结果 `(learner_id, result_id)` 升序 | 计算 `migrated_sha256` + 写后回读校验 |
+| `manifest` | 迁移 manifest（§7.3.5） | — | 计算 `manifest_checksum` |
+
+- bundle 列表本身再用 `canonical_json` 序列化后 sha256：
+  `source_sha256 = sha256_hex(source_bundle)`、`migrated_sha256 = sha256_hex(projected_migrated_bundle)`。
+
+#### 7.3.3 确定性投影与 id/seq 分配规则（P1-03）
+
+1. **禁止 adapter 直接构造 `HistoryEvent`**：staging DTO 不含 `event_id`/`seq`。
+2. **seq 分配**：迁移离线、单 writer、`BEGIN IMMEDIATE` 运行；
+   `base_seq(learner_id) = (SELECT MAX(seq) FROM history_events WHERE learner_id=?)+1`（无事件为 0）。
+3. **事件顺序**：同一 `(learner_id, session_id)` 内按 `(source_created_at, source_order, source_event_id)`
+   升序；E5 `ASSESSMENT` 固定占连续两个 seq（`ASSESSED` 先、`MASTERY_UPDATED` 后）。
+4. **event_id**：严格使用 A canonical 规则 `evt.<learner_id>.<seq>`（与 `LearningHistory.append_event`
+   一致），由 canonical history 在事务内生成；迁移**不得**复用 B `event_id` 作为 A `event_id`
+   （只写入 `payload.source_event_id`）。
+5. **created_at（P2-07）**：A 记录时间戳 = 源记录显式 `created_at`；源缺失 → `MIGRATION_MISSING_TIMESTAMP`
+   （**拒绝**，不注入墙钟）；manifest 自身 `created_at` 是操作者提供的固定配置，只进入 `manifest_checksum`，
+   不进入 `migrated_sha256`。
+6. **投影可复算**：写库前按 1–5 规则计算 `projected_migrated_bundle` 与 `migrated_sha256`；写库后回读并用
+   同一规则重算，必须相等，否则回滚（`MAP-E21_MIGRATION_CHECKSUM_MISMATCH`）。
+
+#### 7.3.4 计算顺序（写库前可复算）
+
+```
+1. validate source records + build evidence_staging_bundle (sorted)
+2. source_sha256    = sha256_hex(source_bundle)
+3. projected_bundle = deterministic_projection(staging)          # §7.3.3 规则
+4. migrated_sha256  = sha256_hex(projected_bundle)
+5. manifest = {..., counts, unsupported, lossy,
+                checksums{source_sha256, migrated_sha256}}
+6. manifest_checksum = sha256_hex(manifest_without_manifest_checksum)
+7. BEGIN IMMEDIATE; allocate seq/event_id（§7.3.3）; write events/assessment/snapshot; COMMIT
+8. read-back canonicalization == projected_bundle 且复算 == migrated_sha256；否则 ROLLBACK
+9. verify_rebuild(learner_id) == materialised snapshot；失败 ROLLBACK + 保留原 DB
+10. 写 manifest（含全部 checksum）；重复 migration key → 拒绝（幂等）
+```
+
+#### 7.3.5 迁移 manifest（单一权威 schema，P2-12 修订）
 
 ```json
 {
@@ -414,37 +488,41 @@ sha256_hex(canonical_json)
   "source_branch_sha": "290c5770461bb5af2a38c6e6d24ee76350bcb410",
   "target_branch_sha": "4706250643fd42d48d69ddad7159e011955fa9fd",
   "tool_version": "m1b.migrate.DESIGN_ONLY",
-  "created_at": "<operator supplied UTC ISO-8601; 由维护者固定>",
-  "counts": {"skills": 0, "edges": 0, "goals": 0, "assessment_results": 0, "evidence_events": 0},
-  "unsupported": [
-    {"record_type": "SkillNode", "record_id": "skill.x",
-     "field": "difficulty", "code": "MIGRATION_UNSUPPORTED_FIELD"}
-  ],
-  "lossy": [
-    {"record_type": "EvidenceEvent", "record_id": "evt.x",
-     "field": "provenance.source", "action": "sidecar:payload.migrated_v0"}
-  ],
+  "created_at": "<operator supplied UTC ISO-8601; 固定配置，非墙钟>",
+  "counts": {
+    "records": {"SkillNode": 0, "EvidenceEvent": 0, "AssessmentResult": 0, "LearningGoal": 0},
+    "lossless": 0, "lossy": 0, "unsupported": 0
+  },
+  "unsupported": [{"record_type": "SkillNode", "record_id": "skill.x",
+                   "field": "difficulty", "code": "MIGRATION_UNSUPPORTED_FIELD"}],
+  "lossy": [{"record_type": "EvidenceEvent", "record_id": "evt.x",
+             "field": "payload.dimensions", "action": "sidecar:payload.migrated_v0"}],
   "checksums": {
-    "source_sha256": "<sha256 of canonical source bundle>",
-    "migrated_sha256": "<sha256 of canonical migrated bundle>",
-    "manifest_checksum": "<sha256(canonical_json(manifest without manifest_checksum))>"
+    "source_sha256": "<sha256_hex(source_bundle)>",
+    "migrated_sha256": "<sha256_hex(projected_migrated_bundle)>",
+    "manifest_checksum": "<sha256_hex(manifest without manifest_checksum)>"
   }
 }
 ```
 
-- 任何 `unsupported` 非空 + 严格模式 → 迁移整体中止（不写 DB）；
-- 宽松模式只允许 `lossy`（有显式 action），`unsupported` 永远不允许进入 canonical DB；
-- manifest 只含合成 fixture/脱敏数据；不得包含真实个人数据、Key、hidden expected。
+- **同一版本只有一个 schema**：ADR 与 PORTS 均引用本节；旧两套 `counts` 字段已统一为
+  `counts.records`（按 record type 计数）+ `lossless/lossy/unsupported`。
+- `unsupported` 非空 + 严格模式 → 整批中止（不写 DB）；`lossy` 必须显式 action；
+  `manifest_checksum` 复算不一致 → 拒绝；重复 migration key → 拒绝。
+- manifest 不得包含 hidden expected、Key、真实个人数据；只允许 synthetic fixture/脱敏副本。
 
 ### 7.4 Rollback 条件（`DESIGN_ONLY`）
 
 1. migrated DB 的 `schema_meta.version` 不等于 A 当前版本（1）→ 拒绝启动/回滚；
-2. `verify_rebuild` 失败（事件重放 ≠ 物化 snapshot）→ 回滚；
-3. manifest `migrated_sha256`/`manifest_checksum` 复算不一致 → 回滚；
-4. 同一 migration 重复执行（manifest idempotency key 已存在）→ 拒绝（不允许部分重复写入）；
-5. 发现任何 B 证据事件 id/session 绑定冲突 → 中止并保留原 DB；
+2. **写后回读校验**：`sha256_hex(read_back_canonical_bundle) != migrated_sha256` →
+   立即 ROLLBACK（`MAP-E21_MIGRATION_CHECKSUM_MISMATCH`）；
+3. **`verify_rebuild(learner_id) == materialised snapshot` 硬门**：失败 → ROLLBACK
+   （P1-05 关闭后 mastery 只能由事件重算，该门才可信）；
+4. `manifest_checksum` 复算不一致 / 同一 migration key 重复执行 → 拒绝；
+5. duplicate `source_order` / `source_event_id` / learner-session 绑定冲突 → 中止并保留原 DB
+   （`MIGRATION_DUPLICATE_SOURCE_ORDER`、`MAP-E15`、`MAP-E18`）；
 6. 回滚方式：停止服务 → 还原迁移前备份 DB（含 manifest 记录）→ 复算备份 sha256 → 只读启动验证
-   `verify_rebuild` 通过 → 记录回滚事件。**禁止**在原 DB 上做逆向字段修补。
+   `schema_meta.version` 与 `verify_rebuild` → 记录回滚事件。**禁止**在原 DB 上做逆向字段修补。
 
 ### 7.5 部署期禁令（硬门）
 
@@ -472,6 +550,17 @@ sha256_hex(canonical_json)
 > 当前 A 线已有实现与本合同一致（`SOURCE_INSPECTED`）；B 线尚不满足（无 canonical 写入链），因此
 > B-PR4 接入前必须先完成 B-PR1/2/3。
 
+**8.1 机制性写 gate（P2-01，B-PR2 实现/验收）**：文档禁令之外必须有结构性阻断。B-PR2 提供唯一写入口
+`commit_teaching_turn(...)`（事件 + snapshot + session 单事务）；`SqliteRepository` 的
+`append_event/upsert_snapshot/save_session` 改为私有方法或要求 `WriteAuthority` 能力令牌（令牌仅由
+`LearningHistory`/提交协调器持有）；诊断/planner/vertical/端口均不注入 repository。任何绕过尝试触发
+`MAP-E20_SECOND_WRITER_CONFLICT` / `MAP-E25_MASTERY_WRITE_FORBIDDEN`（安全事件 STOP），并有负例测试。
+
+**8.2 teacher-visible 导出投影（P2-13）**：A `AssessmentItem.scoring_spec_ref`（`types.py:678`）当前携带
+`scoring/<item>.json` 路径。B-PR1 必须在导出/UI/trace/诊断前替换为不透明 `spec_ref_id` 或剥除；
+`AssessmentPort` T1 用自身 trusted item 解析 ref，不从导出 JSON 读取；B1-06 运行时扫描必须覆盖 item payload
+（不能只做源码 grep）。
+
 ---
 
 ## 9. 迁移与集成顺序（B-PR1..B-PR5 映射）
@@ -481,7 +570,7 @@ sha256_hex(canonical_json)
 | B-PR1 `trusted-judge-worker` | 重做 `AssessmentPort` 信任边界；worker 不含 expected；可信端比较 expected；hidden 泄漏扫描 | `M1_B_PORTS.md` §3.2/§4；本 ADR §4.11/§5.2 |
 | B-PR2 `session-transaction-and-recovery` | 落实 A canonical 的原子提交/恢复合同（`commit_teaching_turn` 设计）；只能有一个写入者 | 本 ADR §5.2/§8；`M1_B_PORTS.md` §5 |
 | B-PR3 `scoped-idempotency` | 落实 composite idempotency key + request digest；修复 B-03 全局 result_id 问题 | 本 ADR §4.1/§11-C3；`M1_B_PORTS.md` §3.2 |
-| B-PR4 `cf-interview-domain-ports` | 实现 `DomainAdapterV1`/`KnowledgeSourcePort`/`TeacherPolicyPort`，接入 B vertical（CF Hint/Interview/Freshness） | `M1_B_PORTS.md` §3/§4/§5 |
+| B-PR4 `cf-interview-domain-ports` | 实现 `DomainAdapterV1`/`KnowledgeSourcePort`/`TeacherPolicyPort`，接入 B vertical（CF Hint/Interview/Freshness）；落实 P2-03 知识决策审计落点与 P2-09 FULL 受限引用 | `M1_B_PORTS.md` §3/§4/§5；本 ADR §4.9/§8 |
 | B-PR5 `unified-e2e-and-blind-evaluation` | 统一事件表/Replay 的两域 E2E + 独立评测 + 新报告（新 suite 单独计数） | 本 ADR §10；`M1_B_CI_AND_DEMO.md` |
 
 ---
@@ -527,7 +616,7 @@ sha256_hex(canonical_json)
 | Q5 | `error_counts` 键约定（error code vs skill id）是否统一？（B ADR Q2） | 跨线迁移语义 | B-Lead/维护者 |
 | Q6 | B vertical 的 `RuntimePort` 是否允许在 B-PR4 后被 external caller 使用？（canonical 仍不调用模型） | 影响 B4 E2E 中“模型文本”的角色 | LeadB + 维护者 |
 | Q7 | 历史的 536/365 是否需要在 README/STATUS 中同时展示为“各自独立”？ | 防止再次“901”误读 | LeadB |
-| Q8 | 迁移工具是否允许接触真实 learner DB（仅维护者离线、备份后）？ | 影响 B-PR4/5 数据导入范围 | 维护者（人类批准） |
+| Q8 | 迁移工具是否允许接触真实 learner DB？ | 默认**禁止**；任何真实 DB 操作必须人类批准 + 备份 + 只读副本演练 + 回滚演练，并排除出 B-PR4/PR5 自动验收（人工 runbook，非自动迁移）；直接 mastery 导入**永久拒绝**（P1-05） | 维护者（人类批准） |
 
 ---
 
@@ -560,3 +649,4 @@ sha256_hex(canonical_json)
 | 日期（UTC） | 版本 | 变更 |
 |---|---|---|
 | 2026-11-20 | B-PR0 初稿 | DRAFT/DESIGN_ONLY：逐字段对照、差异矩阵、canonical 裁决（A）、备选分析、v1 adapter/checksum/rollback、写入者合同、历史数字纪律、冲突 Top 清单、未决问题 |
+| 2026-11-20 | B-PR0 P1 复审修订 | 回应 `PRE_REVIEW_PASS_WITH_ACTIONS`：P1-02 事件映射（§5.1.1）、P1-03 staging+checksum 闭合（§7.2/§7.3）、P1-04 v0 零 diff（§6.6/§7.1）、P1-05 永久拒绝 mastery 导入（§4.5/§7.2/§7.4）、P1-01/06/07 端口设计更新（PORTS §3）、P2-01/02/07/08/10/12/13 修订；仍为 DESIGN_ONLY，未改实现/测试 |

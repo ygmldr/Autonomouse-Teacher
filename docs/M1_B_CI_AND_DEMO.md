@@ -9,6 +9,7 @@
 | 明确声明 | **B 线冻结命令是两个子集**：`tests/m1_teacher`（A 线）与 `tests/m1_offline`（B 线）。**全仓 M0 套件不在本线验收范围**；如引用须原样标注失败项（见 §5）。 |
 | 历史数字纪律 | A 历史 `536 passed`、B 历史 `365 passed` 各自冻结、**不可相加**（不存在“统一 901 tests”）；新集成套件另计并重新独立验收（见 §6） |
 | 交付状态 | B-PR0 结束 = 文档完成、等待独立 Reviewer 静态预审；**不自称 DONE/PASS** |
+| 独立预审响应 | 本修订回应 `docs/M1_B_BOUNDARY_PRE_REVIEW.md`：P2-04（冻结命令 SHA/树断言）、P2-13（teacher-visible item 路径运行时扫描列为 B-PR1 冻结验收项）已修订；处置见 `docs/M1_B_PR0_REVIEW_RESPONSE.md`。仍为 DESIGN_ONLY，未重新声明验收 PASS |
 
 ---
 
@@ -36,14 +37,19 @@
 
 ```bash
 cd /root/m1b/pr0
+# P2-04：pin A 实现树（代码/测试/fixtures/证据自 4706250 起零 diff）+ 前后只读断言
+test "$(git diff --name-only 4706250 -- m1_teacher tests/m1_teacher fixtures/m1_teacher docs/m1a_evidence | wc -l)" = "0" \
+  || { echo "A_IMPL_TREE_DRIFT"; exit 2; }
+git status --porcelain
 "/root/Autonomous Teacher/.venv/bin/python" -m pytest tests/m1_teacher -q
+git status --porcelain
 ```
 
-- **期望输出类别**：`N passed`（全绿，0 failed/skip）；不打印/不依赖网络。
+- **期望输出类别**：树断言 exit 0（`A_IMPL_TREE_DRIFT` 不出现）；`N passed`（全绿，0 failed/skip）；
+  前后 `git status --porcelain` 无 tracked 变更（`__pycache__`/`.pytest_cache` 已 gitignore）。
 - **本 worktree 实测**（`SOURCE_INSPECTED`，2026-11-20）：**`536 passed in 19.30s`**（wall 19.59s）。
-- **Lead 另测**：`536 passed in 16.47s`（同命令，机器负载差异，数字以各自实测记录为准）。
-- 历史来源：`docs/M1_IMPLEMENTATION_REPORT.md` §3/§7、`docs/M1_INDEPENDENT_REVIEW.md` §1.2（Reviewer
-  clean C6 复跑 536 passed）。
+- **Lead 另测**：`536 passed in 16.47s`；**Reviewer 预审复跑**：`536 passed in 18.10s`（同命令，负载差异；
+  计数才是门禁）。历史来源：`docs/M1_IMPLEMENTATION_REPORT.md` §3/§7、`docs/M1_INDEPENDENT_REVIEW.md` §1.2。
 
 ### 2.2 Demo（冻结）
 
@@ -59,7 +65,7 @@ wc -l /tmp/m1b_a_demo_1.txt
 - **期望输出类别**：exit 0；两次 stdout 逐字节相同；**demo digest（sha256）固定**；行数固定。
 - **本 worktree 实测**：`stdout byte-identical`、**`sha256=b08ceee915fb0363864e303ded71de4d547eae6d14f7aa693ba1537a810d491b`**、
   **53 行**、stderr 0 字节；exit 0。
-- 该 digest 与历史报告（`docs/M1_IMPLEMENTATION_REPORT.md` §3：`sha256=b08ceee9…091b`）一致 →
+- 该 digest 与历史报告（`docs/M1_IMPLEMENTATION_REPORT.md` §3：`sha256=b08ceee9…d491b`）一致 →
   在当前树上可复现（`SOURCE_INSPECTED` 复跑证据，不是新验收）。
 - demo 末尾自带边界声明：`offline synthetic only, not real teaching effect`、`MOCK / DETERMINISTIC /
   NOT_VERIFIED` 分类行。
@@ -108,16 +114,21 @@ cd /root/m1b/pr0
 
 ```bash
 cd /root/at-m1-offline
+# P2-04：pin 冻结树 SHA + 前后只读断言
+test "$(git rev-parse HEAD)" = "290c5770461bb5af2a38c6e6d24ee76350bcb410" \
+  || { echo "B_FROZEN_TREE_MISMATCH"; exit 2; }
+git status --porcelain
 env PYTHONDONTWRITEBYTECODE=1 \
   "/root/Autonomous Teacher/.venv/bin/python" -m pytest tests/m1_offline -q -p no:cacheprovider
+git status --porcelain
 ```
 
 - **注意**：是 `tests/m1_offline` 子集，**不是** `tests/` 全仓（见 §5）。
 - `-p no:cacheprovider` 避免 `.pytest_cache`；`PYTHONDONTWRITEBYTECODE=1` 避免 `__pycache__`，保证冻结树只读。
-- **期望输出类别**：`N passed`（0 failed/skip）；离线。
+- **期望输出类别**：SHA 断言 exit 0；`N passed`（0 failed/skip）；前后 `git status --porcelain` 均为空。
 - **本 worktree 实测**（`SOURCE_INSPECTED`，2026-11-20）：**`365 passed in 21.96s`**（wall 22.28s）；
   运行前后 `git status --porcelain` 均为空（冻结树未被写）。
-- **Lead 另测**：`365 passed in 19.38s`（同命令；以各自实测为准）。
+- **Lead 另测**：`365 passed in 19.38s`；**Reviewer 预审复跑**：`365 passed in 19.26s`（同命令）。
 - 历史来源：`docs/m1/REVIEW_M1_OFFLINE.md:103/136/323`（Reviewer clean C2：365 passed）。
 
 ### 3.2 Demo（冻结；默认无写入）
@@ -211,6 +222,12 @@ cd /root/m1b/pr0
   （`tests/m1_teacher/test_assessment_scorer.py:486`）、`test_teacher_source_has_no_hidden_scoring_path_references`
   （`tests/m1_teacher/test_domain_adapter.py:780`）、`test_results_do_not_leak_hidden_spec_material`
   （`tests/m1_teacher/test_assessment_scorer.py:431`）。
+
+**P2-13 运行时导出扫描（B-PR1 冻结项，当前 `NOT_RUN`）**：上面的源码 grep 只证明“引用位置”，不等于运行时
+导出安全。A `AssessmentItem.scoring_spec_ref`（`m1_teacher/contracts/types.py:678`）在 teacher-visible 记录中
+可携带 `scoring/<item>.json` 路径（fixture 实际值）。B-PR1 必须在导出/UI/trace/诊断前把它替换为不透明
+`spec_ref_id` 或剥除，并在 B1-06 增加**运行时导出扫描**（item payload、事件 JSON、诊断消息、demo 输出），
+而不是只做 AST/grep。验收前该项保持 `NOT_RUN`，不得以本节的 grep 结果替代。
 
 **B 线**
 
@@ -379,6 +396,7 @@ exit=1
 | I-4 | 全仓 M0 套件 6 failed（§5） | 若被引用可能误读为 M1 回归 | 原样标注、分开处理 |
 | I-5 | B 默认 demo 可重复，但 B 线无持久化 DB/session | 不能承担 canonical 验收 | B-PR2/B-PR4（ADR canonical 裁决） |
 | I-6 | 两线历史 536/365 易被相加 | 评审口径污染 | 本文件 §6 冻结“不相加”纪律 |
+| I-7 | A teacher-visible `AssessmentItem.scoring_spec_ref` 携带 `scoring/...` 路径（`contracts/types.py:678`） | 源码 grep 无法覆盖运行时导出；B1-06 若只做 AST 会漏 | B-PR1 导出投影 + 运行时 item payload 扫描（P2-13，当前 `NOT_RUN`） |
 
 ---
 
@@ -400,3 +418,4 @@ exit=1
 | 日期（UTC） | 版本 | 变更 |
 |---|---|---|
 | 2026-11-20 | B-PR0 初稿 | DRAFT/DESIGN_ONLY：冻结 A/B 两线 suite + demo + 证据命令、digest/计数记录、静态隔离与 M0 diff 检查清单、全仓 M0 套件原样记录（6 failed）、历史数字不相加纪律、已知问题 I-1..I-6 |
+| 2026-11-20 | B-PR0 P1 复审修订 | P2-04：冻结命令加入 A 实现树零 diff / B SHA pin + 前后只读断言；P2-13：teacher-visible item 路径的运行时导出扫描列为 B-PR1 冻结验收项（当前 NOT_RUN）；其余 P1 修订见 ADR/PORTS 与 `M1_B_PR0_REVIEW_RESPONSE.md`；仍为 DESIGN_ONLY，未改实现/测试 |
