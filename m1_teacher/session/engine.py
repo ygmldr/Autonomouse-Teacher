@@ -89,12 +89,14 @@ from ..idempotency import (
     CONFLICT_REASON_LEGACY_DIGEST_UNPROVEN,
     CONFLICT_REASON_LEGACY_SCOPE,
     CONFLICT_REASON_REQUEST_DIGEST,
+    CONFLICT_REASON_TURN,
     CONFLICT_REASON_TURN_ALREADY_ASSESSED,
     IDEMPOTENCY_POLICY_VERSION,
     ResultScope,
     canonical_response,
     default_result_id,
     legacy_default_result_id,
+    legacy_request_digest,
     request_digest,
     validate_result_id,
 )
@@ -705,6 +707,21 @@ class TeachingSessionEngine:
         item_id = _require_nonempty_str(
             item_id, "TeachingSessionEngine.submit_response(item_id)"
         )
+        digest = request_digest(response)
+        scope: ResultScope | None = None
+        # Idempotency first (review P2-2): an explicit result_id that was already
+        # applied returns the first result without re-validating the phase,
+        # advanced turn or pending item.  The lookup is scoped and
+        # learner/session/item/turn/digest bound; it never falls back to a global
+        # event_id read.
+        if result_id is not None:
+            result_id = validate_result_id(
+                result_id, "TeachingSessionEngine.submit_response(result_id)"
+            )
+            scope = self._make_scope(state, item_id, result_id, digest)
+            existing = self._lookup_result_for_scope(scope, response=response)
+            if existing is not None:
+                return existing
         if state.phase == PHASE_PAUSED:
             raise ConflictError(f"submit_response({session_id!r}): session is PAUSED")
         if state.phase == PHASE_COMPLETE:
@@ -712,21 +729,6 @@ class TeachingSessionEngine:
         item = self._items_by_id.get(item_id)
         if item is None:
             raise NotFoundError(f"submit_response(): unknown item_id {item_id!r}")
-        digest = request_digest(response)
-        scope: ResultScope | None = None
-        # Idempotency first: an explicit result_id that was already applied
-        # returns the first result without re-validating the (already advanced)
-        # turn/pending state or writing any event.  This lookup is scoped and
-        # learner/session/item/turn/digest bound; it never falls back to a
-        # global event_id read.
-        if result_id is not None:
-            result_id = validate_result_id(
-                result_id, "TeachingSessionEngine.submit_response(result_id)"
-            )
-            scope = self._make_scope(state, item_id, result_id, digest)
-            existing = self._lookup_result_for_scope(scope)
-            if existing is not None:
-                return existing
         if state.pending_item_id is None:
             raise ConflictError(
                 f"submit_response({session_id!r}): no item is pending; call "
@@ -741,14 +743,14 @@ class TeachingSessionEngine:
             result_id = self._default_attempt_result_id(state, item_id, response)
             scope = self._make_scope(state, item_id, result_id, digest)
             if self._supports_scoped:
-                existing = self._lookup_result_for_scope(scope)
+                existing = self._lookup_result_for_scope(scope, response=response)
                 if existing is not None:
                     return existing
         assert scope is not None
         snapshot = self._current_snapshot(state.learner_id)
         result = self._score_safely(item, state.learner_id, response, result_id)
         if self._supports_scoped:
-            existing = self._lookup_result_for_scope(scope)
+            existing = self._lookup_result_for_scope(scope, response=response)
             if existing is not None:
                 return existing
 
@@ -792,6 +794,27 @@ class TeachingSessionEngine:
         item_id = _require_nonempty_str(
             item_id, "TeachingSessionEngine.submit_response(item_id)"
         )
+        canonical = canonical_response(response)
+        digest = request_digest(response)
+        digest16 = digest[:16]
+        response_kind = _response_kind(response)
+
+        # 1) Scoped idempotency fast path (review P2-2: before PAUSED/COMPLETE
+        #    phase gates and before any pending/turn validation).  A client that
+        #    lost the response to a submission which then completed or paused the
+        #    session must still get the same stored result for the same scope;
+        #    the lookup is learner/session/item/turn/digest bound and never falls
+        #    back to a global result-id read.
+        requested_result_id: str | None = None
+        requested_scope: ResultScope | None = None
+        if result_id is not None:
+            requested_result_id = validate_result_id(
+                result_id, "TeachingSessionEngine.submit_response(result_id)"
+            )
+            requested_scope = self._make_scope(state, item_id, requested_result_id, digest)
+            existing = self._lookup_result_for_scope(requested_scope, response=response)
+            if existing is not None:
+                return existing
         if state.phase == PHASE_PAUSED:
             raise ConflictError(f"submit_response({session_id!r}): session is PAUSED")
         if state.phase == PHASE_COMPLETE:
@@ -800,25 +823,7 @@ class TeachingSessionEngine:
         if item is None:
             raise NotFoundError(f"submit_response(): unknown item_id {item_id!r}")
         learner_id = state.learner_id
-        canonical = canonical_response(response)
-        digest = request_digest(response)
-        digest16 = digest[:16]
-        response_kind = _response_kind(response)
 
-        # 1) Scoped idempotency fast path (before any pending/turn validation so
-        #    a same-scope retry works after the turn advanced).  The lookup is
-        #    learner/session/item/turn/digest bound; it never falls back to a
-        #    global result-id read.
-        requested_result_id: str | None = None
-        requested_scope: ResultScope | None = None
-        if result_id is not None:
-            requested_result_id = validate_result_id(
-                result_id, "TeachingSessionEngine.submit_response(result_id)"
-            )
-            requested_scope = self._make_scope(state, item_id, requested_result_id, digest)
-            existing = self._lookup_result_for_scope(requested_scope)
-            if existing is not None:
-                return existing
         if state.pending_item_id is None:
             self._raise_consumed_turn_if_applicable(state, item_id, requested_scope)
             raise ConflictError(
@@ -853,7 +858,9 @@ class TeachingSessionEngine:
             self._assert_attempt_matches_request(
                 prepared, state, item, digest, requested_result_id
             )
-            terminal = self._lookup_result_for_scope(prepared.scope)
+            terminal = self._lookup_result_for_scope(
+                prepared.scope, response=response
+            )
             if terminal is not None:
                 return terminal
             current_state = self._load_session(session_id)
@@ -895,7 +902,7 @@ class TeachingSessionEngine:
                     raise
                 retry_payload = self._prepared_payload(state, attempt_id)
                 if retry_payload is None:
-                    terminal = self._lookup_result_for_scope(scope)
+                    terminal = self._lookup_result_for_scope(scope, response=response)
                     if terminal is not None:
                         return terminal
                     raise
@@ -911,7 +918,9 @@ class TeachingSessionEngine:
                 self._assert_attempt_matches_request(
                     prepared, state, item, digest, requested_result_id
                 )
-                terminal = self._lookup_result_for_scope(prepared.scope)
+                terminal = self._lookup_result_for_scope(
+                    prepared.scope, response=response
+                )
                 if terminal is not None:
                     return terminal
             current_state = self._load_session(session_id)
@@ -1260,9 +1269,22 @@ class TeachingSessionEngine:
     def _prepared_scope(prepared: _PreparedAttempt) -> ResultScope:
         if prepared.scope is not None:
             return prepared.scope
-        digest = prepared.request_digest or hashlib.sha256(
-            prepared.canonical_response.encode("utf-8")
-        ).hexdigest()
+        digest = prepared.request_digest
+        if not digest:
+            # Pre-B-PR3 prepared events stored only the canonical response (in the
+            # old JSON projection).  Re-derive the *new* projection digest so the
+            # scope row written by recovery matches later scoped lookups.
+            if prepared.response_kind == "structured":
+                try:
+                    parsed = json.loads(prepared.canonical_response)
+                except json.JSONDecodeError:
+                    raise ValidationError(
+                        "stored ASSESSMENT_PREPARED event has a non-JSON structured "
+                        "canonical response"
+                    ) from None
+                digest = request_digest(parsed)
+            else:
+                digest = request_digest(prepared.canonical_response)
         return ResultScope(
             learner_id=prepared.learner_id,
             session_id=prepared.session_id,
@@ -1272,13 +1294,23 @@ class TeachingSessionEngine:
             request_digest=digest,
         )
 
-    def _lookup_result_for_scope(self, scope: ResultScope) -> AssessmentResult | None:
+    def _lookup_result_for_scope(
+        self, scope: ResultScope, *, response: str | dict | None = None
+    ) -> AssessmentResult | None:
         """Return the stored result for an **exactly matching** scope (or ``None``).
 
         Never performs a global ``result_id`` / ``event_id`` lookup.  With the
         scoped repository extension the v1 row is authoritative; legacy
         (pre-scope) rows/events are only adopted by the explicit legacy adapter
-        below, which requires learner/session/item match and digest proof.
+        below, which requires learner/session/item/turn match and digest proof.
+
+        ``response`` is the *current request payload* and is **required** to
+        verify structured (dict/list) legacy evidence: pre-B-PR3 digests were
+        computed with the default-separator JSON projection, so the comparison
+        uses :func:`legacy_request_digest`.  When it is omitted (e.g. a
+        duplicate-commit catch that only has a v1 scope) a legacy marker can
+        only be proven for string responses; structured evidence fails closed.
+
         Without the extension the engine fails closed
         (``IDEMPOTENCY_UNSUPPORTED``) instead of falling back to global reads.
         """
@@ -1301,8 +1333,8 @@ class TeachingSessionEngine:
             return found
         owner = self._repository.find_scope_owner(scope.result_id)
         if owner is not None and owner.origin == "legacy":
-            return self._legacy_result_from_owner(owner, scope)
-        return self._legacy_event_lookup(scope)
+            return self._legacy_result_from_owner(owner, scope, response=response)
+        return self._legacy_event_lookup(scope, response=response)
 
     def _lookup_scope_turn_tolerant(
         self, scope: ResultScope, conflict: ConflictError
@@ -1367,10 +1399,10 @@ class TeachingSessionEngine:
             )
         except ValidationError:
             return None
-        return self._lookup_result_for_scope(scope)
+        return self._lookup_result_for_scope(scope, response=response)
 
     def _legacy_result_from_owner(
-        self, owner: Any, scope: ResultScope
+        self, owner: Any, scope: ResultScope, *, response: str | dict | None = None
     ) -> AssessmentResult | None:
         """Adopt a migrated legacy scope row after proving it is the same request."""
 
@@ -1397,7 +1429,9 @@ class TeachingSessionEngine:
                 scope,
                 message="result_id is bound to a legacy record of a different turn",
             )
-        self._assert_legacy_digest_matches(owner.request_digest, scope)
+        self._assert_legacy_digest_matches(
+            owner.request_digest, scope, response=response
+        )
         if owner.result_event_id is None:  # pragma: no cover - migration invariant
             raise ValidationError(
                 f"legacy scope row for result_id {scope.result_id!r} has no terminal event"
@@ -1413,12 +1447,17 @@ class TeachingSessionEngine:
             self._idempotency_conflict(CONFLICT_REASON_LEGACY_SCOPE, scope)
         return self._result_from_terminal_event(event, scope)
 
-    def _legacy_event_lookup(self, scope: ResultScope) -> AssessmentResult | None:
+    def _legacy_event_lookup(
+        self, scope: ResultScope, *, response: str | dict | None = None
+    ) -> AssessmentResult | None:
         """Event-log legacy adapter for rows never backfilled into ``result_scopes``.
 
         Only events of the **same learner** are read (``list_events(learner_id)``
-        is learner-scoped); the session/item/result id and the stored response
-        digest prefix must all match, otherwise the call fails closed.
+        is learner-scoped); the session/item/result id, the stored response
+        digest prefix **and** the attempt turn must all match, otherwise the call
+        fails closed.  This fallback is reachable only when the additive index
+        row is missing (e.g. manual recovery); it is deliberately as strict as
+        the ``origin='legacy'`` row adapter (review P2-4).
         """
 
         terminal: HistoryEvent | None = None
@@ -1443,8 +1482,7 @@ class TeachingSessionEngine:
                     "refusing to return it"
                 ),
             )
-        result = self._result_from_terminal_event(terminal, scope)
-        digest_marker = self._legacy_response_digest(scope)
+        digest_marker, attempt_turn = self._legacy_attempt_metadata(scope)
         if digest_marker is None:
             self._idempotency_conflict(
                 CONFLICT_REASON_LEGACY_DIGEST_UNPROVEN,
@@ -1454,11 +1492,34 @@ class TeachingSessionEngine:
                     "(no comparable response digest); refusing to return it"
                 ),
             )
-        self._assert_legacy_digest_matches(digest_marker, scope)
-        return result
+        if attempt_turn is None:
+            self._idempotency_conflict(
+                CONFLICT_REASON_LEGACY_SCOPE,
+                scope,
+                message=(
+                    "cannot prove the turn of the stored legacy result; refusing to "
+                    "return it"
+                ),
+            )
+        if attempt_turn not in (scope.turn_index, scope.turn_index - 1):
+            self._idempotency_conflict(
+                CONFLICT_REASON_TURN,
+                scope,
+                message=(
+                    "result_id is bound to a legacy result of a different turn; "
+                    "refusing to return it"
+                ),
+            )
+        self._assert_legacy_digest_matches(digest_marker, scope, response=response)
+        return self._result_from_terminal_event(terminal, scope)
 
-    def _legacy_response_digest(self, scope: ResultScope) -> str | None:
+    def _legacy_attempt_metadata(
+        self, scope: ResultScope
+    ) -> tuple[str | None, int | None]:
+        """Return ``(digest marker, attempt turn)`` of the matching legacy attempt."""
+
         marker: str | None = None
+        turn: int | None = None
         for event in self._events(scope.learner_id):
             if event.event_type not in ("ASSESSMENT_PREPARED", "RESPONSE_SUBMITTED"):
                 continue
@@ -1469,16 +1530,33 @@ class TeachingSessionEngine:
                 continue
             if event.session_id != scope.session_id:
                 continue
+            raw_turn = payload.get("turn_index", payload.get("attempt"))
+            if type(raw_turn) is int and raw_turn >= 0:
+                turn = raw_turn
             raw_digest = payload.get("response_digest")
             if type(raw_digest) is str and len(raw_digest) == 16:
                 marker = f"legacy:{raw_digest}"
-        return marker
+        return marker, turn
 
-    def _assert_legacy_digest_matches(self, stored: str, scope: ResultScope) -> None:
+    def _assert_legacy_digest_matches(
+        self,
+        stored: str,
+        scope: ResultScope,
+        *,
+        response: str | dict | None = None,
+    ) -> None:
         if type(stored) is str and stored.startswith("legacy:"):
             marker = stored[len("legacy:") :]
             if len(marker) == 16:
-                if marker != scope.request_digest[:16]:
+                # Legacy evidence was produced with the pre-B-PR3 JSON projection
+                # (default separators), so compare against legacy_request_digest
+                # when the current request payload is available.
+                expected = (
+                    legacy_request_digest(response)
+                    if response is not None
+                    else scope.request_digest
+                )[:16]
+                if marker != expected:
                     self._idempotency_conflict(
                         CONFLICT_REASON_REQUEST_DIGEST,
                         scope,
@@ -1620,10 +1698,23 @@ class TeachingSessionEngine:
         canonical = payload["canonical_response"]
         prepared_digest = payload.get("request_digest")
         if type(prepared_digest) is not str or len(prepared_digest) != 64:
-            # Pre-B-PR3 prepared events only carried the 16-hex response_digest;
-            # the full digest is a deterministic function of the canonical
-            # response, so it can be recomputed without guessing.
-            prepared_digest = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+            # Pre-B-PR3 prepared events only carried the 16-hex response_digest
+            # produced with the *old* JSON projection.  Re-derive the new
+            # projection digest from the canonical response and prove it against
+            # the stored legacy prefix; otherwise the attempt is corrupted.
+            response = self._response_from_canonical(
+                canonical, payload["response_kind"], where
+            )
+            prepared_digest = request_digest(response)
+            stored_prefix = payload["response_digest"]
+            if (
+                len(stored_prefix) != 16
+                or legacy_request_digest(response)[:16] != stored_prefix
+            ):
+                raise ValidationError(
+                    f"{where}: stored response_digest does not match the persisted "
+                    "canonical response"
+                )
         raw_scope = payload.get("scope")
         if raw_scope is not None:
             scope = ResultScope.from_dict(raw_scope)
@@ -1659,6 +1750,27 @@ class TeachingSessionEngine:
             request_digest=prepared_digest,
             scope=scope,
         )
+
+    @staticmethod
+    def _response_from_canonical(
+        canonical: str, response_kind: str, where: str
+    ) -> str | dict:
+        """Decode a persisted canonical response back into its request form."""
+
+        if response_kind == "structured":
+            try:
+                parsed = json.loads(canonical)
+            except json.JSONDecodeError:
+                raise ValidationError(
+                    f"{where}: persisted structured canonical response is not JSON"
+                ) from None
+            if not isinstance(parsed, (dict, list)):
+                raise ValidationError(
+                    f"{where}: persisted structured canonical response is not an "
+                    "object/array"
+                )
+            return parsed
+        return canonical
 
     def _assert_attempt_matches_request(
         self,
@@ -1764,7 +1876,13 @@ class TeachingSessionEngine:
         for prepared in unresolved:
             fresh = self._load_session(session_id)
             prepared_scope = self._prepared_scope(prepared)
-            if self._lookup_result_for_scope(prepared_scope) is not None:
+            prepared_response = self._prepared_response_or_none(prepared)
+            if (
+                self._lookup_result_for_scope(
+                    prepared_scope, response=prepared_response
+                )
+                is not None
+            ):
                 recovered += 1
                 continue
             if (
@@ -1801,7 +1919,12 @@ class TeachingSessionEngine:
             try:
                 self._commit_result_turn(fresh, item, result, prepared_scope)
             except ConflictError as exc:
-                if self._lookup_result_for_scope(prepared_scope) is not None:
+                if (
+                    self._lookup_result_for_scope(
+                        prepared_scope, response=prepared_response
+                    )
+                    is not None
+                ):
                     recovered += 1
                     continue
                 code = f"RECOVERY_{getattr(exc, 'code', 'CONFLICT')}"
@@ -1884,7 +2007,13 @@ class TeachingSessionEngine:
                 continue
             seen.add(attempt_id)
             prepared = self._decode_prepared(attempt_id, payload)
-            if self._lookup_result_for_scope(self._prepared_scope(prepared)) is None:
+            if (
+                self._lookup_result_for_scope(
+                    self._prepared_scope(prepared),
+                    response=self._prepared_response_or_none(prepared),
+                )
+                is None
+            ):
                 attempts.append(prepared)
         return attempts
 
@@ -1902,6 +2031,14 @@ class TeachingSessionEngine:
                     "persisted structured response is not valid JSON",
                 ) from None
         return canonical
+
+    def _prepared_response_or_none(self, prepared: _PreparedAttempt):
+        """Decoded persisted response, or ``None`` when it cannot be decoded yet."""
+
+        try:
+            return self._decode_prepared_response(prepared)
+        except _RecoveryFailure:
+            return None
 
     def _rescore_for_recovery(
         self,
