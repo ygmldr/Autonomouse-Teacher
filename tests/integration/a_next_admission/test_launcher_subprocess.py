@@ -6,6 +6,8 @@ from pathlib import Path
 import subprocess
 import sys
 
+import pytest
+
 
 from admission_support import (
     L2_RUNNER, admission_document, begin, launcher_config, retime_authorization,
@@ -136,3 +138,23 @@ def test_l2_case_runner_requires_fresh_a2_01_state(trusted, tmp_path: Path) -> N
         capture_output=True, text=True)
     assert completed.returncode != 0
     assert "fresh" in completed.stderr or "empty" in completed.stderr
+
+
+def test_r25_admission_document_replay_is_rejected(tmp_path: Path) -> None:
+    """The existing Admission replay guard still applies before any dispatch."""
+    from autoteacher_m0.bridge.admission import load_admission
+    from autoteacher_m0.bridge.attempts import AttemptJournal
+
+    admission_path = write_admission(tmp_path)
+    admission = load_admission(admission_path, expected_uid=65534)
+    journal = AttemptJournal(tmp_path / "attempts-r25.sqlite3")
+    try:
+        journal.register_admission(admission.admission_id, admission.sha256,
+                                   admission.run_id, "ctl-first")
+        with pytest.raises(ValueError) as error:
+            journal.register_admission(admission.admission_id, admission.sha256,
+                                       admission.run_id, "ctl-second")
+        assert "ADMISSION_REPLAYED" in str(error.value)
+        assert journal.admission_registered(admission.admission_id) is True
+    finally:
+        journal.close()
