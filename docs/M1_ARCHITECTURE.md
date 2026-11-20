@@ -1,12 +1,15 @@
-# M1-A Architecture & Contracts (initial draft)
+# M1-A Architecture & Contracts (final, B-PR5)
 
-- **Status**: initial draft for B-PR1 (`m1a.v0` interface freeze); later PRs may update this
-  document append-only.
-- **Owner of this revision**: B-PR1a / m1a-contracts.
-- **Baseline**: `main@3e7afee`, worktree branch `work/m1a-mvp`.
-- **Contract version**: `m1a.v0` (`m1_teacher.CONTRACT_VERSION`).
-- **Scope**: offline, deterministic, no-network teacher core for M1-A. Nothing in this document
-  claims real teaching effectiveness or a production launch.
+- **Status**: final architecture for the M1-A offline MVP (B-PR1…B-PR5); append-only from here,
+  changes require an ADR note.
+- **Owner of this revision**: B-PR5 / m1a-e2e (PR1 draft by B-PR1a / m1a-contracts).
+- **Baseline**: worktree branch `work/m1a-mvp`, B-PR4 commit `933ccde`; B-PR5 changes are
+  uncommitted at the time of writing (Lead owns commits; the reviewed SHA is recorded in the
+  B-PR5 review request).
+- **Contract version**: `m1a.v0` (`m1_teacher.CONTRACT_VERSION`); next-phase additive contracts
+  `m1a.extensions.v0` (interface stubs only).
+- **Scope**: offline, deterministic, no-network teacher core + offline E2E demo/CLI for M1-A.
+  Nothing in this document claims real teaching effectiveness or a production launch.
 
 ---
 
@@ -45,7 +48,7 @@ independent review:
 
 | Block | Capability | Delivered by |
 |---|---|---|
-| **B1** | Learning Domain Contracts — `DomainAdapter`, `KnowledgeNode`, `PrerequisiteEdge`, `LearningObjective`, `AssessmentItem`, `AssessmentResult`, `TeachingAction`, `EvidenceReference`; knowledge graph with dependency/difficulty/assessment-mode metadata; no CF-specific fields hard-coded in the teacher core | **PR1** (this revision) |
+| **B1** | Learning Domain Contracts — `DomainAdapter`, `KnowledgeNode`, `PrerequisiteEdge`, `LearningObjective`, `AssessmentItem`, `AssessmentResult`, `TeachingAction`, `EvidenceReference`; knowledge graph with dependency/difficulty/assessment-mode metadata; no CF-specific fields hard-coded in the teacher core | **PR1** |
 | **B2** | Learner Model — mastery/confidence/evidence count/completed practice/error types/recent learning & review times/ability-change history; observed vs inferred evidence; deterministic heuristic or BKT; persistence/restore/idempotency/error-input validation | **PR2** |
 | **B3** | Diagnostic Engine — entry diagnosis and stepwise probing; outputs next diagnostic item, selection reason and the knowledge hypothesis to test; never reads hidden answers; insufficient evidence ⇒ `INSUFFICIENT_EVIDENCE` | **PR3** |
 | **B4** | Curriculum Planner — selects activities by dependency/mastery/goal/time; supports prerequisite remediation, current-node teaching, practice+feedback, review, reassessment, goal-completion judgement; structured `Reason` explains why this node/step | **PR3** |
@@ -307,27 +310,36 @@ activity. PR4 owns the authoritative transition table and tests.
 | `HUMAN_REVIEWED` | Manually inspected outcome by an independent human/agent reviewer |
 | `NOT_VERIFIED` | Claimed/planned but not yet demonstrated; must not be reported as PASS |
 
-PR1 evidence is `DETERMINISTIC` (268 passing tests at this revision) plus `MOCK` fixtures; there
-is no `HUMAN_REVIEWED` outcome yet, and all learning/teaching-effectiveness claims remain
-`NOT_VERIFIED` for M1-A.
+Final (B-PR5) evidence status: `DETERMINISTIC` for **533 passing tests**
+(PR1 268 + PR2 100 + PR3 50 + PR4 75 + PR5 40) and the reproducible E2E artifacts;
+`MOCK` for the synthetic student fixtures and scripted outcomes used by the E2E demo;
+`HUMAN_REVIEWED` remains `NOT_RUN` until the independent review; all real
+learning/teaching-effectiveness claims remain `NOT_VERIFIED` for M1-A.
 
 ---
 
 ## 10. Known limitations / open questions
 
-1. Only one domain adapter (`cf_binary_search`) exists; multi-domain registration is supported by
-   the registry but untested against a second real domain.
-2. Mastery estimation, diagnostic selection, planning and session transitions are **not
-   implemented** in PR1 — only their frozen data contracts/protocols exist.
-3. `SOFT` prerequisite remediation policy (when a soft gap may be skipped) is a PR3 decision.
-4. Semantic scoring of `SHORT_ANSWER` is intentionally conservative; the scorer must return
-   `NEEDS_REVIEW` rather than guessing.
-5. `AssessmentItem.public` is fixture metadata only in v0; if later PRs need it, they must add it
-   additively and bump/review the contract (documented in the ADR).
-6. Records are mutable dataclasses; PR2–PR4 must treat them as value objects and rebuild rather
-   than mutate persisted state in place.
-7. No contract for evidence classification fields on records yet (it is a report-level
-   vocabulary); adding machine-readable evidence classes would be an additive change.
+Final limitations (see `docs/M1_EVALUATION_REPORT.md` §limitations for the complete list):
+
+1. Only one domain adapter (`cf_binary_search`, synthetic CC0-1.0 fixtures) is exercised; the
+   registry supports multiple domains but a second real domain is `NOT_RUN`.
+2. Mastery is a small deterministic heuristic (fixed step/decay/confidence constants), **not** a
+   calibrated psychometric/BKT learner model; it is not validated against real learners.
+3. `SHORT_ANSWER` scoring is intentionally conservative: deterministic keyword evidence can award
+   at most `PARTIAL`, and `NEEDS_REVIEW` is used when semantic evidence cannot be verified.
+4. `CODE` scoring executes learner code in a local child process with a timeout and a temp dir —
+   a determinism/correctness boundary, **not** an OS security sandbox; only synthetic authored
+   fixtures are used.
+5. The E2E demo/CLI uses a MOCK student scorer driven by the synthetic fixture
+   `response_script`; it does not call any real model/provider and its outcomes are not real
+   learner performance.
+6. Records are mutable dataclasses: producers must build new records; persisted state is
+   rebuilt/validated from the append-only event log (`verify_rebuild`).
+7. Evidence classification is a report-level vocabulary, not a machine-readable field on frozen
+   `m1a.v0` records; adding it would be an additive ADR change.
+8. Multi-writer concurrency, real-time/online use, web deployment, interview coaching, knowledge
+   freshness and autonomous research are `NOT_RUN` in M1-A (next-phase plan only).
 8. Fixture provenance is synthetic/CC0-1.0 per B-PR1b README; no real course material is used.
 
 ---
@@ -340,7 +352,7 @@ is no `HUMAN_REVIEWED` outcome yet, and all learning/teaching-effectiveness clai
 | PR2 | B2, B7 | `LearnerSnapshot`, `HistoryEvent`, repository protocols | no; additive only with ADR note |
 | PR3 | B3, B4 | `KnowledgeGraph`, `DomainAdapter`, `Reason`, `DiagnosisResult`, `CurriculumPlan` | no; additive only |
 | PR4 | B5, B6 | `SESSION_PHASE`, `AssessmentResult`, `TeachingAction`; new scorer types | may add scorer-only types; teacher-visible types add-only |
-| PR5 | B8 | all of the above | no; docs/evidence only |
+| PR5 | B8 | all of the above | no; demo/CLI/evidence/docs only (adds `m1_teacher/demo.py`, `cli.py`, `extensions/` stubs) |
 
 Any future change to `m1a.v0` must be **additive only** (new enum values, new optional fields
 with defaults, new protocols/helpers), must be recorded in
@@ -353,3 +365,63 @@ with defaults, new protocols/helpers), must be recorded in
 | Date (UTC) | Revision | Change |
 |---|---|---|
 | 2026-11-20 | B-PR1 initial | Contract freeze `m1a.v0`, knowledge graph, registry, CF adapter, tests, initial architecture and ADR |
+| 2026-11-20 | B-PR2 | Evidence-driven learner model, learning history, SQLite persistence (100 tests) |
+| 2026-11-20 | B-PR3 | Diagnostic engine + curriculum planner with structured `Reason`s (50 tests) |
+| 2026-11-20 | B-PR4 | Teaching-session state machine + independent assessment scorer (75 tests) |
+| 2026-11-20 | B-PR5 final | Student A/B E2E paths, deterministic demo/CLI, reproducible evidence JSONL, implementation/evaluation/review/next-phase docs, next-phase interface stubs (40 tests, 533 total) |
+
+---
+
+## 13. Final implementation inventory (B-PR5)
+
+| Layer | Path | Responsibility |
+|---|---|---|
+| Contracts | `m1_teacher/contracts/{types,domain,repository,errors}.py` | frozen `m1a.v0` records/protocols/errors |
+| Knowledge | `m1_teacher/knowledge/graph.py` | validated prerequisite DAG (topological order, closures) |
+| Domain | `m1_teacher/domains/cf_binary_search.py` | CF binary-search adapter (allow-listed public fixtures only) |
+| Learner | `m1_teacher/learner/{model,history,repository}.py` | mastery heuristic, append-only history, SQLite persistence/rebuild |
+| Diagnostic | `m1_teacher/diagnostic/engine.py` | next diagnostic item + hypothesis + structured `Reason` |
+| Planner | `m1_teacher/planner/planner.py` | prerequisite-first curriculum plan + review/reassess/goal-complete |
+| Assessment | `m1_teacher/assessment/scorer.py` | **only** hidden-scoring reader; independent `CORRECT/INCORRECT/PARTIAL/NEEDS_REVIEW/EVAL_ERROR` |
+| Session | `m1_teacher/session/engine.py` | persistent state machine (diagnose→teach→practice→assess→update→review→next, pause/resume) |
+| E2E demo | `m1_teacher/demo.py`, `m1_teacher/cli.py` | deterministic Student A/B demonstration, offline CLI, evidence writer |
+| Next-phase stubs | `m1_teacher/extensions/interfaces.py` | contract-only protocols for web/interview/freshness/research/improvement (fail closed) |
+| Tests | `tests/m1_teacher/` | 533 tests (268+100+50+75+40) |
+| Evidence | `docs/m1a_evidence/*.jsonl`, `e2e_summary.json` | reproducible E2E traces (no wall clock, no hidden material) |
+
+## 14. Persistence schema (SQLite, `schema_meta.version == 1`)
+
+Implemented in `m1_teacher/learner/repository.py`; the event log is the source of truth and the
+materialised snapshot is a rebuildable cache validated by `LearningHistory.verify_rebuild`.
+
+| Table | Key columns | Purpose |
+|---|---|---|
+| `schema_meta` | `version` | fail-closed schema version check |
+| `learners` | `learner_id` PK, `created_at`, `updated_at` | learner registry |
+| `snapshots` | `learner_id` PK→learners, `revision`, `updated_at`, `snapshot_json` | materialised mastery/error state |
+| `history_events` | `event_id` PK, `learner_id`, `session_id`, `seq`, `event_type`, `payload_json`, `created_at`, `UNIQUE(learner_id, seq)` | append-only learning history (idempotent on `event_id`) |
+| `goals` | `goal_id` PK, `learner_id`, `objective_id`, `status`, `goal_json`, `created_at` | learning goals |
+| `sessions` | `session_id` PK, `learner_id`, `state_json`, `updated_at` | session phase/pending item for pause/restart |
+
+WAL + foreign keys + `BEGIN IMMEDIATE` transactions; `append_events_and_upsert_snapshot` commits
+events and snapshot atomically so a crash cannot leave the snapshot ahead of/behind the log.
+
+## 15. Reproducible E2E evidence (B-PR5)
+
+```bash
+cd /root/at-m1a-mvp
+"/root/Autonomous Teacher/.venv/bin/python" -m m1_teacher.demo                 # deterministic transcript
+"/root/Autonomous Teacher/.venv/bin/python" -m m1_teacher.demo --write-evidence # + JSONL evidence
+"/root/Autonomous Teacher/.venv/bin/python" -m pytest tests/m1_teacher -q       # 533 passed
+```
+
+Two consecutive runs of the demo produce byte-identical stdout; the two JSONL evidence files are
+byte-identical across runs. Wall-clock timestamps are excluded from the evidence projection and
+the E2E mock scorer uses a fixed timestamp, so the artifacts are reproducible on the frozen tree.
+
+## 16. Next phase
+
+`docs/M1_NEXT_PHASE_PLAN.md` defines the additive next-phase interfaces (Web App, Interview
+Coach, Knowledge Freshness, Autonomous Research, Teacher Improvement experiment log). The
+contract-only stubs live in `m1_teacher/extensions/` and fail closed with
+`EXTENSION_NOT_IMPLEMENTED`; none of them performs network/real-provider work.

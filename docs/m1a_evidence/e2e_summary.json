@@ -1,0 +1,1234 @@
+{
+  "base_commit": "933ccdeab2085ff30bbf0dcb65271373eea6ef09",
+  "classification": {
+    "DETERMINISTIC": "state machine, learner model arithmetic, ids, replay verification",
+    "HUMAN_REVIEWED": "NOT_RUN in this PR (independent review follows)",
+    "MOCK": "synthetic student fixtures, scripted outcomes and seeded prior evidence",
+    "NOT_VERIFIED": "real teaching effectiveness, real learner outcomes"
+  },
+  "command": "cd /root/at-m1a-mvp && \"/root/Autonomous Teacher/.venv/bin/python\" -m m1_teacher.demo",
+  "contract_version": "m1a.v0",
+  "disclaimer": "offline synthetic only, not real teaching effect. M1-A is an offline deterministic teaching-loop prototype over synthetic CC0-1.0 fixtures; nothing here measures or claims real learning outcomes.",
+  "evidence_files": [
+    "docs/m1a_evidence/e2e_student_a.jsonl",
+    "docs/m1a_evidence/e2e_student_b.jsonl"
+  ],
+  "evidence_hashes": {
+    "e2e_student_a.jsonl": "171cc654f65129af803dbcd97ebffd50a2da97e8c616d3868570a9b7cb9443f1",
+    "e2e_student_b.jsonl": "5e84229ec452b2abad5243fa731f58cde38f76baee5240b01d01a3759eeda46b"
+  },
+  "fixed_timestamp": "2026-11-20T00:00:00Z",
+  "generated_at_utc_date": "2026-11-20",
+  "max_turns": 10,
+  "not_run": [
+    "real learner data or real teaching effect measurement (offline synthetic only)",
+    "network/LLM provider integration (out of scope for M1-A)",
+    "human expert review of teaching quality (independent review follows this PR)"
+  ],
+  "path_differences": {
+    "final_mastery_differs": true,
+    "first_action_differs": true,
+    "initial_plan_differs": true,
+    "next_recommendation_differs": true,
+    "phase_sequence_differs": true
+  },
+  "pause_after_turns": 5,
+  "policy_checks": {
+    "history_verify_rebuild": true,
+    "interrupt_resume_state_equal": true,
+    "prerequisite_remediation_before_target": true,
+    "student_a_has_no_prerequisite_remediation": true
+  },
+  "schema": "m1a.e2e_scenario.v0",
+  "students": {
+    "a": {
+      "actions": [
+        {
+          "action_id": "action:0379d277a04e8edd",
+          "action_kind": "DIAGNOSE",
+          "item_id": "item.bs.mcq.007",
+          "node_ids": [
+            "cf.complexity.log"
+          ],
+          "phase": "DIAGNOSE",
+          "reason_code": "DIAGNOSTIC_ITEM",
+          "reason_detail": "TARGET_EVIDENCE_GAP: cf.complexity.log is below mastery threshold 0.50 or insufficiently observed; a response to item item.bs.mcq.007 would distinguish 'not yet learned' from 'learned but not yet evidenced'.",
+          "turn_index": 0
+        },
+        {
+          "action_id": "action:987dacdfbfd17c85",
+          "action_kind": "DIAGNOSE",
+          "item_id": "item.bs.mcq.005",
+          "node_ids": [
+            "cf.search.boundary"
+          ],
+          "phase": "DIAGNOSE",
+          "reason_code": "DIAGNOSTIC_ITEM",
+          "reason_detail": "TARGET_EVIDENCE_GAP: cf.search.boundary is below mastery threshold 0.50 or insufficiently observed; a response to item item.bs.mcq.005 would distinguish 'not yet learned' from 'learned but not yet evidenced'.",
+          "turn_index": 1
+        },
+        {
+          "action_id": "action:92ee612e6daf040d",
+          "action_kind": "HINT",
+          "item_id": null,
+          "node_ids": [
+            "cf.search.boundary"
+          ],
+          "phase": "REVIEW",
+          "reason_code": "HINT_LEVEL_2",
+          "reason_detail": "escalated hint to level 2 after repeated INCORRECT outcomes",
+          "turn_index": 2
+        },
+        {
+          "action_id": "action:8e119d0c913bf7be",
+          "action_kind": "EXPLAIN",
+          "item_id": null,
+          "node_ids": [
+            "cf.search.binary"
+          ],
+          "phase": "TEACH",
+          "reason_code": "TEACH_TARGET_NODE",
+          "reason_detail": "target cf.search.binary mastery=0.30 < objective min_mastery=0.70 with evidence_count=2; teach the concept before asking for practice.",
+          "turn_index": 3
+        },
+        {
+          "action_id": "action:3dca8fc1c46a9672",
+          "action_kind": "PRACTICE",
+          "item_id": "item.bs.mcq.004",
+          "node_ids": [
+            "cf.search.binary"
+          ],
+          "phase": "PRACTICE",
+          "reason_code": "PRACTICE_TARGET_NODE",
+          "reason_detail": "practice target cf.search.binary with teacher-visible item item.bs.mcq.004 right after teaching to apply the concept.",
+          "turn_index": 4
+        },
+        {
+          "action_id": "action:e5edc03723aac658",
+          "action_kind": "PRACTICE",
+          "item_id": "item.bs.mcq.004",
+          "node_ids": [
+            "cf.search.binary"
+          ],
+          "phase": "PRACTICE",
+          "reason_code": "PRACTICE_TARGET_NODE",
+          "reason_detail": "target cf.search.binary mastery=0.37 < objective min_mastery=0.70 but has evidence and no elevated error pressure; practise with item item.bs.mcq.004.",
+          "turn_index": 5
+        },
+        {
+          "action_id": "action:3a20ab8b5a597405",
+          "action_kind": "PRACTICE",
+          "item_id": "item.bs.mcq.004",
+          "node_ids": [
+            "cf.search.binary"
+          ],
+          "phase": "PRACTICE",
+          "reason_code": "PRACTICE_TARGET_NODE",
+          "reason_detail": "target cf.search.binary mastery=0.42 < objective min_mastery=0.70 but has evidence and no elevated error pressure; practise with item item.bs.mcq.004.",
+          "turn_index": 6
+        },
+        {
+          "action_id": "action:923d42d48ad0e5c3",
+          "action_kind": "PRACTICE",
+          "item_id": "item.bs.mcq.004",
+          "node_ids": [
+            "cf.search.binary"
+          ],
+          "phase": "PRACTICE",
+          "reason_code": "PRACTICE_TARGET_NODE",
+          "reason_detail": "target cf.search.binary mastery=0.46 < objective min_mastery=0.70 but has evidence and no elevated error pressure; practise with item item.bs.mcq.004.",
+          "turn_index": 7
+        },
+        {
+          "action_id": "action:a8a2d2aeaebc1b74",
+          "action_kind": "PRACTICE",
+          "item_id": "item.bs.mcq.004",
+          "node_ids": [
+            "cf.search.binary"
+          ],
+          "phase": "PRACTICE",
+          "reason_code": "PRACTICE_TARGET_NODE",
+          "reason_detail": "target cf.search.binary mastery=0.49 < objective min_mastery=0.70 but has evidence and no elevated error pressure; practise with item item.bs.mcq.004.",
+          "turn_index": 8
+        },
+        {
+          "action_id": "action:54a716f86e549cda",
+          "action_kind": "PRACTICE",
+          "item_id": "item.bs.mcq.004",
+          "node_ids": [
+            "cf.search.binary"
+          ],
+          "phase": "PRACTICE",
+          "reason_code": "PRACTICE_TARGET_NODE",
+          "reason_detail": "target cf.search.binary mastery=0.52 < objective min_mastery=0.70 but has evidence and no elevated error pressure; practise with item item.bs.mcq.004.",
+          "turn_index": 9
+        }
+      ],
+      "assessment_status_counts": {
+        "CORRECT": 7,
+        "INCORRECT": 1
+      },
+      "assessments": [
+        {
+          "created_at_fixed": "2026-11-20T00:00:00Z",
+          "failure_reason": "",
+          "item_id": "item.bs.mcq.007",
+          "result_id": "result:session:m1a.learner.student_a:goal.m1a.learner.student_a.obj.cf.binary_search.mastery:0:item.bs.mcq.007:559aead08264d579",
+          "score": 1.0,
+          "scorer_id": "m1a.mock.student.script.v0",
+          "status": "CORRECT"
+        },
+        {
+          "created_at_fixed": "2026-11-20T00:00:00Z",
+          "failure_reason": "off_by_one",
+          "item_id": "item.bs.mcq.005",
+          "result_id": "result:session:m1a.learner.student_a:goal.m1a.learner.student_a.obj.cf.binary_search.mastery:1:item.bs.mcq.005:559aead08264d579",
+          "score": 0.0,
+          "scorer_id": "m1a.mock.student.script.v0",
+          "status": "INCORRECT"
+        },
+        {
+          "created_at_fixed": "2026-11-20T00:00:00Z",
+          "failure_reason": "",
+          "item_id": "item.bs.mcq.004",
+          "result_id": "result:session:m1a.learner.student_a:goal.m1a.learner.student_a.obj.cf.binary_search.mastery:4:item.bs.mcq.004:559aead08264d579",
+          "score": 1.0,
+          "scorer_id": "m1a.mock.student.script.v0",
+          "status": "CORRECT"
+        },
+        {
+          "created_at_fixed": "2026-11-20T00:00:00Z",
+          "failure_reason": "",
+          "item_id": "item.bs.mcq.004",
+          "result_id": "result:session:m1a.learner.student_a:goal.m1a.learner.student_a.obj.cf.binary_search.mastery:5:item.bs.mcq.004:559aead08264d579",
+          "score": 1.0,
+          "scorer_id": "m1a.mock.student.script.v0",
+          "status": "CORRECT"
+        },
+        {
+          "created_at_fixed": "2026-11-20T00:00:00Z",
+          "failure_reason": "",
+          "item_id": "item.bs.mcq.004",
+          "result_id": "result:session:m1a.learner.student_a:goal.m1a.learner.student_a.obj.cf.binary_search.mastery:6:item.bs.mcq.004:559aead08264d579",
+          "score": 1.0,
+          "scorer_id": "m1a.mock.student.script.v0",
+          "status": "CORRECT"
+        },
+        {
+          "created_at_fixed": "2026-11-20T00:00:00Z",
+          "failure_reason": "",
+          "item_id": "item.bs.mcq.004",
+          "result_id": "result:session:m1a.learner.student_a:goal.m1a.learner.student_a.obj.cf.binary_search.mastery:7:item.bs.mcq.004:559aead08264d579",
+          "score": 1.0,
+          "scorer_id": "m1a.mock.student.script.v0",
+          "status": "CORRECT"
+        },
+        {
+          "created_at_fixed": "2026-11-20T00:00:00Z",
+          "failure_reason": "",
+          "item_id": "item.bs.mcq.004",
+          "result_id": "result:session:m1a.learner.student_a:goal.m1a.learner.student_a.obj.cf.binary_search.mastery:8:item.bs.mcq.004:559aead08264d579",
+          "score": 1.0,
+          "scorer_id": "m1a.mock.student.script.v0",
+          "status": "CORRECT"
+        },
+        {
+          "created_at_fixed": "2026-11-20T00:00:00Z",
+          "failure_reason": "",
+          "item_id": "item.bs.mcq.004",
+          "result_id": "result:session:m1a.learner.student_a:goal.m1a.learner.student_a.obj.cf.binary_search.mastery:9:item.bs.mcq.004:559aead08264d579",
+          "score": 1.0,
+          "scorer_id": "m1a.mock.student.script.v0",
+          "status": "CORRECT"
+        }
+      ],
+      "diagnosis": {
+        "diagnosis_id": "diag:78166ceeadaf26c4",
+        "hypothesis": "TARGET_EVIDENCE_GAP: cf.complexity.log is below mastery threshold 0.50 or insufficiently observed; a response to item item.bs.mcq.007 would distinguish 'not yet learned' from 'learned but not yet evidenced'.",
+        "policy_version": "m1a.diagnostic.v0",
+        "reason_code": "TARGET_EVIDENCE_GAP",
+        "reason_detail": "selected node cf.complexity.log: observed evidence is insufficient (evidence_count=0 < 2 or confidence=0.00 < 0.5); current mastery estimate=0.00 is below the diagnostic gap threshold 0.50. Item item.bs.mcq.007 (type=MCQ, difficulty=3) covers node(s) ['cf.complexity.log'] and discriminates tags []; candidate nodes were ranked by evidence gap, low mastery, hard-prerequisite priority and difficulty match; policy=m1a.diagnostic.v0.",
+        "selected_item_id": "item.bs.mcq.007",
+        "status": "READY",
+        "target_node_id": "cf.complexity.log"
+      },
+      "display_name": "Student A（合成）",
+      "event_count": 47,
+      "evidence_classification": {
+        "real_teaching_effect": "NOT_VERIFIED",
+        "seeded_prior_evidence": "MOCK",
+        "state_machine_model_and_ids": "DETERMINISTIC",
+        "student_responses_and_outcomes": "MOCK"
+      },
+      "final": {
+        "pending_item_id": null,
+        "phase": "REVIEW",
+        "turn_index": 10
+      },
+      "first_action": {
+        "action_id": "action:0379d277a04e8edd",
+        "action_kind": "DIAGNOSE",
+        "item_id": "item.bs.mcq.007",
+        "node_ids": [
+          "cf.complexity.log"
+        ],
+        "phase": "DIAGNOSE",
+        "reason_code": "DIAGNOSTIC_ITEM",
+        "reason_detail": "TARGET_EVIDENCE_GAP: cf.complexity.log is below mastery threshold 0.50 or insufficiently observed; a response to item item.bs.mcq.007 would distinguish 'not yet learned' from 'learned but not yet evidenced'.",
+        "turn_index": 0
+      },
+      "fixed_timestamp": "2026-11-20T00:00:00Z",
+      "goal_id": "goal.m1a.learner.student_a.obj.cf.binary_search.mastery",
+      "initial_plan": {
+        "plan_id": "plan:f7bf9747d0fd6596",
+        "policy_version": "m1a.planner.v0",
+        "steps": [
+          {
+            "action_kind": "EXPLAIN",
+            "item_id": null,
+            "node_ids": [
+              "cf.search.binary"
+            ],
+            "ordinal": 0,
+            "phase": "TEACH",
+            "reason_code": "TEACH_TARGET_NODE",
+            "reason_detail": "target cf.search.binary mastery=0.30 < objective min_mastery=0.70 with evidence_count=2; teach the concept before asking for practice."
+          },
+          {
+            "action_kind": "PRACTICE",
+            "item_id": "item.bs.mcq.004",
+            "node_ids": [
+              "cf.search.binary"
+            ],
+            "ordinal": 1,
+            "phase": "PRACTICE",
+            "reason_code": "PRACTICE_TARGET_NODE",
+            "reason_detail": "practice target cf.search.binary with teacher-visible item item.bs.mcq.004 right after teaching to apply the concept."
+          },
+          {
+            "action_kind": "DIAGNOSE",
+            "item_id": "item.bs.code.001",
+            "node_ids": [
+              "cf.search.binary"
+            ],
+            "ordinal": 2,
+            "phase": "ASSESS",
+            "reason_code": "ASSESS_PROGRESS",
+            "reason_detail": "assess target cf.search.binary with item item.bs.code.001; observed evidence updates mastery and error counts."
+          },
+          {
+            "action_kind": "EXPLAIN",
+            "item_id": null,
+            "node_ids": [
+              "cf.search.boundary"
+            ],
+            "ordinal": 3,
+            "phase": "TEACH",
+            "reason_code": "TEACH_TARGET_NODE",
+            "reason_detail": "target cf.search.boundary mastery=0.00 < objective min_mastery=0.70 with evidence_count=1; teach the concept before asking for practice."
+          },
+          {
+            "action_kind": "PRACTICE",
+            "item_id": "item.bs.mcq.005",
+            "node_ids": [
+              "cf.search.boundary"
+            ],
+            "ordinal": 4,
+            "phase": "PRACTICE",
+            "reason_code": "PRACTICE_TARGET_NODE",
+            "reason_detail": "practice target cf.search.boundary with teacher-visible item item.bs.mcq.005 right after teaching to apply the concept."
+          },
+          {
+            "action_kind": "DIAGNOSE",
+            "item_id": "item.bs.mcq.005",
+            "node_ids": [
+              "cf.search.boundary"
+            ],
+            "ordinal": 5,
+            "phase": "ASSESS",
+            "reason_code": "ASSESS_PROGRESS",
+            "reason_detail": "assess target cf.search.boundary with item item.bs.mcq.005; observed evidence updates mastery and error counts."
+          },
+          {
+            "action_kind": "EXPLAIN",
+            "item_id": null,
+            "node_ids": [
+              "cf.search.lower_upper"
+            ],
+            "ordinal": 6,
+            "phase": "TEACH",
+            "reason_code": "TEACH_TARGET_NODE",
+            "reason_detail": "target cf.search.lower_upper mastery=0.00 < objective min_mastery=0.70 with evidence_count=0; teach the concept before asking for practice."
+          },
+          {
+            "action_kind": "PRACTICE",
+            "item_id": "item.bs.mcq.006",
+            "node_ids": [
+              "cf.search.lower_upper"
+            ],
+            "ordinal": 7,
+            "phase": "PRACTICE",
+            "reason_code": "PRACTICE_TARGET_NODE",
+            "reason_detail": "practice target cf.search.lower_upper with teacher-visible item item.bs.mcq.006 right after teaching to apply the concept."
+          }
+        ]
+      },
+      "interrupt_resume": {
+        "pause_phase": "REVIEW",
+        "paused_at_turn": 5,
+        "paused_plan_equal": true,
+        "pending_equal": true,
+        "plan_equal": true,
+        "resumed_phase": "REVIEW",
+        "snapshot_equal": true,
+        "verify_rebuild_after_restart": true,
+        "verify_rebuild_before_restart": true
+      },
+      "learner_id": "m1a.learner.student_a",
+      "mastery_after": {
+        "cf.array.basics": {
+          "confidence": 0.75,
+          "evidence_count": 2,
+          "value": 0.3
+        },
+        "cf.complexity.log": {
+          "confidence": 0.5,
+          "evidence_count": 1,
+          "value": 0.2
+        },
+        "cf.search.binary": {
+          "confidence": 0.996094,
+          "evidence_count": 8,
+          "value": 0.543571
+        },
+        "cf.search.boundary": {
+          "confidence": 0.4375,
+          "evidence_count": 2,
+          "value": 0.0
+        },
+        "cf.search.linear": {
+          "confidence": 0.75,
+          "evidence_count": 2,
+          "value": 0.3
+        },
+        "cf.sort.sortedness": {
+          "confidence": 0.75,
+          "evidence_count": 2,
+          "value": 0.3
+        }
+      },
+      "next_recommendation": {
+        "plan_id": "plan:24bfae59cd767de6",
+        "policy_version": "m1a.planner.v0",
+        "steps": [
+          {
+            "action_kind": "PRACTICE",
+            "item_id": "item.bs.mcq.004",
+            "node_ids": [
+              "cf.search.binary"
+            ],
+            "ordinal": 0,
+            "phase": "PRACTICE",
+            "reason_code": "PRACTICE_TARGET_NODE",
+            "reason_detail": "target cf.search.binary mastery=0.54 < objective min_mastery=0.70 but has evidence and no elevated error pressure; practise with item item.bs.mcq.004."
+          },
+          {
+            "action_kind": "DIAGNOSE",
+            "item_id": "item.bs.code.001",
+            "node_ids": [
+              "cf.search.binary"
+            ],
+            "ordinal": 1,
+            "phase": "ASSESS",
+            "reason_code": "ASSESS_PROGRESS",
+            "reason_detail": "assess target cf.search.binary with item item.bs.code.001; observed evidence updates mastery and error counts."
+          },
+          {
+            "action_kind": "REASSESS",
+            "item_id": "item.bs.short.001",
+            "node_ids": [
+              "cf.search.boundary"
+            ],
+            "ordinal": 2,
+            "phase": "ASSESS",
+            "reason_code": "REASSESS_STUCK_NODE",
+            "reason_detail": "target cf.search.boundary has 2 consecutive INCORRECT assessment(s) (threshold 2); reassess before teaching the same content again."
+          },
+          {
+            "action_kind": "EXPLAIN",
+            "item_id": null,
+            "node_ids": [
+              "cf.search.lower_upper"
+            ],
+            "ordinal": 3,
+            "phase": "TEACH",
+            "reason_code": "TEACH_TARGET_NODE",
+            "reason_detail": "target cf.search.lower_upper mastery=0.00 < objective min_mastery=0.70 with evidence_count=0; teach the concept before asking for practice."
+          },
+          {
+            "action_kind": "PRACTICE",
+            "item_id": "item.bs.mcq.006",
+            "node_ids": [
+              "cf.search.lower_upper"
+            ],
+            "ordinal": 4,
+            "phase": "PRACTICE",
+            "reason_code": "PRACTICE_TARGET_NODE",
+            "reason_detail": "practice target cf.search.lower_upper with teacher-visible item item.bs.mcq.006 right after teaching to apply the concept."
+          },
+          {
+            "action_kind": "DIAGNOSE",
+            "item_id": "item.bs.code.002",
+            "node_ids": [
+              "cf.search.lower_upper"
+            ],
+            "ordinal": 5,
+            "phase": "ASSESS",
+            "reason_code": "ASSESS_PROGRESS",
+            "reason_detail": "assess target cf.search.lower_upper with item item.bs.code.002; observed evidence updates mastery and error counts."
+          },
+          {
+            "action_kind": "EXPLAIN",
+            "item_id": null,
+            "node_ids": [
+              "cf.complexity.log"
+            ],
+            "ordinal": 6,
+            "phase": "TEACH",
+            "reason_code": "TEACH_TARGET_NODE",
+            "reason_detail": "target cf.complexity.log mastery=0.20 < objective min_mastery=0.70 with evidence_count=1; teach the concept before asking for practice."
+          },
+          {
+            "action_kind": "PRACTICE",
+            "item_id": "item.bs.mcq.007",
+            "node_ids": [
+              "cf.complexity.log"
+            ],
+            "ordinal": 7,
+            "phase": "PRACTICE",
+            "reason_code": "PRACTICE_TARGET_NODE",
+            "reason_detail": "practice target cf.complexity.log with teacher-visible item item.bs.mcq.007 right after teaching to apply the concept."
+          }
+        ]
+      },
+      "objective_id": "obj.cf.binary_search.mastery",
+      "phase_sequence": [
+        "DIAGNOSE",
+        "DIAGNOSE",
+        "DIAGNOSE",
+        "ASSESS",
+        "UPDATE",
+        "REVIEW",
+        "DIAGNOSE",
+        "DIAGNOSE",
+        "ASSESS",
+        "UPDATE",
+        "REVIEW",
+        "REVIEW",
+        "TEACH",
+        "PRACTICE",
+        "ASSESS",
+        "UPDATE",
+        "REVIEW",
+        "PAUSED",
+        "REVIEW",
+        "PRACTICE",
+        "ASSESS",
+        "UPDATE",
+        "REVIEW",
+        "PRACTICE",
+        "ASSESS",
+        "UPDATE",
+        "REVIEW",
+        "PRACTICE",
+        "ASSESS",
+        "UPDATE",
+        "REVIEW",
+        "PRACTICE",
+        "ASSESS",
+        "UPDATE",
+        "REVIEW",
+        "PRACTICE",
+        "ASSESS",
+        "UPDATE",
+        "REVIEW"
+      ],
+      "schema": "m1a.e2e_student.v0",
+      "seed": {
+        "known_prerequisite_nodes": [
+          "cf.array.basics",
+          "cf.search.binary",
+          "cf.search.boundary",
+          "cf.search.linear",
+          "cf.sort.sortedness"
+        ],
+        "mastery_before": {
+          "cf.array.basics": {
+            "confidence": 0.75,
+            "evidence_count": 2,
+            "value": 0.3
+          },
+          "cf.search.binary": {
+            "confidence": 0.75,
+            "evidence_count": 2,
+            "value": 0.3
+          },
+          "cf.search.boundary": {
+            "confidence": 0.25,
+            "evidence_count": 1,
+            "value": 0.0
+          },
+          "cf.search.linear": {
+            "confidence": 0.75,
+            "evidence_count": 2,
+            "value": 0.3
+          },
+          "cf.sort.sortedness": {
+            "confidence": 0.75,
+            "evidence_count": 2,
+            "value": 0.3
+          }
+        },
+        "submissions": [
+          {
+            "item_id": "item.bs.mcq.001",
+            "rationale": "known prerequisite/target evidence: cf.array.basics",
+            "result_id": "m1a.seed.m1a.learner.student_a.000",
+            "score": 1.0,
+            "status": "CORRECT"
+          },
+          {
+            "item_id": "item.bs.mcq.001",
+            "rationale": "known prerequisite/target evidence: cf.array.basics",
+            "result_id": "m1a.seed.m1a.learner.student_a.001",
+            "score": 1.0,
+            "status": "CORRECT"
+          },
+          {
+            "item_id": "item.bs.code.001",
+            "rationale": "known prerequisite/target evidence: cf.search.binary",
+            "result_id": "m1a.seed.m1a.learner.student_a.002",
+            "score": 1.0,
+            "status": "CORRECT"
+          },
+          {
+            "item_id": "item.bs.mcq.004",
+            "rationale": "known prerequisite/target evidence: cf.search.binary",
+            "result_id": "m1a.seed.m1a.learner.student_a.003",
+            "score": 1.0,
+            "status": "CORRECT"
+          },
+          {
+            "item_id": "item.bs.mcq.003",
+            "rationale": "known prerequisite/target evidence: cf.search.linear",
+            "result_id": "m1a.seed.m1a.learner.student_a.004",
+            "score": 1.0,
+            "status": "CORRECT"
+          },
+          {
+            "item_id": "item.bs.mcq.003",
+            "rationale": "known prerequisite/target evidence: cf.search.linear",
+            "result_id": "m1a.seed.m1a.learner.student_a.005",
+            "score": 1.0,
+            "status": "CORRECT"
+          },
+          {
+            "item_id": "item.bs.code.005",
+            "rationale": "known prerequisite/target evidence: cf.sort.sortedness",
+            "result_id": "m1a.seed.m1a.learner.student_a.006",
+            "score": 1.0,
+            "status": "CORRECT"
+          },
+          {
+            "item_id": "item.bs.mcq.002",
+            "rationale": "known prerequisite/target evidence: cf.sort.sortedness",
+            "result_id": "m1a.seed.m1a.learner.student_a.007",
+            "score": 1.0,
+            "status": "CORRECT"
+          },
+          {
+            "item_id": "item.bs.code.003",
+            "rationale": "weak/missing prerequisite evidence: cf.search.boundary",
+            "result_id": "m1a.seed.m1a.learner.student_a.008",
+            "score": 0.0,
+            "status": "INCORRECT"
+          }
+        ],
+        "verify_rebuild": true
+      },
+      "session_id": "session:m1a.learner.student_a:goal.m1a.learner.student_a.obj.cf.binary_search.mastery",
+      "student_fixture": "student_a",
+      "verify_rebuild": true
+    },
+    "b": {
+      "actions": [
+        {
+          "action_id": "action:d123580e284bc19c",
+          "action_kind": "DIAGNOSE",
+          "item_id": "item.bs.mcq.002",
+          "node_ids": [
+            "cf.sort.sortedness"
+          ],
+          "phase": "DIAGNOSE",
+          "reason_code": "DIAGNOSTIC_ITEM",
+          "reason_detail": "HARD_PREREQUISITE_GAP: cf.sort.sortedness is below mastery threshold 0.50 or insufficiently observed; a response to item item.bs.mcq.002 would distinguish 'not yet learned' from 'learned but not yet evidenced'.",
+          "turn_index": 0
+        },
+        {
+          "action_id": "action:a105f46d865bc247",
+          "action_kind": "HINT",
+          "item_id": null,
+          "node_ids": [
+            "cf.sort.sortedness"
+          ],
+          "phase": "REVIEW",
+          "reason_code": "HINT_LEVEL_2",
+          "reason_detail": "escalated hint to level 2 after repeated INCORRECT outcomes",
+          "turn_index": 1
+        },
+        {
+          "action_id": "action:eb4bedc8d132033a",
+          "action_kind": "DIAGNOSE",
+          "item_id": "item.bs.short.002",
+          "node_ids": [
+            "cf.sort.sortedness"
+          ],
+          "phase": "DIAGNOSE",
+          "reason_code": "DIAGNOSTIC_ITEM",
+          "reason_detail": "HARD_PREREQUISITE_GAP: cf.sort.sortedness is below mastery threshold 0.50 or insufficiently observed; a response to item item.bs.short.002 would distinguish 'not yet learned' from 'learned but not yet evidenced'.",
+          "turn_index": 2
+        },
+        {
+          "action_id": "action:e31f86aeefde590c",
+          "action_kind": "REASSESS",
+          "item_id": "item.bs.short.002",
+          "node_ids": [
+            "cf.sort.sortedness"
+          ],
+          "phase": "ASSESS",
+          "reason_code": "REASSESS_STUCK_NODE",
+          "reason_detail": "HARD prerequisite cf.sort.sortedness mastery=0.00 is below 0.25; it already has 2 consecutive INCORRECT assessment(s) (threshold 2) or 0 RETEACH attempt(s) (limit 2); reassess before further drilling.",
+          "turn_index": 3
+        },
+        {
+          "action_id": "action:1474117e19025cfe",
+          "action_kind": "RETEACH",
+          "item_id": null,
+          "node_ids": [
+            "cf.search.binary"
+          ],
+          "phase": "TEACH",
+          "reason_code": "REMEDIATE_HARD_PREREQUISITE",
+          "reason_detail": "HARD prerequisite cf.search.binary mastery=0.00 is below 0.25; it blocks objective target(s) ['cf.search.boundary', 'cf.search.lower_upper']; reteach it before target teaching.",
+          "turn_index": 4
+        },
+        {
+          "action_id": "action:496346a3b647fd0d",
+          "action_kind": "PRACTICE",
+          "item_id": "item.bs.mcq.004",
+          "node_ids": [
+            "cf.search.binary"
+          ],
+          "phase": "PRACTICE",
+          "reason_code": "PRACTICE_HARD_PREREQUISITE",
+          "reason_detail": "practice HARD prerequisite cf.search.binary with teacher-visible item item.bs.mcq.004 to verify the remedial teaching before moving on.",
+          "turn_index": 5
+        },
+        {
+          "action_id": "action:89f0a46cf0dc1210",
+          "action_kind": "HINT",
+          "item_id": null,
+          "node_ids": [
+            "cf.search.binary"
+          ],
+          "phase": "REVIEW",
+          "reason_code": "HINT_LEVEL_3",
+          "reason_detail": "escalated hint to level 3 after repeated INCORRECT outcomes",
+          "turn_index": 6
+        },
+        {
+          "action_id": "action:05b5f905a50305fc",
+          "action_kind": "REASSESS",
+          "item_id": "item.bs.short.002",
+          "node_ids": [
+            "cf.sort.sortedness"
+          ],
+          "phase": "ASSESS",
+          "reason_code": "REASSESS_STUCK_NODE",
+          "reason_detail": "HARD prerequisite cf.sort.sortedness mastery=0.00 is below 0.25; it already has 2 consecutive INCORRECT assessment(s) (threshold 2) or 0 RETEACH attempt(s) (limit 2); reassess before further drilling.",
+          "turn_index": 7
+        },
+        {
+          "action_id": "action:f2e06449b4776852",
+          "action_kind": "REASSESS",
+          "item_id": "item.bs.code.001",
+          "node_ids": [
+            "cf.search.binary"
+          ],
+          "phase": "ASSESS",
+          "reason_code": "REASSESS_STUCK_NODE",
+          "reason_detail": "HARD prerequisite cf.search.binary mastery=0.00 is below 0.25; it already has 2 consecutive INCORRECT assessment(s) (threshold 2) or 1 RETEACH attempt(s) (limit 2); reassess before further drilling.",
+          "turn_index": 8
+        },
+        {
+          "action_id": "action:8142490b7ec686e4",
+          "action_kind": "REASSESS",
+          "item_id": "item.bs.short.002",
+          "node_ids": [
+            "cf.sort.sortedness"
+          ],
+          "phase": "ASSESS",
+          "reason_code": "REASSESS_STUCK_NODE",
+          "reason_detail": "HARD prerequisite cf.sort.sortedness mastery=0.00 is below 0.25; it already has 2 consecutive INCORRECT assessment(s) (threshold 2) or 0 RETEACH attempt(s) (limit 2); reassess before further drilling.",
+          "turn_index": 9
+        }
+      ],
+      "assessment_status_counts": {
+        "INCORRECT": 3,
+        "NEEDS_REVIEW": 4
+      },
+      "assessments": [
+        {
+          "created_at_fixed": "2026-11-20T00:00:00Z",
+          "failure_reason": "sortedness_missing",
+          "item_id": "item.bs.mcq.002",
+          "result_id": "result:session:m1a.learner.student_b:goal.m1a.learner.student_b.obj.cf.binary_search.mastery:0:item.bs.mcq.002:559aead08264d579",
+          "score": 0.0,
+          "scorer_id": "m1a.mock.student.script.v0",
+          "status": "INCORRECT"
+        },
+        {
+          "created_at_fixed": "2026-11-20T00:00:00Z",
+          "failure_reason": "SCRIPTED_NEEDS_REVIEW:item.bs.short.002",
+          "item_id": "item.bs.short.002",
+          "result_id": "result:session:m1a.learner.student_b:goal.m1a.learner.student_b.obj.cf.binary_search.mastery:2:item.bs.short.002:86b12dc16f5ce14e",
+          "score": null,
+          "scorer_id": "m1a.mock.student.script.v0",
+          "status": "NEEDS_REVIEW"
+        },
+        {
+          "created_at_fixed": "2026-11-20T00:00:00Z",
+          "failure_reason": "SCRIPTED_NEEDS_REVIEW:item.bs.short.002",
+          "item_id": "item.bs.short.002",
+          "result_id": "result:session:m1a.learner.student_b:goal.m1a.learner.student_b.obj.cf.binary_search.mastery:3:item.bs.short.002:86b12dc16f5ce14e",
+          "score": null,
+          "scorer_id": "m1a.mock.student.script.v0",
+          "status": "NEEDS_REVIEW"
+        },
+        {
+          "created_at_fixed": "2026-11-20T00:00:00Z",
+          "failure_reason": "prerequisite_gap",
+          "item_id": "item.bs.mcq.004",
+          "result_id": "result:session:m1a.learner.student_b:goal.m1a.learner.student_b.obj.cf.binary_search.mastery:5:item.bs.mcq.004:559aead08264d579",
+          "score": 0.0,
+          "scorer_id": "m1a.mock.student.script.v0",
+          "status": "INCORRECT"
+        },
+        {
+          "created_at_fixed": "2026-11-20T00:00:00Z",
+          "failure_reason": "SCRIPTED_NEEDS_REVIEW:item.bs.short.002",
+          "item_id": "item.bs.short.002",
+          "result_id": "result:session:m1a.learner.student_b:goal.m1a.learner.student_b.obj.cf.binary_search.mastery:7:item.bs.short.002:86b12dc16f5ce14e",
+          "score": null,
+          "scorer_id": "m1a.mock.student.script.v0",
+          "status": "NEEDS_REVIEW"
+        },
+        {
+          "created_at_fixed": "2026-11-20T00:00:00Z",
+          "failure_reason": "prerequisite_gap",
+          "item_id": "item.bs.code.001",
+          "result_id": "result:session:m1a.learner.student_b:goal.m1a.learner.student_b.obj.cf.binary_search.mastery:8:item.bs.code.001:6d1206aa0a6fa7f3",
+          "score": 0.0,
+          "scorer_id": "m1a.mock.student.script.v0",
+          "status": "INCORRECT"
+        },
+        {
+          "created_at_fixed": "2026-11-20T00:00:00Z",
+          "failure_reason": "SCRIPTED_NEEDS_REVIEW:item.bs.short.002",
+          "item_id": "item.bs.short.002",
+          "result_id": "result:session:m1a.learner.student_b:goal.m1a.learner.student_b.obj.cf.binary_search.mastery:9:item.bs.short.002:86b12dc16f5ce14e",
+          "score": null,
+          "scorer_id": "m1a.mock.student.script.v0",
+          "status": "NEEDS_REVIEW"
+        }
+      ],
+      "diagnosis": {
+        "diagnosis_id": "diag:90f4286eea8bf2a0",
+        "hypothesis": "HARD_PREREQUISITE_GAP: cf.sort.sortedness is below mastery threshold 0.50 or insufficiently observed; a response to item item.bs.mcq.002 would distinguish 'not yet learned' from 'learned but not yet evidenced'.",
+        "policy_version": "m1a.diagnostic.v0",
+        "reason_code": "HARD_PREREQUISITE_GAP",
+        "reason_detail": "selected node cf.sort.sortedness: observed evidence is insufficient (evidence_count=1 < 2 or confidence=0.25 < 0.5); current mastery estimate=0.00 is below the diagnostic gap threshold 0.50. Item item.bs.mcq.002 (type=MCQ, difficulty=2) covers node(s) ['cf.sort.sortedness'] and discriminates tags ['monotonicity']; candidate nodes were ranked by evidence gap, low mastery, hard-prerequisite priority and difficulty match; policy=m1a.diagnostic.v0.",
+        "selected_item_id": "item.bs.mcq.002",
+        "status": "READY",
+        "target_node_id": "cf.sort.sortedness"
+      },
+      "display_name": "Student B（合成）",
+      "event_count": 43,
+      "evidence_classification": {
+        "real_teaching_effect": "NOT_VERIFIED",
+        "seeded_prior_evidence": "MOCK",
+        "state_machine_model_and_ids": "DETERMINISTIC",
+        "student_responses_and_outcomes": "MOCK"
+      },
+      "final": {
+        "pending_item_id": null,
+        "phase": "REVIEW",
+        "turn_index": 10
+      },
+      "first_action": {
+        "action_id": "action:d123580e284bc19c",
+        "action_kind": "DIAGNOSE",
+        "item_id": "item.bs.mcq.002",
+        "node_ids": [
+          "cf.sort.sortedness"
+        ],
+        "phase": "DIAGNOSE",
+        "reason_code": "DIAGNOSTIC_ITEM",
+        "reason_detail": "HARD_PREREQUISITE_GAP: cf.sort.sortedness is below mastery threshold 0.50 or insufficiently observed; a response to item item.bs.mcq.002 would distinguish 'not yet learned' from 'learned but not yet evidenced'.",
+        "turn_index": 0
+      },
+      "fixed_timestamp": "2026-11-20T00:00:00Z",
+      "goal_id": "goal.m1a.learner.student_b.obj.cf.binary_search.mastery",
+      "initial_plan": {
+        "plan_id": "plan:d3fee62a7ed752b3",
+        "policy_version": "m1a.planner.v0",
+        "steps": [
+          {
+            "action_kind": "RETEACH",
+            "item_id": null,
+            "node_ids": [
+              "cf.sort.sortedness"
+            ],
+            "ordinal": 0,
+            "phase": "TEACH",
+            "reason_code": "REMEDIATE_HARD_PREREQUISITE",
+            "reason_detail": "HARD prerequisite cf.sort.sortedness mastery=0.00 is below 0.25; it blocks objective target(s) ['cf.search.binary', 'cf.search.boundary', 'cf.search.lower_upper']; reteach it before target teaching."
+          },
+          {
+            "action_kind": "PRACTICE",
+            "item_id": "item.bs.mcq.002",
+            "node_ids": [
+              "cf.sort.sortedness"
+            ],
+            "ordinal": 1,
+            "phase": "PRACTICE",
+            "reason_code": "PRACTICE_HARD_PREREQUISITE",
+            "reason_detail": "practice HARD prerequisite cf.sort.sortedness with teacher-visible item item.bs.mcq.002 to verify the remedial teaching before moving on."
+          },
+          {
+            "action_kind": "RETEACH",
+            "item_id": null,
+            "node_ids": [
+              "cf.search.binary"
+            ],
+            "ordinal": 2,
+            "phase": "TEACH",
+            "reason_code": "REMEDIATE_HARD_PREREQUISITE",
+            "reason_detail": "HARD prerequisite cf.search.binary mastery=0.00 is below 0.25; it blocks objective target(s) ['cf.search.boundary', 'cf.search.lower_upper']; reteach it before target teaching."
+          },
+          {
+            "action_kind": "PRACTICE",
+            "item_id": "item.bs.mcq.004",
+            "node_ids": [
+              "cf.search.binary"
+            ],
+            "ordinal": 3,
+            "phase": "PRACTICE",
+            "reason_code": "PRACTICE_HARD_PREREQUISITE",
+            "reason_detail": "practice HARD prerequisite cf.search.binary with teacher-visible item item.bs.mcq.004 to verify the remedial teaching before moving on."
+          },
+          {
+            "action_kind": "EXPLAIN",
+            "item_id": null,
+            "node_ids": [
+              "cf.search.boundary"
+            ],
+            "ordinal": 4,
+            "phase": "TEACH",
+            "reason_code": "TEACH_TARGET_NODE",
+            "reason_detail": "target cf.search.boundary mastery=0.00 < objective min_mastery=0.70 with evidence_count=0; teach the concept before asking for practice."
+          },
+          {
+            "action_kind": "PRACTICE",
+            "item_id": "item.bs.mcq.005",
+            "node_ids": [
+              "cf.search.boundary"
+            ],
+            "ordinal": 5,
+            "phase": "PRACTICE",
+            "reason_code": "PRACTICE_TARGET_NODE",
+            "reason_detail": "practice target cf.search.boundary with teacher-visible item item.bs.mcq.005 right after teaching to apply the concept."
+          },
+          {
+            "action_kind": "DIAGNOSE",
+            "item_id": "item.bs.code.003",
+            "node_ids": [
+              "cf.search.boundary"
+            ],
+            "ordinal": 6,
+            "phase": "ASSESS",
+            "reason_code": "ASSESS_PROGRESS",
+            "reason_detail": "assess target cf.search.boundary with item item.bs.code.003; observed evidence updates mastery and error counts."
+          },
+          {
+            "action_kind": "EXPLAIN",
+            "item_id": null,
+            "node_ids": [
+              "cf.search.lower_upper"
+            ],
+            "ordinal": 7,
+            "phase": "TEACH",
+            "reason_code": "TEACH_TARGET_NODE",
+            "reason_detail": "target cf.search.lower_upper mastery=0.00 < objective min_mastery=0.70 with evidence_count=0; teach the concept before asking for practice."
+          }
+        ]
+      },
+      "interrupt_resume": {
+        "pause_phase": "REVIEW",
+        "paused_at_turn": 5,
+        "paused_plan_equal": true,
+        "pending_equal": true,
+        "plan_equal": true,
+        "resumed_phase": "REVIEW",
+        "snapshot_equal": true,
+        "verify_rebuild_after_restart": true,
+        "verify_rebuild_before_restart": true
+      },
+      "learner_id": "m1a.learner.student_b",
+      "mastery_after": {
+        "cf.array.basics": {
+          "confidence": 0.75,
+          "evidence_count": 2,
+          "value": 0.3
+        },
+        "cf.search.binary": {
+          "confidence": 0.578125,
+          "evidence_count": 3,
+          "value": 0.0
+        },
+        "cf.search.linear": {
+          "confidence": 0.75,
+          "evidence_count": 2,
+          "value": 0.3
+        },
+        "cf.sort.sortedness": {
+          "confidence": 0.4375,
+          "evidence_count": 2,
+          "value": 0.0
+        }
+      },
+      "next_recommendation": {
+        "plan_id": "plan:6f783574427ae0a8",
+        "policy_version": "m1a.planner.v0",
+        "steps": [
+          {
+            "action_kind": "REASSESS",
+            "item_id": "item.bs.short.002",
+            "node_ids": [
+              "cf.sort.sortedness"
+            ],
+            "ordinal": 0,
+            "phase": "ASSESS",
+            "reason_code": "REASSESS_STUCK_NODE",
+            "reason_detail": "HARD prerequisite cf.sort.sortedness mastery=0.00 is below 0.25; it already has 2 consecutive INCORRECT assessment(s) (threshold 2) or 0 RETEACH attempt(s) (limit 2); reassess before further drilling."
+          },
+          {
+            "action_kind": "REASSESS",
+            "item_id": "item.bs.code.001",
+            "node_ids": [
+              "cf.search.binary"
+            ],
+            "ordinal": 1,
+            "phase": "ASSESS",
+            "reason_code": "REASSESS_STUCK_NODE",
+            "reason_detail": "HARD prerequisite cf.search.binary mastery=0.00 is below 0.25; it already has 3 consecutive INCORRECT assessment(s) (threshold 2) or 1 RETEACH attempt(s) (limit 2); reassess before further drilling."
+          },
+          {
+            "action_kind": "EXPLAIN",
+            "item_id": null,
+            "node_ids": [
+              "cf.search.boundary"
+            ],
+            "ordinal": 2,
+            "phase": "TEACH",
+            "reason_code": "TEACH_TARGET_NODE",
+            "reason_detail": "target cf.search.boundary mastery=0.00 < objective min_mastery=0.70 with evidence_count=0; teach the concept before asking for practice."
+          },
+          {
+            "action_kind": "PRACTICE",
+            "item_id": "item.bs.mcq.005",
+            "node_ids": [
+              "cf.search.boundary"
+            ],
+            "ordinal": 3,
+            "phase": "PRACTICE",
+            "reason_code": "PRACTICE_TARGET_NODE",
+            "reason_detail": "practice target cf.search.boundary with teacher-visible item item.bs.mcq.005 right after teaching to apply the concept."
+          },
+          {
+            "action_kind": "DIAGNOSE",
+            "item_id": "item.bs.code.003",
+            "node_ids": [
+              "cf.search.boundary"
+            ],
+            "ordinal": 4,
+            "phase": "ASSESS",
+            "reason_code": "ASSESS_PROGRESS",
+            "reason_detail": "assess target cf.search.boundary with item item.bs.code.003; observed evidence updates mastery and error counts."
+          },
+          {
+            "action_kind": "EXPLAIN",
+            "item_id": null,
+            "node_ids": [
+              "cf.search.lower_upper"
+            ],
+            "ordinal": 5,
+            "phase": "TEACH",
+            "reason_code": "TEACH_TARGET_NODE",
+            "reason_detail": "target cf.search.lower_upper mastery=0.00 < objective min_mastery=0.70 with evidence_count=0; teach the concept before asking for practice."
+          },
+          {
+            "action_kind": "PRACTICE",
+            "item_id": "item.bs.mcq.006",
+            "node_ids": [
+              "cf.search.lower_upper"
+            ],
+            "ordinal": 6,
+            "phase": "PRACTICE",
+            "reason_code": "PRACTICE_TARGET_NODE",
+            "reason_detail": "practice target cf.search.lower_upper with teacher-visible item item.bs.mcq.006 right after teaching to apply the concept."
+          },
+          {
+            "action_kind": "DIAGNOSE",
+            "item_id": "item.bs.code.002",
+            "node_ids": [
+              "cf.search.lower_upper"
+            ],
+            "ordinal": 7,
+            "phase": "ASSESS",
+            "reason_code": "ASSESS_PROGRESS",
+            "reason_detail": "assess target cf.search.lower_upper with item item.bs.code.002; observed evidence updates mastery and error counts."
+          }
+        ]
+      },
+      "objective_id": "obj.cf.binary_search.mastery",
+      "phase_sequence": [
+        "DIAGNOSE",
+        "DIAGNOSE",
+        "DIAGNOSE",
+        "ASSESS",
+        "UPDATE",
+        "REVIEW",
+        "REVIEW",
+        "DIAGNOSE",
+        "DIAGNOSE",
+        "ASSESS",
+        "UPDATE",
+        "REVIEW",
+        "ASSESS",
+        "ASSESS",
+        "UPDATE",
+        "REVIEW",
+        "TEACH",
+        "PAUSED",
+        "REVIEW",
+        "PRACTICE",
+        "ASSESS",
+        "UPDATE",
+        "REVIEW",
+        "REVIEW",
+        "ASSESS",
+        "ASSESS",
+        "UPDATE",
+        "REVIEW",
+        "ASSESS",
+        "ASSESS",
+        "UPDATE",
+        "REVIEW",
+        "ASSESS",
+        "ASSESS",
+        "UPDATE",
+        "REVIEW"
+      ],
+      "schema": "m1a.e2e_student.v0",
+      "seed": {
+        "known_prerequisite_nodes": [
+          "cf.array.basics",
+          "cf.search.binary",
+          "cf.search.linear",
+          "cf.sort.sortedness"
+        ],
+        "mastery_before": {
+          "cf.array.basics": {
+            "confidence": 0.75,
+            "evidence_count": 2,
+            "value": 0.3
+          },
+          "cf.search.binary": {
+            "confidence": 0.25,
+            "evidence_count": 1,
+            "value": 0.0
+          },
+          "cf.search.linear": {
+            "confidence": 0.75,
+            "evidence_count": 2,
+            "value": 0.3
+          },
+          "cf.sort.sortedness": {
+            "confidence": 0.25,
+            "evidence_count": 1,
+            "value": 0.0
+          }
+        },
+        "submissions": [
+          {
+            "item_id": "item.bs.mcq.001",
+            "rationale": "known prerequisite/target evidence: cf.array.basics",
+            "result_id": "m1a.seed.m1a.learner.student_b.000",
+            "score": 1.0,
+            "status": "CORRECT"
+          },
+          {
+            "item_id": "item.bs.mcq.001",
+            "rationale": "known prerequisite/target evidence: cf.array.basics",
+            "result_id": "m1a.seed.m1a.learner.student_b.001",
+            "score": 1.0,
+            "status": "CORRECT"
+          },
+          {
+            "item_id": "item.bs.mcq.003",
+            "rationale": "known prerequisite/target evidence: cf.search.linear",
+            "result_id": "m1a.seed.m1a.learner.student_b.002",
+            "score": 1.0,
+            "status": "CORRECT"
+          },
+          {
+            "item_id": "item.bs.mcq.003",
+            "rationale": "known prerequisite/target evidence: cf.search.linear",
+            "result_id": "m1a.seed.m1a.learner.student_b.003",
+            "score": 1.0,
+            "status": "CORRECT"
+          },
+          {
+            "item_id": "item.bs.code.001",
+            "rationale": "weak/missing prerequisite evidence: cf.search.binary",
+            "result_id": "m1a.seed.m1a.learner.student_b.004",
+            "score": 0.0,
+            "status": "INCORRECT"
+          },
+          {
+            "item_id": "item.bs.code.005",
+            "rationale": "weak/missing prerequisite evidence: cf.sort.sortedness",
+            "result_id": "m1a.seed.m1a.learner.student_b.005",
+            "score": 0.0,
+            "status": "INCORRECT"
+          }
+        ],
+        "verify_rebuild": true
+      },
+      "session_id": "session:m1a.learner.student_b:goal.m1a.learner.student_b.obj.cf.binary_search.mastery",
+      "student_fixture": "student_b",
+      "verify_rebuild": true
+    }
+  }
+}
