@@ -41,6 +41,17 @@ from autoteacher_m0.accounting.observation import (
 from autoteacher_m0.bridge.dispatch_audit import (
     DispatchAudit, default_journal_path, describe_request,
 )
+from autoteacher_m0.bridge.recovery_diagnostics import (
+    ACTION_MARK_SETTLED, ACTION_MARK_UNCERTAIN, ACTION_MARK_WORST_CASE,
+    ACTION_SKIP, RecoveryDiagnostics, build_record as build_recovery_record,
+    default_recovery_path, is_preservable_primary_cause,
+)
+from autoteacher_m0.bridge.request_lifecycle import (
+    EVENT_CANCEL_BEFORE_CONTROLLER, EVENT_CONTROLLER_ENTERED,
+    EVENT_DEADLINE_BEFORE_CONTROLLER, EVENT_FAILED_BEFORE_RESERVE,
+    EVENT_PROTOCOL_REJECTED, EVENT_RECEIVED, RequestLifecycleAudit,
+    default_lifecycle_path,
+)
 from autoteacher_m0.bridge.protocol import (
     ERROR_CODES, Envelope, validate_chunk_payload, validate_error_payload,
     validate_request_payload,
@@ -231,7 +242,9 @@ class TrustedController:
                  expected_uid: int = 65534, register_admission: bool = True,
                  dispatch_gate: object | None = None,
                  dispatch_journal: str | os.PathLike[str] | None = None,
-                 require_origin: bool = False):
+                 require_origin: bool = False,
+                 request_lifecycle: str | os.PathLike[str] | None = None,
+                 recovery_diagnostics: str | os.PathLike[str] | None = None):
         self.admission = admission
         self.broker = broker
         self.fake = fake
@@ -247,6 +260,16 @@ class TrustedController:
         # G4-F2: bounded per-dispatch evidence journal and the kernel-reported
         # peer for each transport. A journal write never decides a dispatch.
         self.dispatch_audit = DispatchAudit(dispatch_journal)
+        # G4-R P2-05: request/transport-level lifecycle journal. Conceptually
+        # separate from the dispatch layer above: it never allocates a
+        # dispatch_seq and its ``reserved`` field is always false. A write
+        # failure is counted and surfaced as an observability gap; it never
+        # changes an allow/deny, Broker or Fake decision.
+        self.request_lifecycle = RequestLifecycleAudit(request_lifecycle)
+        # G4-R P2-06: append-only recovery observation journal. It separates
+        # the stable first cause from the latest re-verification result instead
+        # of overloading the single Attempt ``reason`` column.
+        self.recovery_diagnostics = RecoveryDiagnostics(recovery_diagnostics)
         self._peer_lock = threading.Lock()
         self._peer_origins: dict[str, dict] = {}
         # Only an Admission/socket deployment that declares an expected peer UID
@@ -377,8 +400,65 @@ class TrustedController:
         self.dispatch_audit.append(record)
 
     def _audit_protocol_rejection(self, env: Envelope, code: str) -> None:
-        record = self._new_dispatch_record(env.payload, env.transport_id)
-        self._emit_dispatch_record(record, error_code=code)
+        # G4-R P2-05: this request never entered the dispatch handler, so it has
+        # no real dispatch. Keep the frozen G4-F2 rejection row for compatibility
+        # but do not fabricate a dispatch_seq / dispatch-layer claim for it.
+        try:
+            record = describe_request(
+                env.payload, approved=dict(self.admission.tool_schemas),
+                origin=self._origin_for(env.transport_id),
+                transport_id=env.transport_id)
+            record["instance_id"] = self.instance_id
+            record["dispatch_seq"] = None
+            record["controller_entered"] = False
+            record["request_level_only"] = True
+            self._emit_dispatch_record(record, error_code=code)
+        except Exception:  # noqa: BLE001 - observation must not mask the rejection
+            pass
+
+    # -- G4-R P2-05 request-level lifecycle observation -----------------
+    def _lifecycle_emit(self, record: dict | None, event: str, *,
+                        stage: str | None = None, code: str | None = None,
+                        reason: str | None = None,
+                        controller_entered: bool | None = None,
+                        dispatch_seq: int | None = None) -> bool:
+        """Best-effort request-layer event; never changes request semantics."""
+        if record is None:
+            return False
+        try:
+            return self.request_lifecycle.emit(
+                record, event, stage=stage, code=code, reason=reason,
+                controller_entered=controller_entered,
+                dispatch_seq=dispatch_seq)
+        except Exception:  # noqa: BLE001 - observation must not mask the outcome
+            return False
+
+    def observability_status(self) -> dict:
+        """Observability-gap indicator for the trusted launcher/tests.
+
+        A journal write failure is evidence loss only: the returned
+        ``safety_admission_changed`` is always false because no gate, Broker or
+        controller decision reads these journals.
+        """
+        request_gap = self.request_lifecycle.gap_indicator()
+        recovery_gap = self.recovery_diagnostics.gap_indicator()
+        dispatch_errors = int(getattr(self.dispatch_audit, "errors", 0))
+        return {
+            "schema": "m0.g4r.observability.v1",
+            "dispatch_window": {
+                "journal": "dispatch-window",
+                "written": int(getattr(self.dispatch_audit, "written", 0)),
+                "write_errors": dispatch_errors,
+                "observability_gap": dispatch_errors > 0,
+            },
+            "request_lifecycle": request_gap,
+            "recovery_diagnostics": recovery_gap,
+            "observability_gap": bool(
+                request_gap["observability_gap"]
+                or recovery_gap["observability_gap"]
+                or dispatch_errors > 0),
+            "safety_admission_changed": False,
+        }
 
     def cancel(self, *, transport_id: str, reason: str) -> None:
         """Cancel exactly one transport's stream; repeated/unknown ids are safe.
@@ -544,9 +624,23 @@ class TrustedController:
         state = self._state_for_start(transport_id) if isinstance(transport_id, str) else None
         deadline = time.monotonic() + self.deadline_seconds
         seq = env.seq + 1
+        # G4-R P2-05: one request-level observation record from the transport
+        # layer. It is separate from the dispatch-window record created later
+        # only if this request really enters the dispatch handler.
+        lifecycle = self.request_lifecycle.new_request(
+            transport_id=transport_id,
+            origin=self._origin_for(transport_id),
+            payload=env.payload,
+            instance_id=self.instance_id)
+        self._lifecycle_emit(lifecycle, EVENT_RECEIVED, stage="transport")
         try:
             if state is not None and state.event.is_set():
-                yield self._error_envelope(env, "CANCELLED", seq=seq)
+                code = "CANCELLED"
+                self._lifecycle_emit(
+                    lifecycle, EVENT_CANCEL_BEFORE_CONTROLLER,
+                    stage="pre_start_cancel_state", code=code,
+                    reason=state.reason)
+                yield self._error_envelope(env, code, seq=seq)
                 return
             try:
                 validate_request_payload(env.payload)
@@ -561,9 +655,14 @@ class TrustedController:
                         code = "INTERNAL"
                 else:
                     code = "INTERNAL"
+                self._lifecycle_emit(
+                    lifecycle, EVENT_PROTOCOL_REJECTED,
+                    stage="validate_request_payload", code=code,
+                    reason=type(exc).__name__)
                 try:
-                    # G4-F2: a request rejected before any Reserve/Claim is still
-                    # part of the observed tool surface (and its purpose/origin).
+                    # G4-F2 compatibility: a rejected request is still part of
+                    # the observed tool surface (bounded rejection row without
+                    # a dispatch_seq; this request never entered the handler).
                     self._audit_protocol_rejection(env, code)
                 except Exception:  # noqa: BLE001 - observation must not mask the rejection
                     pass
@@ -573,7 +672,8 @@ class TrustedController:
             abort = threading.Event()
             worker = threading.Thread(
                 target=self._handle_payload_stream,
-                args=(env.payload, transport_id, deadline, state, events, abort),
+                args=(env.payload, transport_id, deadline, state, events, abort,
+                      lifecycle),
                 name="g3c-controller-stream", daemon=True)
             worker.start()
             try:
@@ -584,6 +684,19 @@ class TrustedController:
                         if not worker.is_alive():
                             break
                         if time.monotonic() > deadline:
+                            # G4-R P2-05: the transport observed the deadline
+                            # before the dispatch layer emitted any terminal
+                            # frame. This guaranteed synchronous record explains
+                            # a missing dispatch-window row (G4-F5 F5-R4) without
+                            # pretending the request never entered the worker.
+                            entered = bool(lifecycle.get("controller_entered"))
+                            self._lifecycle_emit(
+                                lifecycle, EVENT_DEADLINE_BEFORE_CONTROLLER,
+                                stage=lifecycle.get("controller_stage") or "transport",
+                                code=deadline_protocol_code(),
+                                reason="transport_observed_deadline",
+                                controller_entered=entered,
+                                dispatch_seq=lifecycle.get("dispatch_seq"))
                             yield self._error_envelope(
                                 env, deadline_protocol_code(), seq=seq)
                             return
@@ -742,7 +855,8 @@ class TrustedController:
                                transport_id: str, deadline: float,
                                state: _CancelState | None,
                                events: queue.Queue,
-                               abort: threading.Event) -> None:
+                               abort: threading.Event,
+                               lifecycle: dict | None = None) -> None:
         """Single-flight worker: trusted request path plus frame publication."""
         def emit(event: tuple[str, object]) -> None:
             self._publish_event(events, abort, state, deadline, event)
@@ -750,7 +864,7 @@ class TrustedController:
         try:
             with self._send_lock:
                 self._handle_payload_serial(payload, transport_id, deadline,
-                                            state, emit)
+                                            state, emit, lifecycle)
         except _Cancelled:
             emit(("error", "CANCELLED"))
         except _DeadlineExceeded:
@@ -850,6 +964,10 @@ class TrustedController:
         code = getattr(exc, "code", None)
         if isinstance(code, str):
             return cls._normalize_code(code)
+        if isinstance(exc, _Cancelled):
+            # G4-R P2-05: an aborted pre-send window is a real CANCELLED
+            # outcome, not an unclassified INTERNAL dispatch rejection.
+            return "CANCELLED"
         text = str(exc)
         if text in ERROR_CODES or text in _BROKER_CODE_TARGETS or text in _BROKER_PRE_SEND_FALLBACKS:
             return broker_protocol_code(text)
@@ -862,14 +980,27 @@ class TrustedController:
     # -- main request path --------------------------------------------
     def _handle_payload_serial(self, payload: Mapping[str, object], transport_id: str,
                                deadline: float, state: _CancelState | None,
-                               emit: Callable[[tuple[str, object]], None]
+                               emit: Callable[[tuple[str, object]], None],
+                               lifecycle: dict | None = None
                                ) -> None:
         attempt_id: str | None = None
         intent_id: str | None = None
         call_id: str | None = None
         audit = self._new_dispatch_record(payload, transport_id)
+        # G4-R P2-05: the dispatch handler really started, so this is the only
+        # layer where a real dispatch_seq exists. Pre-Controller lifecycle
+        # events must never see a value here.
+        if lifecycle is not None:
+            lifecycle["controller_entered"] = True
+            lifecycle["dispatch_seq"] = audit.get("dispatch_seq")
+            lifecycle["controller_stage"] = "dispatch_handler"
+        self._lifecycle_emit(
+            lifecycle, EVENT_CONTROLLER_ENTERED, stage="dispatch_handler",
+            controller_entered=True, dispatch_seq=audit.get("dispatch_seq"))
         try:
             with self._quota_lock:
+                if lifecycle is not None:
+                    lifecycle["controller_stage"] = "admission"
                 self._checkpoint(state, deadline, "admission")
                 # G4-F2: a request from an unknown/foreign UDS peer is refused
                 # before quota, Reserve and Claim. In-process callers that never
@@ -921,6 +1052,8 @@ class TrustedController:
             payload_bytes = canonical_json(fake_payload).encode("utf-8")
             payload_digest = hashlib.sha256(payload_bytes).hexdigest()
             task_id = "g3b-" + hashlib.sha256(self.admission.run_id.encode()).hexdigest()[:32]
+            if lifecycle is not None:
+                lifecycle["controller_stage"] = "before_reserve"
             self._test_delay("before_reserve")
             self._checkpoint(state, deadline, "before_reserve")
             reserved = self._broker_reserve(task_id=task_id, input_tokens=input_bound,
@@ -928,6 +1061,8 @@ class TrustedController:
                                             call_id=prepared.call_id, deadline=deadline)
             reservation_id = reserved["reservation_id"]
             audit["reserved"] = True
+            if lifecycle is not None:
+                lifecycle["controller_stage"] = "reserved"
             audit["reservation_id"] = reservation_id
             # Read-only copy of the Broker's authoritative upper bound; the gate
             # uses it only to size its conservative held view.
@@ -1150,6 +1285,18 @@ class TrustedController:
                 audit["error_code"] = self._exception_code(exc)
             except Exception:  # noqa: BLE001 - evidence must not mask the abort
                 audit["error_code"] = "INTERNAL"
+            if not audit.get("reserved"):
+                # G4-R P2-05: the request really entered the handler but never
+                # created a Reservation, so the request layer records that
+                # explicit pre-Reserve failure (with the open window) instead of
+                # a fabricated dispatch.
+                self._lifecycle_emit(
+                    lifecycle, EVENT_FAILED_BEFORE_RESERVE,
+                    stage=lifecycle.get("controller_stage") if lifecycle else None,
+                    code=audit.get("error_code"),
+                    reason=type(exc).__name__,
+                    controller_entered=True,
+                    dispatch_seq=lifecycle.get("dispatch_seq") if lifecycle else None)
             if intent_id is not None:
                 try:
                     self.attempts.mark_intent_held(
@@ -1617,6 +1764,35 @@ class TrustedController:
             return
         self._broker_status(reservation_id, deadline)
 
+    def _recovery_diagnostic(self, row: Mapping[str, object], *,
+                             prior_reason: object, observation: str,
+                             broker_status: str | None, action: str,
+                             primary_cause_preserved: bool,
+                             receipt_verified: bool,
+                             broker_authoritative: bool = True) -> None:
+        """Append one P2-06 recovery observation (best effort, never decisive).
+
+        The Attempt ``reason`` column stays the single first-cause field for the
+        proven enumerations; this diagnostic records what the latest recovery
+        verification observed and which action was taken.
+        """
+        try:
+            record = build_recovery_record(
+                attempt_id=row.get("attempt_id"),
+                reservation_id=row.get("reservation_id"),
+                call_id=row.get("call_id"),
+                prior_state=row.get("state"),
+                prior_reason=prior_reason,
+                observation=observation,
+                broker_status=broker_status,
+                broker_authoritative=broker_authoritative,
+                action=action,
+                primary_cause_preserved=primary_cause_preserved,
+                receipt_verified=receipt_verified)
+            self.recovery_diagnostics.append(record)
+        except Exception:  # noqa: BLE001 - observation must not mask recovery
+            pass
+
     def reconcile_on_startup(self, receipt_dir: str | None = None) -> list[dict]:
         """Single authoritative recovery path; never sends a new Provider call."""
         deadline = time.monotonic() + max(self.deadline_seconds, 1.0)
@@ -1644,14 +1820,35 @@ class TrustedController:
                     if upgraded:
                         row = self.attempts.attempt_for_call(row["call_id"]) or row
             if row["state"] in {"SETTLED", "WORST_CASE_HELD"}:
+                self._recovery_diagnostic(
+                    row,
+                    prior_reason=row.get("reason"),
+                    observation="ALREADY_TERMINAL",
+                    broker_status=None,
+                    action=ACTION_SKIP,
+                    primary_cause_preserved=True,
+                    receipt_verified=row.get("receipt_json") is not None,
+                    broker_authoritative=False)
                 continue
+            prior_reason = row.get("reason")
             if row["state"] == "ATTEMPT_STARTED":
                 self.attempts.mark_settlement_uncertain(
                     attempt_id, reason="NO_RECEIPT_AFTER_CRASH")
+                self._recovery_diagnostic(
+                    row,
+                    prior_reason=prior_reason,
+                    observation="NO_RECEIPT_AFTER_CRASH",
+                    broker_status=None,
+                    action=ACTION_MARK_UNCERTAIN,
+                    primary_cause_preserved=is_preservable_primary_cause(prior_reason),
+                    receipt_verified=False,
+                    broker_authoritative=False)
                 continue
             verified, reason = self._verify_receipt_document(row, receipt_root)
             if not verified:
                 status_reply = self._broker_status(row["reservation_id"], deadline)
+                broker_status = (status_reply.get("status")
+                                 if status_reply.get("ok") else None)
                 if status_reply.get("ok") and status_reply.get("status") == "OK":
                     # A-04: the Broker's final state is authoritative; a local
                     # evidence defect must not miswrite a committed OK settlement
@@ -1661,17 +1858,49 @@ class TrustedController:
                         settlement_json=json.dumps(
                             {"archived_from_broker": status_reply,
                              "local_evidence_reason": reason}, sort_keys=True))
+                    self._recovery_diagnostic(
+                        row, prior_reason=prior_reason, observation=reason,
+                        broker_status=broker_status, action=ACTION_MARK_SETTLED,
+                        primary_cause_preserved=False, receipt_verified=False)
                     continue
                 if status_reply.get("ok") and status_reply.get("status") == "FAILED":
                     self.attempts.mark_worst_case(
                         attempt_id, reason=f"BROKER_ALREADY_FAILED:{reason}")
+                    self._recovery_diagnostic(
+                        row, prior_reason=prior_reason, observation=reason,
+                        broker_status=broker_status, action=ACTION_MARK_WORST_CASE,
+                        primary_cause_preserved=False, receipt_verified=False)
+                    continue
+                if broker_status == "PENDING" and is_preservable_primary_cause(prior_reason):
+                    # G4-R P2-06: the Broker is still PENDING, so the proven
+                    # first cause (revocation window) still explains the hold.
+                    # Keep that primary cause instead of overwriting it with the
+                    # downstream reconciliation observation; record the
+                    # observation in the separate append-only diagnostic.
+                    self.attempts.mark_settlement_uncertain(
+                        attempt_id, reason=str(prior_reason)[:256])
+                    self._recovery_diagnostic(
+                        row, prior_reason=prior_reason, observation=reason,
+                        broker_status=broker_status, action=ACTION_MARK_UNCERTAIN,
+                        primary_cause_preserved=True, receipt_verified=False)
                     continue
                 self.attempts.mark_settlement_uncertain(attempt_id, reason=reason)
+                self._recovery_diagnostic(
+                    row, prior_reason=prior_reason, observation=reason,
+                    broker_status=broker_status, action=ACTION_MARK_UNCERTAIN,
+                    primary_cause_preserved=False, receipt_verified=False,
+                    broker_authoritative=False)
                 continue
             status_reply = self._broker_status(row["reservation_id"], deadline)
             if not status_reply.get("ok"):
                 self.attempts.mark_settlement_uncertain(
                     attempt_id, reason="BROKER_STATUS_UNAVAILABLE")
+                self._recovery_diagnostic(
+                    row, prior_reason=prior_reason,
+                    observation="BROKER_STATUS_UNAVAILABLE", broker_status=None,
+                    action=ACTION_MARK_UNCERTAIN,
+                    primary_cause_preserved=False, receipt_verified=True,
+                    broker_authoritative=False)
                 continue
             status = status_reply.get("status")
             if status == "OK":
@@ -1679,13 +1908,26 @@ class TrustedController:
                     attempt_id,
                     settlement_json=json.dumps({"archived_from_broker": status_reply},
                                                sort_keys=True))
+                self._recovery_diagnostic(
+                    row, prior_reason=prior_reason, observation="BROKER_STATUS_OK",
+                    broker_status=status, action=ACTION_MARK_SETTLED,
+                    primary_cause_preserved=False, receipt_verified=True)
                 continue
             if status == "FAILED":
                 self.attempts.mark_worst_case(attempt_id, reason="BROKER_ALREADY_FAILED")
+                self._recovery_diagnostic(
+                    row, prior_reason=prior_reason, observation="BROKER_STATUS_FAILED",
+                    broker_status=status, action=ACTION_MARK_WORST_CASE,
+                    primary_cause_preserved=False, receipt_verified=True)
                 continue
             if status != "PENDING":
                 self.attempts.mark_settlement_uncertain(
                     attempt_id, reason="BROKER_STATUS_UNKNOWN")
+                self._recovery_diagnostic(
+                    row, prior_reason=prior_reason, observation="BROKER_STATUS_UNKNOWN",
+                    broker_status=None, action=ACTION_MARK_UNCERTAIN,
+                    primary_cause_preserved=False, receipt_verified=True,
+                    broker_authoritative=False)
                 continue
             document = verified
             authoritative = document.get("completeness") == "AUTHORITATIVE"
@@ -1701,14 +1943,34 @@ class TrustedController:
             except (BridgeError, BrokerClientError):
                 self.attempts.mark_settlement_uncertain(
                     attempt_id, reason="RECONCILE_SETTLE_FAILED")
+                self._recovery_diagnostic(
+                    row, prior_reason=prior_reason,
+                    observation="RECONCILE_SETTLE_FAILED", broker_status="PENDING",
+                    action=ACTION_MARK_UNCERTAIN,
+                    primary_cause_preserved=is_preservable_primary_cause(prior_reason),
+                    receipt_verified=True, broker_authoritative=False)
                 continue
             try:
                 self._apply_completion_reply(
                     reply, attempt_id=attempt_id, reservation_id=row["reservation_id"],
                     authoritative=authoritative, deadline=deadline)
+                self._recovery_diagnostic(
+                    row, prior_reason=prior_reason,
+                    observation=("BROKER_SETTLED" if authoritative
+                                 else "BROKER_FAILED_NOT_AUTHORITATIVE"),
+                    broker_status=("OK" if authoritative else "FAILED"),
+                    action=(ACTION_MARK_SETTLED if authoritative
+                            else ACTION_MARK_WORST_CASE),
+                    primary_cause_preserved=False, receipt_verified=True)
             except BridgeError:
                 self.attempts.mark_settlement_uncertain(
                     attempt_id, reason="RECONCILE_SETTLE_REJECTED")
+                self._recovery_diagnostic(
+                    row, prior_reason=prior_reason,
+                    observation="RECONCILE_SETTLE_REJECTED", broker_status="PENDING",
+                    action=ACTION_MARK_UNCERTAIN,
+                    primary_cause_preserved=is_preservable_primary_cause(prior_reason),
+                    receipt_verified=True, broker_authoritative=False)
         return self.attempts.attempts()
 
     def _upgrade_from_receipt_file(self, row: dict, receipt_root: Path) -> bool:
@@ -2026,6 +2288,10 @@ def main(argv: list[str] | None = None, *,
                                        register_admission=False,
                                        dispatch_gate=dispatch_gate,
                                        dispatch_journal=default_journal_path(
+                                           config["attempt_db"]),
+                                       request_lifecycle=default_lifecycle_path(
+                                           config["attempt_db"]),
+                                       recovery_diagnostics=default_recovery_path(
                                            config["attempt_db"]),
                                        require_origin=config.get(
                                            "expected_peer_uid") is not None)
