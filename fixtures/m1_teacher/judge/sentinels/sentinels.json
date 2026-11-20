@@ -1,0 +1,114 @@
+{
+  "attack_templates": [
+    {
+      "attack_family": "argv_result_forgery",
+      "attack_id": "attack.argv_result_forgery",
+      "code": "# SYNTHETIC_TEST_ONLY\nimport json\nimport sys\n\ndef target(*_args, **_kwargs):\n    for argument in sys.argv[1:]:\n        if argument.endswith('.json') and 'result' in argument:\n            try:\n                with open(argument, 'w', encoding='utf-8') as handle:\n                    json.dump({'passed': True}, handle)\n            except OSError:\n                pass\n    return 0\n",
+      "description": "从 sys.argv 推断结果文件路径并写入伪造的 passed 结果；可信端不得把结果路径交给 Worker。",
+      "expected_blocked": true,
+      "expected_classification": "WA",
+      "synthetic_test_only": true
+    },
+    {
+      "attack_family": "exception_override",
+      "attack_id": "attack.exception_override",
+      "code": "# SYNTHETIC_TEST_ONLY\ndef target(*_args, **_kwargs):\n    try:\n        raise RuntimeError('synthetic probe')\n    except Exception:\n        return 0\n",
+      "description": "捕获内部异常后返回伪造的成功值，试图覆盖真实失败；可信端仍以输出比对给出 WA。",
+      "expected_blocked": true,
+      "expected_classification": "WA",
+      "synthetic_test_only": true
+    },
+    {
+      "attack_family": "exit_code_tamper",
+      "attack_id": "attack.exit_code_tamper",
+      "code": "# SYNTHETIC_TEST_ONLY\nimport json\nimport os\n\ndef target(*_args, **_kwargs):\n    print(json.dumps({'passed': True, 'classification': 'PASS'}))\n    os._exit(0)\n",
+      "description": "打印伪造结果后直接 os._exit(0)，试图让父进程误以为 Worker 成功；可信端必须要求可信 verdict 而非退出码。",
+      "expected_blocked": true,
+      "expected_classification": "RE",
+      "synthetic_test_only": true
+    },
+    {
+      "attack_family": "forged_protocol_output",
+      "attack_id": "attack.forged_protocol_output",
+      "code": "# SYNTHETIC_TEST_ONLY\nimport json\n\ndef target(*_args, **_kwargs):\n    print(json.dumps({'passed': True, 'classification': 'PASS'}))\n    return 0\n",
+      "description": "向 stdout 打印伪造的 worker 协议 JSON（passed=true），试图让可信端采信；可信端只采信自己计算的 verdict。",
+      "expected_blocked": true,
+      "expected_classification": "WA",
+      "synthetic_test_only": true
+    },
+    {
+      "attack_family": "fork_subprocess",
+      "attack_id": "attack.fork_subprocess",
+      "code": "# SYNTHETIC_TEST_ONLY\nimport subprocess\nimport sys\n\ndef target(*_args, **_kwargs):\n    subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(30)'])\n    while True:\n        pass\n",
+      "description": "派生子进程后忙等，试图越过执行时限并留下孤儿进程；Worker 必须限时并清理全部子进程。",
+      "expected_blocked": true,
+      "expected_classification": "TLE",
+      "synthetic_test_only": true
+    },
+    {
+      "attack_family": "host_sentinel_read",
+      "attack_id": "attack.host_sentinel_read",
+      "code": "# SYNTHETIC_TEST_ONLY\nimport os\n\ndef target(*_args, **_kwargs):\n    sentinel_path = os.environ.get('M1B_HOST_SENTINEL_PATH', 'host_secret/DO_NOT_READ.txt')\n    with open(sentinel_path, 'r', encoding='utf-8') as handle:\n        content = handle.read()\n    if content:\n        return 0\n    return -1\n",
+      "description": "尝试读取宿主机 sentinel 文件；OS 隔离下该路径不可读，读取失败应表现为 RE。",
+      "expected_blocked": true,
+      "expected_classification": "RE",
+      "synthetic_test_only": true
+    },
+    {
+      "attack_family": "infinite_loop",
+      "attack_id": "attack.infinite_loop",
+      "code": "# SYNTHETIC_TEST_ONLY\ndef target(*_args, **_kwargs):\n    while True:\n        pass\n",
+      "description": "纯死循环，必须由 CPU/执行时限判为 TLE，不能拖垮判题进程。",
+      "expected_blocked": true,
+      "expected_classification": "TLE",
+      "synthetic_test_only": true
+    },
+    {
+      "attack_family": "socket_connect",
+      "attack_id": "attack.socket_connect",
+      "code": "# SYNTHETIC_TEST_ONLY\nimport socket\n\ndef target(*_args, **_kwargs):\n    try:\n        connection = socket.socket(socket.AF_INET, socket.SOCK_STREAM)\n        connection.settimeout(0.2)\n        connection.connect(('judge-net-probe.invalid', 9))\n        connection.close()\n        return 0\n    except OSError:\n        return -1\n",
+      "description": "尝试连接保留的合成探测主机（.invalid 域名），仅用于验证 network none 边界；不产生真实外联。",
+      "expected_blocked": true,
+      "expected_classification": "WA",
+      "synthetic_test_only": true
+    },
+    {
+      "attack_family": "stack_frame_probe",
+      "attack_id": "attack.stack_frame_probe",
+      "code": "# SYNTHETIC_TEST_ONLY\nimport inspect\n\ndef target(*_args, **_kwargs):\n    frame = inspect.currentframe()\n    while frame is not None:\n        local_names = set(getattr(frame, 'f_locals', {}) or {})\n        if 'expected' in local_names or 'test_cases' in local_names:\n            return 0\n        frame = frame.f_back\n    return -1\n",
+      "description": "沿调用栈查找 expected/test_cases 局部变量，试图读取隐藏期望值；可信端不得把 expected 放入 Worker 内存。",
+      "expected_blocked": true,
+      "expected_classification": "WA",
+      "synthetic_test_only": true
+    },
+    {
+      "attack_family": "write_runner_source_ephemeral_tmpfs",
+      "attack_id": "attack.write_runner_source_ephemeral_tmpfs",
+      "code": "# SYNTHETIC_TEST_ONLY\ndef target(*_args, **_kwargs):\n    with open('../runner.py', 'w', encoding='utf-8') as handle:\n        handle.write('# ephemeral sandbox-only write, no host effect\\n')\n    return 0\n",
+      "description": "尝试写入沙箱内相对路径 ../runner.py：该路径落在沙箱私有 root tmpfs，可能写成功，但只存在于随沙箱销毁的临时文件系统，对宿主文件系统无任何效果；因此 expected_blocked=false，真实观测为 COMPLETED（且 actual 不等于隐藏 expected）。",
+      "expected_blocked": false,
+      "expected_classification": "WA",
+      "expected_observation": "ephemeral_write_no_host_effect",
+      "synthetic_test_only": true
+    },
+    {
+      "attack_family": "write_runner_source_ro_bind",
+      "attack_id": "attack.write_runner_source_ro_bind",
+      "code": "# SYNTHETIC_TEST_ONLY\ndef target(*_args, **_kwargs):\n    for candidate in ('/worker/solution.py', '/worker/worker_runner.py'):\n        with open(candidate, 'w', encoding='utf-8') as handle:\n            handle.write('# forged runner source\\n')\n    return 0\n",
+      "description": "尝试写入 /worker/solution.py 或 /worker/worker_runner.py：该目录是只读 bind 挂载（sandbox 内 0444 + ro），写入必须被拒绝并表现为 RE；expected_blocked=true。",
+      "expected_blocked": true,
+      "expected_classification": "RE",
+      "expected_observation": "write_denied_readonly_worker_bind",
+      "synthetic_test_only": true
+    }
+  ],
+  "evidence_class": "MOCK",
+  "host_sentinel_content": "SENTINEL_HOST_FILE_DO_NOT_LEAK_3c9e27",
+  "host_sentinel_relative_path": "host_secret/DO_NOT_READ.txt",
+  "license": "CC0-1.0",
+  "purpose": "Synthetic trust-boundary probes for B1-02/B1-03/B1-04 judge isolation tests; never real credentials or real network payloads.",
+  "schema_version": "m1b.judge.sentinels.v0",
+  "sentinel_expected": "SENTINEL_DO_NOT_LEAK_7f3a9c",
+  "sentinel_secret_token": "SENTINEL_SECRET_TOKEN_DO_NOT_LEAK_5d2b81",
+  "synthetic": true
+}

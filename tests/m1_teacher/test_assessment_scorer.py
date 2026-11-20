@@ -117,7 +117,9 @@ def items(adapter: CFBinarySearchDomainAdapter) -> dict[str, AssessmentItem]:
 
 @pytest.fixture(scope="module")
 def scorer() -> DeterministicScorer:
-    return DeterministicScorer(FIXTURES_DIR, clock=lambda: FIXED_TS)
+    return DeterministicScorer(
+        FIXTURES_DIR, clock=lambda: FIXED_TS, trusted_fixture_only=True
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -236,7 +238,7 @@ def test_code_partial_credit(
     )
     assert result.status == "PARTIAL"
     assert 0.0 < (result.score or 0.0) < result.max_score
-    assert result.failure_reason.startswith("CASES_FAILED:")
+    assert result.failure_reason.startswith("JUDGE_CASES_FAILED:")
 
 
 def test_code_wrong_answer_is_incorrect(
@@ -249,7 +251,7 @@ def test_code_wrong_answer_is_incorrect(
     )
     assert result.status == "INCORRECT"
     assert result.score == 0.0
-    assert result.failure_reason.startswith("CASES_FAILED:")
+    assert result.failure_reason.startswith("JUDGE_CASES_FAILED:")
 
 
 def test_code_student_failures_are_not_eval_errors(
@@ -258,7 +260,7 @@ def test_code_student_failures_are_not_eval_errors(
     item = items["item.bs.code.001"]
     syntax = scorer.score(item, "learner.a", "def broken(:\n    pass\n")
     assert syntax.status == "INCORRECT"
-    assert syntax.failure_reason == "SYNTAX_ERROR"
+    assert syntax.failure_reason == "JUDGE_STUDENT_RE"
 
     runtime = scorer.score(
         item,
@@ -266,11 +268,11 @@ def test_code_student_failures_are_not_eval_errors(
         "def binary_search_exact(arr, target):\n    raise ValueError('boom')\n",
     )
     assert runtime.status == "INCORRECT"
-    assert runtime.failure_reason.startswith("RUNTIME_ERROR")
+    assert runtime.failure_reason == "JUDGE_STUDENT_RE"
 
     missing = scorer.score(item, "learner.a", "def other_name(arr, target):\n    return -1\n")
     assert missing.status == "INCORRECT"
-    assert missing.failure_reason == "MISSING_FUNCTION"
+    assert missing.failure_reason == "JUDGE_STUDENT_RE"
 
     empty = scorer.score(item, "learner.a", "   ")
     assert empty.status == "INCORRECT"
@@ -280,14 +282,19 @@ def test_code_student_failures_are_not_eval_errors(
 def test_code_timeout_is_student_failure_not_infrastructure(
     items: dict[str, AssessmentItem],
 ) -> None:
-    fast = DeterministicScorer(FIXTURES_DIR, timeout_s=0.5, clock=lambda: FIXED_TS)
+    fast = DeterministicScorer(
+        FIXTURES_DIR,
+        timeout_s=0.5,
+        clock=lambda: FIXED_TS,
+        trusted_fixture_only=True,
+    )
     result = fast.score(
         items["item.bs.code.001"],
         "learner.a",
         "def binary_search_exact(arr, target):\n    while True:\n        pass\n",
     )
     assert result.status == "INCORRECT"
-    assert result.failure_reason == "TIMEOUT"
+    assert result.failure_reason == "JUDGE_STUDENT_TLE"
     assert result.score == 0.0
 
 

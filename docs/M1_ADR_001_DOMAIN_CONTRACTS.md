@@ -255,6 +255,18 @@ Recorded for the reviewer:
    rejected.
 8. **Empty-identifier rejection**: identifiers/codes/titles/prompts must not be blank (stricter
    than the brief, which only marked them required). Considered safe for v0.
+9. **B-NEXT B-PR2 — `HISTORY_EVENT_TYPE` additive value `ASSESSMENT_PREPARED`** (D12
+   change-log record): appended to `m1a.v0` `HISTORY_EVENT_TYPE_VALUES`; no value was renamed
+   or removed and no record/field changed. The new value records the **durable prepared
+   assessment attempt** written atomically with `RESPONSE_SUBMITTED` before the external scorer
+   runs, so a crash between scoring preparation and the terminal `ASSESSED`/`ERROR` commit is
+   recoverable (`recover_session()`) while state application stays exactly-once. Previously valid
+   JSON payloads remain valid; the enum-freeze test was minimally extended (+1 value, no other
+   frozen assertion changed). Recorded in `docs/M1_ARCHITECTURE.md` §12 change log and detailed
+   in `docs/M1_B_TXN_RECOVERY.md`. Storage is **forward-only**: a database containing
+   `ASSESSMENT_PREPARED` events is readable only by code that knows this value; older builds fail
+   closed on the frozen enum validation (no silent downgrade) — see
+   `docs/M1_B_TXN_RECOVERY.md` §10.
 
 ---
 
