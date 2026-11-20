@@ -4,9 +4,9 @@
 |---|---|
 | 文档状态 | **`OWNER_REPORTED`（实现汇总 + Owner 侧证据；不是最终独立验收，不是 PASS）** |
 | 文档版本 | `m1b.impl-report.v0`（2026-11-20 UTC） |
-| 工作区 / 分支 | `/root/m1b/pr5docs` / `b-next/pr5-docs`（当前快照 `e2b6e85`） |
+| 工作区 / 分支 | `/root/m1b/pr5` / `b-next/pr5-e2e-eval`（最终树 `861d147` + B5 `c420d19`；PR5 最终 commit SHA 回填） |
 | 被汇总范围 | B-PR0 合同收敛 → B-PR1 可信判题 → B-PR2 事务/恢复 → B-PR3 scoped 幂等 → B-PR4 双域 ports → B-PR5 统一 E2E/证据 |
-| 最终数字归属 | **当前快照数字**（pre-B5 873；PR5 B5 提交后过渡树 884），不是最终集成树数字。**所有最终数字/最终 SHA/证据 hash 以 `docs/M1_B_EVALUATION_REPORT.md` §13 的 `PENDING_FINAL_TREE` 复跑为准**（协议 `docs/M1_B_EVALUATION_PROTOCOL.md`）。PR1/PR3/PR4 的 review-fix 尚待合入，合入后计数会变化；本报告不写死最终数字 |
+| 最终数字归属 | **最终树实测（本报告标注 FINAL_TREE_MEASURED）：938 passed（clean TMPDIR）、strict `M1B_REQUIRE_OS_SANDBOX=1 -rs` 938 passed/0 skipped；最终 SHA/evidence hashes 以 `docs/M1_B_EVALUATION_REPORT.md` §13 为准**（协议 `docs/M1_B_EVALUATION_PROTOCOL.md`）。PR1/PR2/PR3/PR4 review-fix tree 已合入 final tree；B-PR5 最终独立评审仍 `PENDING`（Lead 指派） |
 | 证据词汇 | 按评估协议 §1 冻结词汇。本文件只使用 `OWNER_REPORTED`（本线实现/本轮文档作者实测，未经独立 Reviewer 复跑）、`HISTORICAL_FROZEN`（历史冻结参考）、`NOT_RUN`、`BLOCKED`、`NOT_VERIFIED`、`UNVERIFIED`；**不使用 `INDEPENDENTLY_REEXECUTED`**（该标签只能由独立 Reviewer 本轮真实复跑获得） |
 | 边界 | 仅离线、合成 fixtures、确定性/mock E2E；**不包含**真人学习收益、真实招聘/JD/简历、联网研究、真实 Provider/LLM、LiveGate、生产可用性；M0 保护路径零变更 |
 
@@ -16,25 +16,26 @@
 
 ---
 
-## 0. 结论摘要（当前快照 `e2b6e85`）
+## 0. 结论摘要（最终树 `FINAL_TREE_MEASURED`；原 `e2b6e85` 过渡快照数值仅保留于 §6.2 历史行）
 
-| 项 | 当前值 | 标签 |
+| 项 | 最终值 | 标签 |
 |---|---|---|
-| 当前分支/快照 | `b-next/pr5-docs` / `e2b6e85d8939b2411b2b6c6cc26538014c6f57e3` | — |
-| 测试收集数 | **873 collected** | `OWNER_REPORTED`（本轮 `--collect-only`） |
-| 新集成套件（相对 A 历史 536，pre-B5 快照） | **337 新增** = PR1 138 + PR2 63 + PR3 37 + PR4 85 + PR5 14（collector）；PR5 B5 提交 +11 后过渡树 884（最终树 `PENDING_FINAL_TREE`，见 `docs/M1_B_EVALUATION_REPORT.md` §13） | `OWNER_REPORTED`（按文件归组；非最终数字） |
-| 全量套件（干净 `TMPDIR`） | **`873 passed in 84.51s`，exit 0，0 skipped** | `OWNER_REPORTED`（本轮实测） |
-| 全量套件（共享 `/tmp` 默认环境） | `4 failed, 869 passed in 89.24s`，exit 1；失败均在 judge 临时目录清理断言，根因是共享 `/tmp` 中先前运行残留的 `m1b_judge_worker_*` 目录（非产品逻辑回归；同一测试文件单独跑 `11 passed`） | `OWNER_REPORTED`（本轮实测；PR3 Reviewer 也记录过同类 `734 passed/3 failed` 环境现象） |
+| 最终集成树 | PR4 final `1de6ae6d…` 合入 PR5 后 merge `861d147d…`；B5 实现提交 `c420d19…`；PR5 最终 commit SHA 回填 | — |
+| 测试收集数 | **938 collected** | `OWNER_REPORTED`（`--collect-only`；clean TMPDIR） |
+| 新集成套件（最终树） | **938 总计** = PR4 final 913（含 PR1/PR2/PR3 review-fix tree + PR4 final） + PR5 25（B5 11 + collector 14）；历史 M1-A 536 含于其中、未改；不得与 M1-Offline 365 相加 | `OWNER_REPORTED` + collector-only `EXECUTED_PASS`（非产品 PASS） |
+| 全量套件（干净 `TMPDIR`，最终树） | **`938 passed in 102.76s`，exit 0，0 skipped** | `OWNER_REPORTED`（final tree 实测） |
+| 全量套件（strict `M1B_REQUIRE_OS_SANDBOX=1 -rs`） | **`938 passed in 102.95s`，0 skipped** | `OWNER_REPORTED`（final tree 实测；PR1 gate 已合入） |
+| 旧快照（`e2b6e85`）共享 `/tmp` 环境 | 曾出现 `4 failed, 869 passed`（judge 临时目录清理断言；干净 TMPDIR 下消失）——**历史事实，final tree 已用私有 TMPDIR 复跑无失败** | `OWNER_REPORTED`（旧快照） |
 | A demo 双跑 | 逐字节相同；`sha256=b08ceee915fb0363864e303ded71de4d547eae6d14f7aa693ba1537a810d491b`；53 行 / 5,798 bytes | `OWNER_REPORTED`（本轮实测；与历史一致） |
 | B4 demo（`--json`）双跑 | 逐字节相同；`sha256=6b7bb66e36a38bd640d5b47d206d8fee24a446df9b42dbe76d20dd8cc50bef83`；511 行 / 15,108 bytes | `OWNER_REPORTED`（本轮实测；与 PR4 Reviewer 记录一致） |
 | `ruff check m1_teacher tests/m1_teacher` | `All checks passed!` | `OWNER_REPORTED`（本轮实测） |
 | 相对基线 `4706250` 的变更面 | 100 个文件，全部位于 `docs/`、`fixtures/`、`m1_teacher/`、`tests/m1_teacher/`、`scripts/m1b/`；**M0/security/bridge/config/g*/scripts/g4*/plugins/LiveGate 零变更** | `OWNER_REPORTED`（本轮 `git diff --name-only` 过滤） |
-| 最终裁定 | **`TBD`（见 `docs/M1_B_EVALUATION_REPORT.md`）**；Owner 侧不预填 PASS | `NOT_RUN` |
+| 最终裁定 | Owner 侧 `FINAL_TREE_MEASURED`；**独立 Reviewer 最终裁定 `PENDING`（Lead 指派）**；Owner 不预填 PASS | `PENDING` |
 
-**当前必须如实保留的负面事实**
+**当前必须如实保留的负面事实（final tree 更新后）**
 
-1. 当前快照的 4 个 judge 失败是 **共享 `/tmp` 环境污染导致的测试隔离缺陷**；干净 `TMPDIR` 下全绿。最终 Reviewer 复跑必须使用干净 `TMPDIR`（或先清理残留），否则 C-01 会出现假失败。
-2. **PR1/PR3/PR4 的独立评审修复尚未全部合入当前快照**；PR5 的最终独立评测报告尚未产出（`B5-01` `NOT_RUN`）。
+1. 旧 `e2b6e85` 快照的 4 个 judge 失败是**共享 `/tmp` 环境污染导致的测试隔离缺陷**；final tree 在 `mktemp -d` 私有 TMPDIR 串行复跑 **938 passed / 0 skipped**。最终 Reviewer 必须使用干净 TMPDIR（或先清理残留），否则会出现假失败。
+2. **PR1/PR2/PR3/PR4 review-fix tree 已合入 final tree**（PR4 final `1de6ae6d`）；PR5 最终评测报告（Owner 侧）已产出；**`B5-01` 最终独立评审 `PENDING`（Lead 指派）**。
 3. 真实学习效果 **`NOT_VERIFIED`**；真实 Provider/网络/LiveGate **`BLOCKED`**；目标部署（非 root、断电、真实 CODE）**`NOT_RUN`/`UNVERIFIED`**。
 4. 两条历史线（M1-A 536 / M1-Offline 365）是**各自独立冻结**的参考，不是本套件的组成；新套件计数必须独立统计。
 
@@ -77,7 +78,7 @@
 
 ## 2. 逐 PR 交付、证据与评审状态
 
-### 2.1 计数总表（当前快照 `e2b6e85`，文件级归组）
+### 2.1 计数总表（最终树 938，文件级归组；旧 e2b6e85 快照仅历史）
 
 | 来源 | 测试数 | 说明 |
 |---|---|---|
@@ -87,7 +88,7 @@
 | B-PR3 新增 | **37** | scoped_idempotency 26 + scope_migration 11 |
 | B-PR4 新增 | **85** | interview_domain 14 + interview_fixtures 10 + interview_judge 14 + freshness 22 + vertical_policy 16 + b4_e2e 9 |
 | B-PR5 新增 | **14** | evidence_collector 14 |
-| **当前快照合计（pre-B5）** | **873** | 536 + 337；PR5 B5 提交后过渡树 884；不得与 B 线历史 365 相加；最终树数字见评测报告 §13 `PENDING_FINAL_TREE` |
+| **最终树合计** | **938** | PR4 final 913 + PR5 25；不得与 B 线历史 365 相加（无“901”）；严格模式 938 passed / 0 skipped |
 
 历史/评审侧的全量数字（**不同树/不同 HEAD，不得横向相加或混用**，均按原报告标签引用）：
 
@@ -97,7 +98,7 @@
 | PR2 评审 | PR2 独立分支 | `595 passed`（该分支范围）；crash matrix 32 行 | `REVIEWER_REPORTED`（`docs/M1_B_PR2_REVIEW.md` §3） |
 | PR3 评审 | `db636ea` | `774 passed in 88.63s` | `REVIEWER_REPORTED`（`docs/M1_B_PR3_REVIEW.md` §3） |
 | PR4 评审 | `11a4f72` | `859 passed in 81.59s`，0 failed/skipped | `REVIEWER_REPORTED`（`docs/M1_B_PR4_REVIEW.md` §1） |
-| PR5 当前快照 | `e2b6e85` | `873 passed in 84.51s`（干净 TMPDIR） | `OWNER_REPORTED`（本报告作者本轮实测） |
+| PR5 最终树 | `861d147` + `c420d19` | **`938 passed in 102.76s`**（clean TMPDIR）；strict `938 passed / 0 skipped` | `OWNER_REPORTED`（final tree 实测） |
 
 ### 2.2 B-PR0 — 合同收敛 ADR / 端口 / CI（文档交付）
 
@@ -120,7 +121,7 @@
 | 证据命令（Owner/Reviewer 已跑） | `pytest tests/m1_teacher -q`；定向 `test_judge_supervisor/worker/sandbox/negatives/correctness/fixture_integrity/hidden_leakage_scan`；`test_judge_correctness.py`（14 参考解、112/112 hidden cases）；攻击模板矩阵（stack-frame 读 expected、argv/result 伪造、宿主 sentinel、stdout 伪造 PASS、`os._exit`、fork、infinite loop、tmpfs 写入）全部非 PASS |
 | 实际输出摘要 | 当前快照：judge 相关文件集合共 138 tests（本轮 collect-only 归组；本轮未单独重跑该子集）；PR1 Reviewer 在 `6e20fd1`：全量 `674 passed in 51.48s`，定向 `172 passed`；B1-01/02/03/06 `VERIFIED (LOCAL_ONLY)`；B1-04/05 `PARTIAL` |
 | 评审文档/结论 | `docs/M1_B_PR1_REVIEW.md`（`62c32c5`，分支 `b-next/pr1-review`）：**`PASS_WITH_ACTIONS`**，P0=0，P1=4；`docs/M1_B_PR1_REVIEW_ADDENDUM.md`（`af09cff`）：**`P1_ACTIONS_PARTIALLY_CLOSED`**（P1-1/P1-4 CLOSED；P1-3 机制关闭但 CI 未接线；P1-2 未关闭） |
-| Review-fix 状态 | 修复 commit `8175233`（P1-1/P1-4 + P2）与 `550ad37`（P1-2 启动 fail-closed + P1-3 仓库安全 CI 脚本）存在于 `b-next/pr1-trusted-judge` tip `550ad37`；**尚未合入当前快照 `e2b6e85`，也未被独立 Reviewer 复核新 delta**。`550ad37` 自述在修复树上 `709 passed`（`OWNER_REPORTED`） |
+| Review-fix 状态 | **已合入 final tree（PR4 final `1de6ae6d`）**：PR1 修复 `8175233`/`550ad37` 的 P1-1/P1-3/P1-4 及 P1-2 文档/报告部分；PR1 addendum 复核为 `P1_ACTIONS_PARTIALLY_CLOSED`（P1-2 非 root principal 仍 `NOT CLOSED`）；final tree strict `938 passed / 0 skipped` |
 | 关键限制 | 真实用户 CODE 仍 **`BLOCKED`**（需人类批准 + 目标部署安全验收）；非 root 宿主 principal 本机 **`NOT_RUN`**（当前 root + uid_map→0）；`.github/workflows` 安全 job 未配置（`NOT_CONFIGURED/NOT_RUN`）；P2 残余：`spec-sha256` 元数据、`ASSESSED.item.scoring_spec_ref` 路径、worker 可伪造 INFRA/RAISED 抑制学生证据（不能伪造 PASS） |
 
 ### 2.4 B-PR2 — 事务、崩溃恢复与单写者
@@ -144,7 +145,7 @@
 | 新增测试 | **37**（26 + 11；当前树） |
 | 证据命令/输出 | PR3 Reviewer：全量 `774 passed in 88.63s`；`test_scoped_idempotency.py 26 passed`；`test_scope_migration.py 11 passed`；独立探针验证同键幂等/不同 payload 冲突/跨 learner 不可读/目标 learner 零变化；schema v2 DDL `result_scopes(result_id PK, scope_version, learner_id, session_id, …)` + 索引 + v1→v2 迁移/backfill |
 | 评审文档/结论 | `docs/M1_B_PR3_REVIEW.md`（`db636ea`，分支 `b-next/pr3-review`）：**`PASS_WITH_ACTIONS`**，P0=0，P1=2、P2=5；B3-01/B3-02 核心验收成立 |
-| Review-fix 状态 | 修复 `3ad85c2` + 强制 legacy fixture `a5373f1` 在 `b-next/pr3-scoped-idempotency` tip `a5373f1`；**尚未合入当前快照**。P1-1：结构化 legacy response digest 投影兼容；P1-2：`LearningHistory.apply_assessment()` 仍全局 `get_event`（跨 learner 静默丢弃，不泄漏成绩，但需改为 scoped）——修复在分支，待合入/复评 |
+| Review-fix 状态 | **已合入 final tree（PR4 final `1de6ae6d` 含 PR1/PR2/PR3 review-fix tree）**：legacy 结构化 response digest 兼容（P1-1）、`LearningHistory.apply_assessment()` scoped 查找（P1-2）随 review-fix 合入；final tree `test_scope_migration` 15 + `test_scoped_idempotency` 31 passed |
 | 关键限制 | legacy 默认 id 升级路径仅 string response 已证明；`turn_index=-1` 仅 legacy 行（防御纵深）；v2 DB forward-only |
 
 ### 2.6 B-PR4 — CF/Interview/Freshness 双域统一闭环与 domain ports
@@ -166,8 +167,8 @@
 | 目标 | 新统一 E2E/demo；证据包收集器（append-only audit index）；评测协议/报告模板；最终独立评测入口 |
 | 关键文件 | `scripts/m1b/collect_evidence.py`、`docs/M1_B_EVIDENCE_PACKET.md`、`docs/M1_B_EVALUATION_REPORT_TEMPLATE.md`、`tests/m1_teacher/test_evidence_collector.py`；E2E 相关：`m1_teacher/demo_b4.py`、`tests/m1_teacher/test_b4_e2e.py` |
 | 新增测试 | **14**（evidence collector；当前快照新增）；B4 E2E 9 个在 PR4 范围内已计入 |
-| 证据命令/输出 | `pytest tests/m1_teacher -q` → 当前快照 `873 passed`（干净 TMPDIR）；collector 本轮 smoke：`--case-id SMOKE-CONTRACTS --command "... pytest test_contracts.py -q"` → `EXECUTED_PASS`，`sha256=37d63c107feaaccd9d3590cee720fd36cba3c1a9c912f0fd5f0577589c0befeb`（raw evidence），`audit-index.jsonl sha256=639dd18c7c9815911925edf269f20d83b81ea9836dcc274ae9d8e4cece9b42d2`；包结构 = `README.md + audit-index.jsonl + audit-index.json + raw/<run_id>/{evidence.json,stdout.log,stderr.log}` |
-| 评审文档/结论 | **评测报告已产出过渡快照（`docs/M1_B_EVALUATION_REPORT.md`）；最终树数字/最终裁定 = `PENDING_FINAL_TREE`**（默认结论仅当全部门通过时才允许 `PASS_FOR_M1B_OFFLINE_INTEGRATION_SCOPE`）；测评协议 `docs/M1_B_EVALUATION_PROTOCOL.md`（分支 `b-next/pr5-eval-protocol@09e1dd9`，DESIGN）。**B5-01 = `NOT_RUN`** |
+| 证据命令/输出 | final tree `pytest tests/m1_teacher -q`（clean TMPDIR）→ **`938 passed in 102.76s`**；strict `M1B_REQUIRE_OS_SANDBOX=1 -q -rs` → **938 passed / 0 skipped**；collector final entries 见 `docs/m1b_evidence/audit-index.jsonl`（append-only；旧 smoke 记录保留）；包结构 = `README.md + audit-index.jsonl + audit-index.json + raw/<run_id>/{evidence.json,stdout.log,stderr.log}` |
+| 评审文档/结论 | **最终树评测报告已产出（`docs/M1_B_EVALUATION_REPORT.md`，FINAL_TREE_MEASURED）**；B5-01 最终独立评审 `PENDING`（Lead 指派）；默认结论仅当全部门通过时才允许 `PASS_FOR_M1B_OFFLINE_INTEGRATION_SCOPE`；测评协议 `docs/M1_B_EVALUATION_PROTOCOL.md`（分支 `b-next/pr5-eval-protocol@09e1dd9`，DESIGN）。**B5-01 = `NOT_RUN`** |
 | 关键限制 | 收集器只记录“命令执行事实”，`EXECUTED_PASS` ≠ 产品 PASS；未知 `evidence_class` 默认 `NOT_VERIFIED`；collector 不是沙箱；网络隔离需 Reviewer 环境负责；最终报告不能预填 PASS |
 
 ---
@@ -197,7 +198,7 @@
 ### 3.3 安全 CI gate 现状
 
 - 当前快照 **不含** `M1B_REQUIRE_OS_SANDBOX` 实现（`grep` 命中 0）；普通 `pytest` 在 bwrap 不可用时仍会 skip OS 动态证据。
-- PR1 修复分支 `550ad37` 新增 `scripts/m1b/run_safety_ci.sh`：默认 `M1B_REQUIRE_OS_SANDBOX=1 M1B_REQUIRE_NONROOT_SANDBOX=1`，跑 `pytest tests/m1_teacher -q -rs` 并断言 exit 0、无 skipped、无 `s` progress 行；`--allow-root-synthetic` 仅供本地 root 合成验证（不是部署安全证据）。该脚本**尚未合入当前快照**，`.github/workflows` 也**未配置**该 job（`NOT_CONFIGURED/NOT_RUN`，需维护者/CI owner 接线）。
+- PR1 修复 `scripts/m1b/run_safety_ci.sh` **已合入 final tree**：默认要求 `M1B_REQUIRE_OS_SANDBOX=1`/非 root 断言，并跑 `pytest tests/m1_teacher -q -rs`；本报告 final tree 用 `M1B_REQUIRE_OS_SANDBOX=1 ... -q -rs` 实测 **938 passed / 0 skipped**。`.github/workflows` 的实际 job 接线仍由维护者/CI owner 负责（本报告不声称仓库 CI 已接线）。
 - PR1 修复分支自述：修复树 `709 passed`；缺 bwrap 模拟下 0 skipped、fail 而非 skip（`OWNER_REPORTED`，待独立复评）。
 
 ---
@@ -255,12 +256,12 @@
 - 因为共享 `/tmp` 存在先前运行的 `m1b_judge_worker_*` 残留，**本轮全量命令需设置私有 `TMPDIR`**：
   `TMPDIR=$(mktemp -d) pytest tests/m1_teacher -q -p no:cacheprovider`。
 
-### 6.2 当前快照可直接复跑的命令（供最终 Reviewer 参考；Owner 本轮实测）
+### 6.2 历史快照（`e2b6e85`）复跑记录（保留供审计；最终树数字见 §6.5）
 
 | # | 命令（cwd=`/root/m1b/pr5docs`） | 本轮实测 | 标签 |
 |---|---|---|---|
-| O-01 | `pytest tests/m1_teacher --collect-only -q` | `873 tests collected` | OWNER_REPORTED |
-| O-02 | `TMPDIR=$T pytest tests/m1_teacher -q -p no:cacheprovider` | **`873 passed in 84.51s`，exit 0，0 skipped** | OWNER_REPORTED |
+| O-01 | `pytest tests/m1_teacher --collect-only -q` | 旧快照 `873 tests collected`；final tree **938 collected** | OWNER_REPORTED |
+| O-02 | `TMPDIR=$T pytest tests/m1_teacher -q -p no:cacheprovider` | 旧快照 `873 passed in 84.51s`；final tree **`938 passed in 102.76s` / strict `938 passed 0 skipped`** | OWNER_REPORTED |
 | O-03 | 默认 `/tmp` 同命令（未清理残留） | `4 failed, 869 passed in 89.24s`；失败 = 3×`test_judge_negatives`（`test_attack_templates_never_pass_and_never_leak_sentinels` / `test_attack_timeout_and_fork_are_killed_without_host_leftovers` / `test_ephemeral_tmpfs_write_has_no_host_effect`，均为临时目录清理断言）+ 1×`test_judge_worker.test_worker_timeout_is_bounded_and_cleaned_up`；`test_judge_sandbox.py -q` 单独跑 `11 passed in 0.77s` | OWNER_REPORTED（环境假失败，**不得**当作产品 PASS 或产品失败） |
 | O-04 | `python -m m1_teacher.demo` ×2 + `cmp` + `sha256sum` | 逐字节相同；`b08ceee915fb…d491b`；53 行 | OWNER_REPORTED |
 | O-05 | `python -m m1_teacher.demo_b4 --json` ×2 + `cmp` + `sha256sum` | 逐字节相同；`6b7bb66e36a3…bef83`；511 行 / 15,108 bytes | OWNER_REPORTED |
@@ -268,7 +269,7 @@
 | O-07 | `ruff check m1_teacher tests/m1_teacher` | `All checks passed!` | OWNER_REPORTED |
 | O-08 | `git diff --name-only 4706250..HEAD` + 路径过滤 | 100 文件；全部 `docs/ fixtures/ m1_teacher/ tests/m1_teacher/ scripts/m1b/`；`NO_OUT_OF_SCOPE_PATHS` | OWNER_REPORTED |
 | O-09 | `grep -RInE "autoteacher_m0\|import (httpx\|requests\|aiohttp\|urllib.request)" m1_teacher` | `NONE` | OWNER_REPORTED |
-| O-10 | `M1B_REQUIRE_OS_SANDBOX=1 pytest tests/m1_teacher -q -rs`；合入 PR1 修复后用 `PYTHON="$PY" ./scripts/m1b/run_safety_ci.sh` | **当前快照未实现该 env/脚本：`NOT_CONFIGURED`**（grep 命中 0）；PR1 修复分支 `550ad37` 自述安全模式 `709 passed`（`OWNER_REPORTED`，待合入+复评）；缺 bwrap 模拟要求 fail 而非 skip | NOT_RUN / NOT_CONFIGURED（Owner 过渡） |
+| O-10 | `M1B_REQUIRE_OS_SANDBOX=1 pytest tests/m1_teacher -q -rs`；`scripts/m1b/run_safety_ci.sh` | **final tree 已实现并实测：`938 passed in 102.95s`，0 skipped**（旧 e2b6e85 快照为 `NOT_CONFIGURED`，历史） | OWNER_REPORTED（final tree） |
 
 ### 6.3 历史冻结参考（只引用，不相加；最终 Reviewer 必须独立重跑并保留标签）
 
@@ -277,7 +278,7 @@
 | M1-A `m1_teacher` | `4706250`（`m1a.v0`；M1-A 独立 Review `PASS_FOR_M1A_OFFLINE_MVP`） | clean archive 后 `pytest tests/m1_teacher -q` | `536 passed`（Reviewer 在 PR2 评审 E8 独立确认 `536 passed in 16.41s`）；demo `b08ceee9…`，53 行；evidence `171cc654…`/`5e84229e…`/`23b871a3…`（历史） | `HISTORICAL_FROZEN` |
 | M1-Offline `m1_offline` | `290c577`（`m1.offline.v0`；Review clean C2） | `/root/at-m1-offline` 冻结树 `pytest tests/m1_offline -q -p no:cacheprovider` | `365 passed`；demo 历史 `1d57ca62…`（上下文相关） | `HISTORICAL_FROZEN`（本轮 **未重跑**；B 线不在当前树） |
 
-> **禁止**：`536 + 365 = 901` 不是任何真实套件，也不存在“统一 901”；新 B 集成套件当前 `873`（含 536 基线 + 337 新增）是**本树**数字，不能与 365 相加。
+> **禁止**：`536 + 365 = 901` 不是任何真实套件，也不存在“统一 901”；最终 B 集成套件 `938`（PR4 final 913 + PR5 25；含历史 M1-A 536 基线）是**本树**数字，不能与 365 相加。
 
 ### 6.4 证据包（B-PR5 交付）
 
@@ -286,11 +287,15 @@
 - 建议最终包位置：`/root/m1b_evidence/B5-01/`（由 Reviewer 在冻结 SHA 上运行收集器生成；最终位置以 Reviewer 报告为准）。每个 C 行必须登记 `case_id/command/environment/exit_code/raw_evidence_path/sha256/limitation`。
 - 状态语义：`EXECUTED_PASS` 仅表示命令退出 0；`NOT_RUN` 必须有 reason；`evidence_class` 默认 `NOT_VERIFIED`，需 Reviewer 显式标注。
 
-### 6.5 最终数字占位
+### 6.5 最终数字（FINAL_TREE_MEASURED）
 
-最终集成树尚未冻结（需先合入 PR1/PR3/PR4 review-fix、评审文档、PR5 评测协议并生成最终 SHA）。因此：
-- **最终测试计数/全绿状态/评审裁定 = 见 `docs/M1_B_EVALUATION_REPORT.md`（最终树实测，Reviewer 填）**；若 LeadB/维护者另指定独立评审文档（如 `docs/M1_B_INDEPENDENT_REVIEW.md`），以该指定为准，但最终报告必须引用本实现报告与证据包；
-- 当前快照数字只作过渡参考（`873 passed` @ `e2b6e85`）。
+最终集成树 = PR4 final `1de6ae6d3714ab815c47022e4c2cceee107db979` 合入 PR5 后的 merge commit `861d147d…`；B5 实现提交 `c420d19…`；PR5 最终 commit SHA 由本报告 commit 后回填（`git rev-parse b-next/pr5-e2e-eval`）。最终数字：
+
+- `pytest tests/m1_teacher -q`（clean TMPDIR）→ **938 passed in 102.76s**；strict `M1B_REQUIRE_OS_SANDBOX=1 -q -rs` → **938 passed in 102.95s，0 skipped**；
+- 定向：B5 11 / B4 9 / B4 durability 9 / judge certification 33（112/112） / crash 35 / collector 14；ruff clean；
+- 最终 counts/hashes/证据包详见 `docs/M1_B_EVALUATION_REPORT.md` §13；B5 独立评审 `PENDING`（Lead 指派），本报告不预填 PASS；
+- 若 LeadB/维护者另指定独立评审文档（如 `docs/M1_B_INDEPENDENT_REVIEW.md`），以该指定为准，但最终报告必须引用本实现报告与证据包；
+- 旧 `e2b6e85` 过渡快照数值仅供历史参考；final tree 以 **938 passed / strict 0 skipped** 为准（`docs/M1_B_EVALUATION_REPORT.md` §13）。
 
 ---
 
@@ -313,9 +318,9 @@
 | 13 | worker 可伪造 INFRA/RAISED | 不能伪造 PASS，但可抑制负面学生证据（PR1 P2） | PR1 评审 |
 | 14 | 阈值（加速 0.25/证据 2、hint cap、interview ladder） | **`UNCALIBRATED`**：无真实数据校准 | DOMAINS §9 |
 | 15 | B4-05 / 版本不兼容拒绝 | **`NOT_RUN`** | PR4 评审 §6 |
-| 16 | 共享 `/tmp` 测试隔离 | 当前快照 4 个 judge 测试在默认 `/tmp` 假失败；干净 TMPDIR 全绿；最终 Reviewer 必须清理/隔离 | 本轮 O-02/O-03；PR3 评审也记录同类 |
-| 17 | PR1/PR3/PR4 review-fix 未合入 | 当前快照尚未包含 `550ad37`、`a5373f1`、PR4 修复；最终树计数/状态会变化 | 分支核对 |
-| 18 | PR5 独立评测 | `B5-01` **`NOT_RUN`**；最终报告 `docs/M1_B_EVALUATION_REPORT.md` 未产出 | 模板/协议 |
+| 16 | 共享 `/tmp` 测试隔离 | 已用 `mktemp -d` 独立 TMPDIR 串行复跑：938 passed/0 skipped；最终 Reviewer 必须使用干净 TMPDIR/串行 | 本轮 final tree 实测；PR3 评审也记录同类 |
+| 17 | PR1/PR2/PR3/PR4 review-fix 合入 | 已合入 final tree（PR4 final `1de6ae6d`；最终树 938） | 本报告 §6.5；PR4 review/response |
+| 18 | PR5 独立评测 | Owner 最终树评测报告已产出；`B5-01` 最终独立评审 **`PENDING`（Lead 指派）** | `docs/M1_B_EVALUATION_REPORT.md` §13 |
 | 19 | 文档残留 | ADR §5 “optional fields …” 与 P1-04 零 diff 原则措辞冲突；`docs/M1_ARCHITECTURE.md` §14 仍写 `schema_meta.version == 1`（实际 v2）；PR1/PR3/PR4 评审文档未合入树；PR1 附录文本仍列 P1-2/P1-3 未关闭（修复分支后补 commit 已实现，待复评/合入） | 本轮静态核对 |
 
 ---
@@ -337,7 +342,7 @@
 | PR4 review/fix | `b-next/pr4-review` | `dfda203` | PASS_WITH_ACTIONS（P1=3）；**fix 未创建** | **否 → 待修复合入** |
 | PR5 | `b-next/pr5-e2e-eval` / `b-next/pr5-docs` | `e2b6e85` | 证据收集器 + 模板 + 统一 E2E + 合并栈 | 是（当前快照） |
 | PR5 eval protocol（未合入） | `b-next/pr5-eval-protocol` | `09e1dd9` | 测评协议 DESIGN | **否** |
-| 最终评测 | `PENDING_FINAL_TREE`（integration/freeze） | **`PENDING_FINAL_TREE`** | `docs/M1_B_EVALUATION_REPORT.md` §13 + 冻结 SHA | **过渡快照已产出；最终未产生** |
+| 最终评测 | final tree (`861d147`/`c420d19`) | **`FINAL_TREE_MEASURED`** | `docs/M1_B_EVALUATION_REPORT.md` §13 + final evidence hashes | **已产生（Owner）；独立评审 PENDING** |
 
 ### 8.2 合并顺序与冻结
 
@@ -364,7 +369,7 @@
 | 最终评测前必须完成 | PR1/PR3/PR4 review-fix 合入；PR4 P1-1..P1-3；PR5 评测协议+最终报告；最终集成 SHA 冻结；C-01..C-16 独立复跑 |
 | 文档清理 | ADR §5 可选字段措辞 vs P1-04；ARCHITECTURE §14 schema v1→v2；PR1/PR3/PR4 评审文档合入；PR1 附录状态与修复 commit 对齐 |
 | 产品/测试缺口 | session replay + MAP-E12/E13；persistent review queue；FULL_SOLUTION 路径；hidden 参考回答从 E2E 输入移出；`scoring_spec_ref` opaque 化；共享 `/tmp` 测试隔离 |
-| 最终裁定 | 见 `docs/M1_B_EVALUATION_REPORT.md`（**`TBD`**）；本报告不预填 PASS，不把 `MOCK/DETERMINISTIC` 结果写成真实效果 |
+| 最终裁定 | 见 `docs/M1_B_EVALUATION_REPORT.md`（Owner `FINAL_TREE_MEASURED`；独立 Reviewer `PENDING`）；本报告不预填 PASS，不把 `MOCK/DETERMINISTIC` 结果写成真实效果 |
 
 ---
 
@@ -372,4 +377,5 @@
 
 | 日期（UTC） | 版本 | 变更 |
 |---|---|---|
-| 2026-11-20 | v0 | 初稿：汇总 PR0–PR5 实现/证据/评审状态；当前快照 `e2b6e85`；最终数字标记 TBD（待最终树 + 独立评测报告）；未修改实现/测试/fixture |
+| 2026-11-20 | v0 | 初稿：汇总 PR0–PR5 实现/证据/评审状态；当前快照 `e2b6e85`；最终数字标记 TBD |
+| 2026-11-20 | v1 | PR4 final 合入后最终树实测：938 passed / strict 938 passed 0 skipped；final SHA `861d147` + B5 `c420d19`；证据包 final hashes；独立评审 PENDING；未改实现/测试/fixture |

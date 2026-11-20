@@ -1,0 +1,55 @@
+{
+  "artifacts": [],
+  "branch": "b-next/pr5-e2e-eval",
+  "case_id": "B1-05-os-sandbox-gate",
+  "collector": {
+    "name": "m1b.collect-evidence",
+    "sha256": "30c53af65afcb261156cbe8607f0710e67f6dce1436170dcd5f29f3c5b6fc939",
+    "version": "m1b.collect-evidence.v0"
+  },
+  "command": "env M1B_REQUIRE_OS_SANDBOX=1 '/root/Autonomous Teacher/.venv/bin/python' -m pytest tests/m1_teacher -q -rs",
+  "command_argv": [
+    "env",
+    "M1B_REQUIRE_OS_SANDBOX=1",
+    "/root/Autonomous Teacher/.venv/bin/python",
+    "-m",
+    "pytest",
+    "tests/m1_teacher",
+    "-q",
+    "-rs"
+  ],
+  "cwd": "/root/m1b/pr5",
+  "environment": {
+    "PYTHONHASHSEED": null,
+    "TZ": null,
+    "cwd": "/root/m1b/pr5",
+    "machine": "x86_64",
+    "platform": "Linux-6.17.13-2-pve-x86_64-with-glibc2.39",
+    "python_executable": "/root/Autonomous Teacher/.venv/bin/python",
+    "python_implementation": "CPython",
+    "python_version": "3.11.15",
+    "repo_root": "/root/m1b/pr5",
+    "system": "Linux"
+  },
+  "evidence_class": "DETERMINISTIC",
+  "exit_code": 0,
+  "expected_exit": 0,
+  "git_sha": "c420d19390d87e0d3faa3f716c7b2a3904c36891",
+  "limitation": "final integrated tree (PR4 final 1de6ae6 merged; merge 861d147; B5 fix c420d19) :: strict OS-sandbox CI mode (PR1 gate merged); clean TMPDIR",
+  "run_id": "B1-05-os-sandbox-gate-20261120T230529201083Z-97c58d10",
+  "status": "EXECUTED_PASS",
+  "stderr": {
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "tail": "",
+    "truncated": false
+  },
+  "stdout": {
+    "bytes": 1152,
+    "sha256": "e7b82cef4f35cb8ea4167f6aa1cef9b6696f43183fb2ee8120e9fc8cd7b9a742",
+    "tail": "........................................................................ [  7%]\n........................................................................ [ 15%]\n........................................................................ [ 23%]\n........................................................................ [ 30%]\n........................................................................ [ 38%]\n........................................................................ [ 46%]\n........................................................................ [ 53%]\n........................................................................ [ 61%]\n........................................................................ [ 69%]\n........................................................................ [ 76%]\n........................................................................ [ 84%]\n........................................................................ [ 92%]\n........................................................................ [ 99%]\n..                                                                       [100%]\n938 passed in 103.10s (0:01:43)\n",
+    "truncated": false
+  },
+  "timed_out": false,
+  "utc": "2026-11-20T23:05:29Z"
+}

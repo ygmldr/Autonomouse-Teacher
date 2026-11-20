@@ -1,0 +1,53 @@
+{
+  "artifacts": [],
+  "branch": "b-next/pr5-e2e-eval",
+  "case_id": "B4-01-02-03-e2e",
+  "collector": {
+    "name": "m1b.collect-evidence",
+    "sha256": "30c53af65afcb261156cbe8607f0710e67f6dce1436170dcd5f29f3c5b6fc939",
+    "version": "m1b.collect-evidence.v0"
+  },
+  "command": "'/root/Autonomous Teacher/.venv/bin/python' -m pytest tests/m1_teacher/test_b4_e2e.py tests/m1_teacher/test_b4_durability_replay.py -q",
+  "command_argv": [
+    "/root/Autonomous Teacher/.venv/bin/python",
+    "-m",
+    "pytest",
+    "tests/m1_teacher/test_b4_e2e.py",
+    "tests/m1_teacher/test_b4_durability_replay.py",
+    "-q"
+  ],
+  "cwd": "/root/m1b/pr5",
+  "environment": {
+    "PYTHONHASHSEED": null,
+    "TZ": null,
+    "cwd": "/root/m1b/pr5",
+    "machine": "x86_64",
+    "platform": "Linux-6.17.13-2-pve-x86_64-with-glibc2.39",
+    "python_executable": "/root/Autonomous Teacher/.venv/bin/python",
+    "python_implementation": "CPython",
+    "python_version": "3.11.15",
+    "repo_root": "/root/m1b/pr5",
+    "system": "Linux"
+  },
+  "evidence_class": "DETERMINISTIC",
+  "exit_code": 0,
+  "expected_exit": 0,
+  "git_sha": "c420d19390d87e0d3faa3f716c7b2a3904c36891",
+  "limitation": "final integrated tree (PR4 final 1de6ae6 merged; merge 861d147; B5 fix c420d19) :: B4-01/02/03 + B4 durability/replay final tree",
+  "run_id": "B4-01-02-03-e2e-20261120T230712672946Z-42963125",
+  "status": "EXECUTED_PASS",
+  "stderr": {
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "tail": "",
+    "truncated": false
+  },
+  "stdout": {
+    "bytes": 99,
+    "sha256": "3e1ab3e09d7d49ef40206cfcf119e3487f2aa6bf6fb95c54df3a4371ec688441",
+    "tail": "..................                                                       [100%]\n18 passed in 5.53s\n",
+    "truncated": false
+  },
+  "timed_out": false,
+  "utc": "2026-11-20T23:07:12Z"
+}

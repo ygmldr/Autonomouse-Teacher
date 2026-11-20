@@ -5,7 +5,7 @@
 | 请求方 | B0 架构文档作者（B-NEXT 交付汇总；本请求不代替独立 Reviewer） |
 | 请求日期 | 2026-11-20 UTC |
 | 请求对象 | 维护者（最终签收人）+ LeadB（协调/合并） |
-| 候选集成快照 | `b-next/pr5-docs` / `e2b6e85d8939b2411b2b6c6cc26538014c6f57e3`（**当前候选，不是最终冻结 SHA**） |
+| 最终集成快照（候选） | PR4 final `1de6ae6d3714ab815c47022e4c2cceee107db979` 合入 PR5 后的 merge commit **`861d147d…`**；B5 实现提交 `c420d19…`；PR5 最终 commit SHA 由 Lead 记录/回填 |
 | 默认最终结论（仅在全部 Gate 通过时） | **`PASS_FOR_M1B_OFFLINE_INTEGRATION_SCOPE`** |
 | 结论边界 | 仅覆盖：离线、合成 fixtures、确定性/mock E2E、B-PR0…B-PR5 独立复跑证据；**不包含**真人学习收益/教学效果、联网研究/真实 JD/简历、真实 Provider/LLM、真实 OS 判题安全承诺、Live/LiveGate、生产可用性、M0 G4-H/G5/M0 决策 |
 | 请求的裁定 | ① 签收 B0 合同收敛 ADR；② 确认最终集成 SHA 冻结与 GitHub PR/合并顺序；③ 决定 schema v2 与迁移策略；④ 在独立评测报告完成后审阅是否接受 `PASS_FOR_M1B_OFFLINE_INTEGRATION_SCOPE`；⑤ 人类 Gate（真实用户 CODE/Provider/LiveGate/非 root 部署）保持独立批准 |
@@ -37,9 +37,9 @@
 
 ### 2.1 当前候选（以最终 push 为准）
 
-- 候选集成分支：`b-next/pr5-docs`（与 `b-next/pr5-e2e-eval` 同 tip）@ **`e2b6e85`**。
-- 该快照包含：PR0 文档 + PR1 实现（未含 PR1 最新修复）+ PR2 实现+修复 + PR3 实现（未含 PR3 修复）+ PR4 实现/E2E + PR5 证据收集器/模板。
-- **最终冻结 SHA = `TBD`**：应在合入 §2.2 的 review-fix 与评审文档后，由 LeadB/维护者确定新 integration 分支 tip；所有最终证据必须绑定该 40-hex SHA（不得用分支名代指）。
+- 最终集成分支：`b-next/pr5-e2e-eval`，PR4 final `1de6ae6d…` 合入后的 merge commit **`861d147d…`**（B5 实现提交 `c420d19…`）；PR5 最终 commit SHA = 本 branch HEAD（Lead 记录/回填）。
+- 该快照包含：PR0 文档 + PR1/PR2/PR3 review-fix tree + PR4 final（P1 修复）+ PR5 B5 统一 E2E/证据/评测报告。
+- **最终冻结 SHA = `861d147d…`（集成树）+ PR5 最终 commit SHA**：所有最终证据必须绑定 40-hex SHA（不得用分支名代指）。
 
 ### 2.2 各 PR 分支、评审文档与结论
 
@@ -50,7 +50,7 @@
 | B-PR2 | `b-next/pr2-session-txn` @ `7f9ce06`（含 `10fdaa9` 修复） | `docs/M1_B_PR2_REVIEW.md` @ `434f731`（在树） | `PASS_WITH_ACTIONS`（P0=0，P1=2 文档治理、P2=5）；B2-01/02/03 + B-Q2 **VERIFIED** | 修复 `10fdaa9` **已在当前树**（P1/P2 关闭） |
 | B-PR3 | 实现 `18b08fe`/`2f32f13`/`3103a06`；评审 `b-next/pr3-review` @ `db636ea`；修复 `b-next/pr3-scoped-idempotency` @ `a5373f1`（含 `3ad85c2`） | `docs/M1_B_PR3_REVIEW.md` @ `db636ea`（分支 `b-next/pr3-review`） | `PASS_WITH_ACTIONS`（P0=0，P1=2、P2=5）；B3-01/B3-02 核心成立 | **P1/P2 修复待合入 + 复评**（P1-1 legacy digest 投影、P1-2 `history.apply_assessment` 全局查找） |
 | B-PR4 | 实现 `b-next/pr4-interview-freshness` @ `e265b96`；评审 `b-next/pr4-domain-ports`/`b-next/pr4-review` @ `dfda203` | `docs/M1_B_PR4_REVIEW.md` @ `dfda203` | `PASS_WITH_ACTIONS`（P0=0，P1=3、P2=7）；B4-01/02/03 为 **VERIFIED（E2E-MOCK，带限制）**；B4-04 部分、B4-05 `NOT_RUN` | **修复尚未创建/合入**：P1-1 持久化 interview 阶段计划；P1-2 hidden reader/`reference_answers.json`；P1-3 session replay/版本拒绝（或降级声明） |
-| B-PR5 | `b-next/pr5-e2e-eval` @ `b36bf11`/`1cad799`（合入 `b-next/pr5-docs`/`pr5-eval-protocol` 后） | **`docs/M1_B_EVALUATION_REPORT.md`（过渡快照已产出；最终树数字/SHA/hash = `PENDING_FINAL_TREE`）**；模板 `docs/M1_B_EVALUATION_REPORT_TEMPLATE.md`；协议 `docs/M1_B_EVALUATION_PROTOCOL.md`（DESIGN） | 最终独立评审 **`NOT_RUN`**；`B5-01` 待最终树复跑 | 测评报告 §13 明确最终以冻结 SHA 复跑为准；不在正文写死最终数字 |
+| B-PR5 | `b-next/pr5-e2e-eval` @ `861d147`/`c420d19`（最终树） | **`docs/M1_B_EVALUATION_REPORT.md`（Owner FINAL_TREE_MEASURED；938 passed/strict 0 skipped；final evidence hashes）**；协议 `docs/M1_B_EVALUATION_PROTOCOL.md` | 最终独立评审 **`PENDING`（Lead 指派）**；`B5-01` 待独立 Reviewer 复跑 | 报告 §13 已填 owner 最终数字；独立裁定由 Reviewer 给出 |
 
 **最终独立评审文档路径**：本轮请求的最终评测报告为 `docs/M1_B_EVALUATION_REPORT.md`（模板 `docs/M1_B_EVALUATION_REPORT_TEMPLATE.md`，由独立 Reviewer 在冻结 SHA 上填充）；若 LeadB/维护者另指定独立评审文档（如 `docs/M1_B_INDEPENDENT_REVIEW.md`），以该指定路径为准，但最终裁定仍必须引用本评测报告与证据包。
 
@@ -74,11 +74,11 @@
 - `m1_teacher/idempotency.py`（PR3 scoped 幂等）。
 - `m1_teacher/session/vertical.py`、`m1_teacher/domains/interview.py`、`m1_teacher/knowledge/freshness.py`、`m1_teacher/assessment/interview_judge.py`、`m1_teacher/demo_b4.py`（PR4 双域闭环）。
 - `scripts/m1b/collect_evidence.py`、`docs/M1_B_EVIDENCE_PACKET.md`、`docs/M1_B_EVALUATION_REPORT_TEMPLATE.md`（PR5 证据/评测入口）。
-- `tests/m1_teacher/**`（pre-B5 快照 873 = 536 + PR1 138 + PR2 63 + PR3 37 + PR4 85 + PR5 14；PR5 B5 提交后过渡树 884；**最终树计数 = `PENDING_FINAL_TREE`**，以评测报告 §13 复跑为准）。
+- `tests/m1_teacher/**`（最终树 **938** = PR4 final 913 + PR5 25（B5 11 + collector 14）；strict `M1B_REQUIRE_OS_SANDBOX=1 -rs` 938 passed/0 skipped；以评测报告 §13 为准）。
 
 ### 3.3 证据与评审
 
-- 本报告 `docs/M1_B_IMPLEMENTATION_REPORT.md`（Owner 汇总；最终数字以 `docs/M1_B_EVALUATION_REPORT.md` §13 `PENDING_FINAL_TREE` 为准）。
+- 本报告 `docs/M1_B_IMPLEMENTATION_REPORT.md`（Owner 汇总；最终数字以 `docs/M1_B_EVALUATION_REPORT.md` §13 最终树实测为准）。
 - PR 评审文档（按 §2.2 路径；部分在分支）、PR0 响应、威胁模型、interview/freshness 映射、B-PR2 事务设计、B-PR3 幂等设计、B-PR4 vertical 实现记录。
 - 证据包：`scripts/m1b/collect_evidence.py` 生成的 `audit-index.jsonl` + `raw/`（建议最终位置 `/root/m1b_evidence/B5-01/`，以 Reviewer 报告为准）。
 - 冻结参考：`docs/M1_B_EVALUATION_REPORT_TEMPLATE.md` §4 历史冻结表；M1-A `536`、M1-Offline `365` 分别独立。
@@ -102,7 +102,7 @@ PY="/root/Autonomous Teacher/.venv/bin/python"
 ```
 
 - C-00 通过条件：SHA 正确、无 `.git`/未提交文件、`TMPDIR` 私有、无网络/Key、环境变量记录齐全。
-- **注意（当前快照实测）**：共享 `/tmp` 残留 `m1b_judge_worker_*` 会使 judge 临时目录清理断言假失败（本轮默认环境 `4 failed / 869 passed`；干净 TMPDIR `873 passed`）。最终 Reviewer 必须使用私有 TMPDIR 或先清理残留，且不得把该假失败写成产品回归。
+- **注意（final tree 实测）**：共享 `/tmp` 残留 `m1b_judge_worker_*` 会使 judge 临时目录清理断言假失败（旧快照默认环境曾 `4 failed / 869 passed`）；final tree 用私有 TMPDIR 串行实测 **938 passed / 0 skipped**。最终 Reviewer 必须使用私有 TMPDIR 或先清理残留，且不得把该假失败写成产品回归。
 
 ### 4.2 回归与安全矩阵
 
@@ -110,8 +110,8 @@ PY="/root/Autonomous Teacher/.venv/bin/python"
 |---|---|---|---|---|
 | C-01 | M1-A 历史基线（独立复跑） | `git archive 4706250 \| tar -x -C /tmp/m1a-base && cd /tmp/m1a-base && "$PY" -m pytest tests/m1_teacher -q` | `536 passed`（历史冻结；Reviewer 曾独立确认 16.41s） | `NOT_RUN`（本轮由 Reviewer 执行） |
 | C-02 | M1-Offline 历史基线（独立复跑） | `cd /root/at-m1-offline && env PYTHONDONTWRITEBYTECODE=1 "$PY" -m pytest tests/m1_offline -q -p no:cacheprovider` | `365 passed`（历史冻结；**不加入 C-03 计数**） | `NOT_RUN` |
-| C-03 | 新 B 集成套件（全部当前树测试） | `TMPDIR=$(mktemp -d) "$PY" -m pytest tests/m1_teacher -q -p no:cacheprovider` | 当前快照 `873 passed`（干净 TMPDIR）；最终树计数 `TBD`；历史 536/365 不相加 | `NOT_RUN`（Owner 过渡：873 passed @ `e2b6e85`） |
-| C-04 | 分 PR 计数/归组 | `pytest tests/m1_teacher --collect-only -q` + 按文件归组（PR1 138 / PR2 63 / PR3 37 / PR4 85 / PR5 14） | 当前 873；最终树 `TBD`；每个 skip 必须写理由 | `NOT_RUN` |
+| C-03 | 新 B 集成套件（最终树全部测试） | `TMPDIR=$(mktemp -d) "$PY" -m pytest tests/m1_teacher -q -p no:cacheprovider` | **final tree 938 passed**（clean TMPDIR）；strict `M1B_REQUIRE_OS_SANDBOX=1 -q -rs` 938 passed/0 skipped；历史 536/365 不相加 | `OWNER_REPORTED`（final tree） |
+| C-04 | 分 PR 计数/归组 | `pytest tests/m1_teacher --collect-only -q` + 按文件归组 | **final tree 938 = PR4 final 913 + PR5 25（B5 11 + collector 14）**；每 skip 须写理由 | `OWNER_REPORTED` |
 | C-05 | Judge 安全负例/正确性 | `pytest tests/m1_teacher/test_judge_supervisor.py test_judge_worker.py test_judge_sandbox.py test_judge_negatives.py test_judge_correctness.py test_judge_fixture_integrity.py test_hidden_leakage_scan.py -q` | B1-01..06 负例矩阵；默认 blocked；伪造 PASS 全拒；112/112 hidden cases；无 sentinel 泄漏 | `NOT_RUN` |
 | C-06 | 安全 CI gate（要求 OS 证据不可 skip） | 合入 PR1 修复后：`PYTHON="$PY" ./scripts/m1b/run_safety_ci.sh`（默认 `M1B_REQUIRE_OS_SANDBOX=1 M1B_REQUIRE_NONROOT_SANDBOX=1`，断言 exit 0 + 0 skipped）；仅本地 root 合成可用 `--allow-root-synthetic`（**不是部署安全证据**） | 脚本在 PR1 修复分支 `550ad37`；当前快照 **`NOT_CONFIGURED`**（无脚本/env）；`.github` job 未配置，需维护者接线 | `NOT_RUN` / `NOT_CONFIGURED` |
 | C-07 | 事务/崩溃/恢复 | `M1B_MATRIX_OUT=/tmp/m1b_matrix_final.jsonl pytest tests/m1_teacher/test_crash_recovery.py -q`；`pytest tests/m1_teacher/test_turn_transaction.py test_concurrency.py -q` | B2-01/02/03 + B-Q2；真实 SIGKILL；matrix 分组 9/21/2、hash 77c620…/ec99d5…/bbd500…；重复恢复 0 events | `NOT_RUN` |
@@ -175,7 +175,7 @@ PY="/root/Autonomous Teacher/.venv/bin/python"
 - PR1/PR3/PR4 review-fix 未合入当前候选快照；PR4 P1-1/P1-2/P1-3 尚未修复。
 - 共享 `/tmp` 的 judge 临时目录隔离缺陷（干净 TMPDIR 可规避；最终 Reviewer 需固定该条件）。
 - `ASSESSED.item.scoring_spec_ref` 的 `scoring/` 路径、`spec-sha256` 元数据、`demo_b4.py` hidden 读取（PR4 P1-2/P2-1、PR1 P2）。
-- PR1 修复分支的 `run_safety_ci.sh`/非 root 启动校验尚未合入；`.github` 安全 job 未配置。
+- PR1 修复 `run_safety_ci.sh` 已合入 final tree；`.github` 安全 job 的实际接线仍由维护者/CI owner 负责（本请求不声称已配置）。
 - 文档残留：ADR §5 可选字段措辞与 P1-04 零 diff 原则冲突；`docs/M1_ARCHITECTURE.md` §14 仍写 schema v1（实际 v2）；PR1/PR3/PR4 评审文档未合入。
 
 ---
@@ -191,7 +191,7 @@ PY="/root/Autonomous Teacher/.venv/bin/python"
 | H-05 | 签收 B0 合同收敛 ADR（A canonical + B vertical + 四端口） | 待签收 | 维护者 + LeadB |
 | H-06 | 创建 GitHub PR 并确认合并顺序（PR0→PR5 + review-fix） | 当前仅本地分支 | 维护者/LeadB |
 | H-07 | schema v2 / 迁移策略（forward-only；禁止真实 learner DB 自动迁移） | 实现为 add-only v2 + v1→v2 迁移；真实 DB 永久禁止自动迁移 | 维护者 + LeadB |
-| H-08 | 最终 `PASS_FOR_M1B_OFFLINE_INTEGRATION_SCOPE` 签收 | `TBD`（待独立评测报告） | 维护者 |
+| H-08 | 最终 `PASS_FOR_M1B_OFFLINE_INTEGRATION_SCOPE` 签收 | `PENDING`（Owner final tree 证据已交付；待 Lead 指派独立 Reviewer 出具 B5-01 结论） | 维护者 |
 
 ---
 
@@ -217,7 +217,7 @@ PY="/root/Autonomous Teacher/.venv/bin/python"
 - [ ] 维护者确认 §6.1 不可声称项全部保留；历史 536/365 未相加；真实收益/Provider/Live 未混写。
 - [ ] 人类 Gate（§7）保持原状态或由对应批准人单独签署。
 
-> 本请求**不代表** M1-B 已验收或已可合并；在最终评测报告产出前，当前所有状态均为 `TBD / NOT_RUN`。
+> 本请求**不代表** M1-B 已验收或已可合并；Owner 最终树评测报告已产出（`FINAL_TREE_MEASURED`），但 B5-01 最终独立评审与维护者签收仍 `PENDING`，最终裁定由独立 Reviewer 给出。
 
 ---
 
