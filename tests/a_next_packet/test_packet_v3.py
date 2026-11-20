@@ -6,7 +6,7 @@ import json
 import os
 import subprocess
 
-from conftest import (
+from a_next_packet_helpers import (
     IMPL,
     canonical_sha,
     copy_packet,
