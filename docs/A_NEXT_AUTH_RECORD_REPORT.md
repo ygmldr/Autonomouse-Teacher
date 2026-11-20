@@ -79,7 +79,7 @@ schema/字段集合/`run_epoch`，不校验 body 的 `authorization_id`。Review
 | L802–L847 `_read_use_record` | 签名加 `*, expected_authorization_id: str`；返回值改为 `tuple[str, str]`（`authorization_id, run_epoch`）；新增 id 类型/格式、路径绑定、expected 绑定、`consumed_utc` 校验 |
 | L850–L870 `_read_use_record_settled` | 透传 `expected_authorization_id`，返回值同 tuple |
 | L1038–L1041、L1082–L1089 | 调用处传 `expected_authorization_id=authorization.authorization_id`，从 tuple 取 epoch 分类 |
-| L809 `os.open(... O_RDONLY \| O_NOFOLLOW \| O_CLOEXEC)` | 追加 `O_NONBLOCK`（FIFO 不阻塞） |
+| L813 `os.open(... O_RDONLY \| O_NOFOLLOW \| O_CLOEXEC)` | 追加 `O_NONBLOCK`（FIFO 不阻塞）。**Reviewer nit 已更正**：评审指出该 `os.open` 在基线 L813（设计稿误写 L809），实现与报告采用 L813 |
 
 不新增公开 API、不改 `AuthorizationUse`、不改错误码集合（`USE_RECORD_INVALID` 与
 `DURABILITY_UNKNOWN` 均为既有码）。
@@ -109,3 +109,92 @@ schema/字段集合/`run_epoch`，不校验 body 的 `authorization_id`。Review
    G4-R 独立 Review 观察-2 披露。
 5. 并发/容量仍是单进程内无锁近似（`MAX_AUTHORIZATION_USES` 可能短暂超 1），与 G4-R R1 一致，
    不属 P2-01 范围。
+
+## 6. 实现结果（Commit 2：实现 + 取消 xfail + 本节）
+
+设计门：独立 Reviewer 逐行核对本文 §1–§5，裁定 **A1 设计 = PASS（条件式 C1）**；C1“设计文档先提交”由
+commit `0df36de`（本文 + 测试骨架）满足。Reviewer 亲自在基线跑测试骨架：**24 passed / 15 xfailed(strict) / 93.70s**，
+与 Owner 预期一致。Reviewer nit（`os.open` 基线行号 L813，非 L809）已在 §3.4 更正。
+
+### 6.1 修改点与最终行号（`src/autoteacher_m0/security/authorization.py`，HEAD）
+
+| 行号（实现后） | 修改 |
+|---|---|
+| L802–L803 | `_read_use_record` 签名新增 `*, expected_authorization_id: str`，返回 `tuple[str, str]`（id, epoch） |
+| L825–L827 | 防御性校验 expected id：非 `str`/非 `_IDENTIFIER` → `AUTHORIZATION_USE_RECORD_INVALID`（先于任何 I/O） |
+| L829–L830 | `os.open(... O_RDONLY \| O_NOFOLLOW \| O_NONBLOCK \| O_CLOEXEC)`：FIFO/设备不再阻塞；普通文件语义不变 |
+| L858–L868 | 解析后校验：`authorization_id` 为 `str` 且 `_IDENTIFIER.fullmatch`；`run_epoch` 同规则；`consumed_utc` 匹配 `_UTC_TEXT`；字段集合仍精确 4 键 |
+| L869–L874 | **路径绑定**：`path.name == sha256(authorization_id) + ".json"`；**expected 绑定**：`authorization_id == expected_authorization_id`；任一不符 → 稳定 `AUTHORIZATION_USE_RECORD_INVALID`（绝不 REPLAYED/EPOCH_MISMATCH） |
+| L878–L899 | `_read_use_record_settled` 透传 expected id；重试语义不变（5×10ms 仅用于旧半写 publisher，持久非法仍 INVALID） |
+| L1068–L1071 | 快路径（final 已存在）用**已验证签名文档**的 `authorization.authorization_id` 作为 expected id，从 tuple 取 epoch 分类 |
+| L1116–L1119 | `link` EEXIST 分支同样交叉校验；失败不再可能被误记为 replay |
+
+未改：`os.replace` 仍 0 处；无 `O_CREAT|O_EXCL` 直写 final 回退；`AuthorizationUse`/错误码集合/公开签名不变。
+
+### 6.2 三态语义与测试证据映射
+
+| 状态 | 实现证据（用例） | 断言 |
+|---|---|---|
+| **拒绝**（`REJECTED_NO_CONSUMPTION`） | `test_a1_01_body_id_a_in_record_file_of_b_*`、`test_a1_01_foreign_body_id_*`、`test_a1_01_reader_rejects_expected_id_mismatch`、`body_id_format_invalid[10]`、`corrupt_record[9]`、symlink/hardlink/FIFO、`dir_fsync_failure`（拒绝码 `DURABILITY_UNKNOWN` 亦为拒绝） | 拒绝码精确等于 `AUTHORIZATION_USE_RECORD_INVALID`（或 `DURABILITY_UNKNOWN`），断言 `REPLAYED`/`EPOCH_MISMATCH` **不出现**；不产生新 final/temp |
+| **已消费但持久性未知**（`CONSUMED_DURABILITY_UNKNOWN`） | `test_a1_02_dir_fsync_failure_is_consumed_but_durability_unknown`、`test_a1_01_hard_process_death_*[_fsync_directory]` | final 完整存在（`schema/id/epoch/consumed_utc` 精确），调用方拿到拒绝而非成功；重启 → `REPLAYED`，恰 1 条记录，无第二次成功 |
+| **无消费**（`NO_CONSUMPTION`） | `crash_before_write`、`crash_before_link`、hard-death 前两窗口、`link_failure_fails_closed_without_direct_write_fallback` | 无 final（可能残留完整 temp）；重启恰一次成功，之后 `REPLAYED`；无直写回退 |
+
+“恰一次成功 / 无第二次 Reserve/Fake”证据：(a) 全部并发/crash 用例断言恰 1 accepted、其余稳定 `REPLAYED`、恰 1 条 final；
+(b) `test_a1_02_consumption_module_has_no_broker_or_fake_path` 用 AST 断言本模块无 accounting/bridge import、
+无 `reserve/claim/settle/release/dispatch/send/fake/connect` 调用——该模块结构上不存在第二次 Reserve/Fake 路径。
+
+### 6.3 测试命令与计数（实现树；`PYTHONPATH=src`，绝对解释器）
+
+| 命令 | 结果 | 用时 | exit | UTC（采集窗口） | 证据 |
+|---|---|---|---|---|---|
+| `pytest tests/integration/a_next_auth -q -p no:cacheprovider` | **39 passed / 0 failed / 0 skipped**（含实现后取消的 15 个原 xfail） | 69.71s | 0 | ~19:40–19:41 | 控制台 + 提交后 HEAD 复跑见 §6.4 |
+| `pytest tests/integration/g4r_auth -q -p no:cacheprovider`（G4-R R1 旧套件回归） | **26 passed** | 261.23s | 0 | ~19:41:46–19:46:07 | `artifacts/a_next/a1/g4r_auth-regression.log` |
+| `pytest tests/integration/g4_a -q -p no:cacheprovider`（原 G4-A 回归） | **223 passed** | 139.04s | 0 | ~19:41:46–19:44:05 | `artifacts/a_next/a1/g4_a-regression.log` |
+| `pytest tests/security -q -p no:cacheprovider` | **7 passed** | 10.29s | 0 | ~19:46:15–19:46:25 | `artifacts/a_next/a1/security-regression.log` |
+| `pytest tests/unit -q -p no:cacheprovider` | **396 passed** | 50.59s | 0 | ~19:46:21–19:47:12 | `artifacts/a_next/a1/unit-regression.log` |
+| `pytest --collect-only -q -p no:cacheprovider`（全仓） | **1459 tests collected / 0 collection error** | 3.08s | 0 | ~19:46:15–19:46:18 | `artifacts/a_next/a1/collect-only.log` |
+| `ruff check src/autoteacher_m0/security/authorization.py tests/integration/a_next_auth` | **All checks passed** | <1s | 0 | 19:47 | 控制台 |
+
+骨架基线对照（commit `0df36de` 树）：`a_next_auth` = **24 passed / 15 xfailed(strict) / 87.60s**（Owner），
+与 Reviewer 独立复跑 24/15/93.70s 一致；实现后同一测试文件取消 xfail 后 **39 passed**，无任何 case 被删除或弱化。
+
+### 6.4 提交后 HEAD 复跑
+
+实现 commit 提交后，在同一 HEAD（tree 与证据采集树同字节，`git diff` 为空）复跑
+`pytest tests/integration/a_next_auth -q -p no:cacheprovider` 以绑定 SHA；结果与 §6.3 一致（39 passed）。
+完整命令/UTC/exit/HEAD 记录在 `artifacts/a_next/a1/`（gitignored）并向 Lead 汇报。
+
+### 6.5 与历史证据的关系
+
+- `docs/REVIEW_G4R_INDEPENDENT.md` P2-01：本 PR 只关闭“body id 未交叉校验”这一数据完整性缺口；
+  不改旧 Review 字节、不改冻结 CSV、不改 R1 报告。
+- P2-02（consume 无生产 Controller 调用方）**仍开放**，本 PR 不触碰；`B03/E5-P04=UNVERIFIED`、
+  `LiveGate=BLOCKED`、`G4-H=NOT_AUTHORIZED`、`G5=BLOCKED`、`G6=NOT_RUN`、`M0=DECISION_PENDING` 不变。
+- 与 G4-R R1 修复叠加：R1 的原子 no-replace 发布（temp→fsync→link→fsync(dir)）不变；本 PR 仅加严读取侧校验。
+
+### 6.6 残余风险
+
+1. `expected_authorization_id` 是私有读取器参数，唯一生产调用方传**已验证签名文档**的 id；
+   若未来新增调用方必须自行验证来源（否则 path 绑定仍拦 body/path 错配，expected 绑定形同额外防线）。
+2. `nlink == 2` 容忍窗口保留（final + 未回收 temp 的崩溃残留），`nlink > 2` 拒绝；属 R1/观察-2 既有取舍。
+3. `consumed_utc` 校验采用写入侧唯一格式；若未来支持 v2 record schema，需要显式 schema 版本分流，
+   本 PR 不预留隐式兼容（避免放宽为“任意字符串”）。
+4. FIFO/特殊节点修复依赖 POSIX `O_NONBLOCK`+`S_ISREG`；已用 fork+timeout 证明不阻塞，但未在
+   非 Linux/其它文件系统上跑（环境为 Linux ext4，L1-HOST）。
+5. 并发/容量仍为单进程无锁近似（与 R1 相同），不属 P2-01 范围；跨进程共享目录语义未变。
+6. 本 PR 只做 L1-HOST；真实 DSH/Controller 端到端接线（A2/P2-02）与 L2 复验仍 NOT_RUN/UNVERIFIED。
+
+### 6.7 复现命令（worktree 根）
+
+```bash
+cd "/root/Autonomous Teacher/worktrees/a-next-auth-record"
+PYTHONPATH=src "/root/Autonomous Teacher/.venv/bin/python" -m pytest tests/integration/a_next_auth -q -p no:cacheprovider
+PYTHONPATH=src "/root/Autonomous Teacher/.venv/bin/python" -m pytest tests/integration/g4r_auth -q -p no:cacheprovider
+PYTHONPATH=src "/root/Autonomous Teacher/.venv/bin/python" -m pytest tests/integration/g4_a -q -p no:cacheprovider
+PYTHONPATH=src "/root/Autonomous Teacher/.venv/bin/python" -m pytest tests/security tests/unit -q -p no:cacheprovider
+PYTHONPATH=src "/root/Autonomous Teacher/.venv/bin/python" -m pytest --collect-only -q -p no:cacheprovider
+"/root/Autonomous Teacher/.venv/bin/ruff" check src/autoteacher_m0/security/authorization.py tests/integration/a_next_auth
+```
+
+证据根：`artifacts/a_next/a1/`（gitignored）：`environment.txt`、`g4r_auth-regression.log`、
+`g4_a-regression.log`、`security-regression.log`、`unit-regression.log`、`collect-only.log`。

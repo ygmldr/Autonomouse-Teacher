@@ -59,11 +59,6 @@ TEMP_PREFIX = authorization_module._USE_RECORD_TEMP_PREFIX
 DURABILITY_UNKNOWN = "AUTHORIZATION_USE_LOG_DURABILITY_UNKNOWN"
 
 _UNSET = object()
-# pytest marks for behaviour that the current baseline does not implement yet;
-# the implementation commit removes these markers (reviewable in the diff).
-PENDING_A1 = pytest.mark.xfail(
-    strict=True,
-    reason="A-NEXT A1/P2-01: body authorization_id cross-check not implemented yet")
 
 
 # ---------------------------------------------------------------------------
@@ -244,7 +239,6 @@ def test_a1_01_valid_replay_different_epoch(trusted) -> None:
 # ---------------------------------------------------------------------------
 # body authorization_id vs record path / expected authorization id
 # ---------------------------------------------------------------------------
-@PENDING_A1
 def test_a1_01_body_id_a_in_record_file_of_b_is_invalid_not_replay(trusted) -> None:
     """The Reviewer P2-01 probe: a schema-valid record for A stored under B."""
     id_a = "auth-a1-body-a"
@@ -259,7 +253,6 @@ def test_a1_01_body_id_a_in_record_file_of_b_is_invalid_not_replay(trusted) -> N
     assert _temp_names(trusted) == []
 
 
-@PENDING_A1
 def test_a1_01_foreign_body_id_under_matching_path_is_invalid(trusted) -> None:
     _write_use_record(trusted, AUTH_ID, body_authorization_id="auth-a1-other-id",
                       run_epoch=RUN_EPOCH)
@@ -268,7 +261,6 @@ def test_a1_01_foreign_body_id_under_matching_path_is_invalid(trusted) -> None:
     assert _temp_names(trusted) == []
 
 
-@PENDING_A1
 def test_a1_01_reader_rejects_expected_id_mismatch(trusted) -> None:
     """Unit level: path body matches, but the caller expected another id."""
     id_a = "auth-a1-reader-a"
@@ -282,7 +274,6 @@ def test_a1_01_reader_rejects_expected_id_mismatch(trusted) -> None:
         path, expected_authorization_id=id_a) == (id_a, RUN_EPOCH)
 
 
-@PENDING_A1
 @pytest.mark.parametrize("bad_id", [
     pytest.param(None, id="null"),
     pytest.param(True, id="bool"),
@@ -300,7 +291,6 @@ def test_a1_01_body_id_format_invalid_is_invalid(trusted, bad_id) -> None:
     _expect_rejected(trusted.consume, "AUTHORIZATION_USE_RECORD_INVALID")
 
 
-@PENDING_A1
 def test_a1_01_body_consumed_utc_invalid_is_invalid(trusted) -> None:
     """Writing side always emits one fixed UTC form; anything else is corrupt."""
     _write_use_record(trusted, AUTH_ID, consumed_utc="not-a-utc-timestamp")
@@ -381,7 +371,6 @@ def test_a1_01_single_crash_residue_hardlink_is_tolerated_as_replay(trusted) -> 
     _expect_rejected(trusted.consume, "AUTHORIZATION_REPLAYED")
 
 
-@PENDING_A1
 def test_a1_01_fifo_record_rejected_without_blocking(trusted) -> None:
     """A FIFO must be rejected as INVALID, never opened blocking forever."""
     record = _record_path_for(trusted, AUTH_ID)
