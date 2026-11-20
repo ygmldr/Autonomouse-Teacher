@@ -74,12 +74,15 @@ review/addendum/errata 合并 → 15c5a08`。
   允许同一授权再次消费（历史语义相同，非回归；LOW）。
 - **G4-R 答复：已被覆盖（代码 + 测试 + 独立 Reviewer 复验）**：
   1. 代码：`_fsync_directory(directory)` 在 link 成功后调用；失败 → `AUTHORIZATION_USE_LOG_DURABILITY_UNKNOWN`
-     **fail-closed**，use 视为已花、不返回成功、不发送（`authorization.py` consume 尾段，实测行号见 §8）。
-  2. 测试：`tests/integration/g4r_auth/test_r1_atomic_use_record.py` 含
-     `test_r1_05_crash_after_link_before_dir_fsync_never_double_authorizes` 与
-     `test_r1_05_dir_fsync_failure_is_fail_closed_not_success`（另有 hardlink/symlink/temp 上限等）。
+     **fail-closed**，use 视为已花、不返回成功、不发送。实测行号：`src/autoteacher_m0/security/authorization.py:918`
+     （`_fsync_directory`）、`:1074`（`_link_use_record_no_replace` 调用）、`:1088`（目录 fsync 调用）、
+     `:1095`（`DURABILITY_UNKNOWN` 拒绝）。
+  2. 测试：`tests/integration/g4r_auth/test_r1_atomic_use_record.py:326`
+     （`test_r1_05_crash_after_link_before_dir_fsync_never_double_authorizes`）与 `:345`
+     （`test_r1_05_dir_fsync_failure_is_fail_closed_not_success`）；另有 hardlink/symlink/temp 上限等。
   3. 独立复核：Reviewer `R-REV2` 的 dir fsync EIO 用例返回 `AUTHORIZATION_USE_LOG_DURABILITY_UNKNOWN`
-     fail-closed、final 保留、0 temp、后续 `REPLAYED`（`docs/REVIEW_G4R_INDEPENDENT.md` §2）。
+     fail-closed、final 保留、0 temp、后续 `REPLAYED`（`docs/REVIEW_G4R_INDEPENDENT.md:163` 行）。
+     对照：H0 `F-02` 定义见只读引用 `work/m0-g4h0:docs/g4h0/INDEPENDENT_REVIEW.md:325`。
 - **残余（不得写成“已彻底解决”）**：真实掉电/跨文件系统/其他 FS 的持久性未穷举（Reviewer 只做 EIO 注入）；
   `nlink==2` 被容忍（crash 后 final+temp 共存）；P2-01 body-id 交叉校验仍 OPEN。
   ⇒ **结论：H0 的 F-02 不构成保留 H0 use-record 实现的理由；G4-R 是该行为的 canonical 实现。**

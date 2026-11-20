@@ -77,8 +77,11 @@ immutable / no drift”**；后续 OCI 必须使用 rootfs 可写副本并串行
 
 ## 5. 受保护文件清单（实测 `git blob SHA-1 @HEAD` + `sha256` 内容摘要）
 
-说明：以下文件在本分支 **相对 `main 3e7afee` 未改动**（`git diff --name-only 3e7afee..HEAD -- <list>` 为空，
-见 §8 复核），且 A-PR0 不写入这些路径。`sha256` 为工作树文件内容实测值，供独立复核。
+说明：分两组核对：(A) **`main` 已有受保护文件**（`gates.py`/`dsh_adapter.py`/`cli.py`/`run_live.sh`、
+config patches、旧 G4-F Review/errata/46 行矩阵）——`git diff --name-only 3e7afee..HEAD -- <A 组>` 为空；
+(B) **`work/g4r` 历史新增的 Review 冻结件**（`docs/REVIEW_G4R_INDEPENDENT.md`、65 行矩阵、
+`docs/g4r_review_evidence/**`）——相对 `main` 属新增，但 A-PR0 未改动任何字节：
+`git diff --name-only fd1d3a6..HEAD -- <B 组>` 为空。`sha256` 为工作树文件内容实测值，供独立复核。
 
 | 文件 | git blob SHA-1 @HEAD | sha256（实测） |
 |---|---|---|
@@ -144,13 +147,15 @@ git rev-parse main work/g4r work/m0-g4h0
 git merge-base main work/g4r; git merge-base main work/m0-g4h0; git merge-base work/g4r work/m0-g4h0
 git rev-parse HEAD 'HEAD^{tree}' HEAD:src
 git diff --stat 3e7afee..d33e0aa; git diff --stat d33e0aa..fd1d3a6; git diff --stat work/m0-g4h0..work/g4r
-git diff --name-only 3e7afee..HEAD -- <§5 受保护文件清单>   # 预期：空
+git diff --name-only 3e7afee..HEAD -- <§5 A 组：main 已有受保护文件>   # 预期：空
+git diff --name-only fd1d3a6..HEAD -- <§5 B 组：G4-R Review 冻结件>    # 预期：空（A-PR0 零改动）
 git rev-list --merges fd1d3a6..HEAD                          # 预期：0
 git diff --name-only 3e7afee..HEAD | grep -E 'm1_|m1_teacher|m1_offline'  # 预期：无输出
 sha256sum <§5 文件>                                          # 与表中值比对
 ```
 
-> 说明：`git diff 3e7afee..HEAD -- <受保护清单>` 在 A-PR0 三个 docs 提交后仍应为空；如有输出即 **STOP**。
+> 说明：A 组相对 `main` 在分支历史中本就应保持不变（如有输出即历史漂移，需 STOP）；B 组是 `work/g4r`
+> 新增的冻结 Review 件，A-PR0 之后 `git diff fd1d3a6..HEAD` 必须为空；任何输出即 **STOP**。
 
 ## 9. 不主张 / STOP
 
