@@ -1,0 +1,1246 @@
+{
+  "schema_version": "m1a.v0",
+  "domain_id": "interview_coach",
+  "domain_version": "0.1.0",
+  "provenance": {
+    "source": "m1_offline fixtures/m1/interview (work/m1-offline-design=290c577)",
+    "license": "CC0-1.0",
+    "synthetic": true,
+    "converted_at": "2026-11-20T00:00:00Z",
+    "note": "teacher-visible only: no hidden scoring material, hidden answers or expected scores"
+  },
+  "nodes": [
+    {
+      "node_id": "interview.node.recommendation_ctr",
+      "title": "推荐/CTR",
+      "description": "面试能力节点：推荐/CTR。与 synthetic 题库/评分域绑定，只含 teacher-visible 数据。",
+      "difficulty": 3,
+      "assessment_mode": "RULE_RUBRIC",
+      "tags": [
+        "interview",
+        "recommendation_ctr",
+        "synthetic"
+      ],
+      "content_ref": "teaching:recommendation_ctr"
+    },
+    {
+      "node_id": "interview.node.ml_fundamentals",
+      "title": "机器学习基础",
+      "description": "面试能力节点：机器学习基础。与 synthetic 题库/评分域绑定，只含 teacher-visible 数据。",
+      "difficulty": 2,
+      "assessment_mode": "RULE_RUBRIC",
+      "tags": [
+        "interview",
+        "ml_fundamentals",
+        "synthetic"
+      ],
+      "content_ref": "teaching:ml_fundamentals"
+    },
+    {
+      "node_id": "interview.node.engineering_metrics",
+      "title": "工程与指标",
+      "description": "面试能力节点：工程与指标。与 synthetic 题库/评分域绑定，只含 teacher-visible 数据。",
+      "difficulty": 3,
+      "assessment_mode": "RULE_RUBRIC",
+      "tags": [
+        "interview",
+        "engineering_metrics",
+        "synthetic"
+      ],
+      "content_ref": "teaching:engineering_metrics"
+    },
+    {
+      "node_id": "interview.node.system_design",
+      "title": "系统设计",
+      "description": "面试能力节点：系统设计。与 synthetic 题库/评分域绑定，只含 teacher-visible 数据。",
+      "difficulty": 4,
+      "assessment_mode": "RULE_RUBRIC",
+      "tags": [
+        "interview",
+        "system_design",
+        "synthetic"
+      ],
+      "content_ref": "teaching:system_design"
+    }
+  ],
+  "edges": [
+    {
+      "source_node_id": "interview.node.ml_fundamentals",
+      "target_node_id": "interview.node.recommendation_ctr",
+      "kind": "SOFT",
+      "weight": 0.5
+    },
+    {
+      "source_node_id": "interview.node.ml_fundamentals",
+      "target_node_id": "interview.node.engineering_metrics",
+      "kind": "SOFT",
+      "weight": 0.5
+    },
+    {
+      "source_node_id": "interview.node.engineering_metrics",
+      "target_node_id": "interview.node.system_design",
+      "kind": "SOFT",
+      "weight": 0.6
+    },
+    {
+      "source_node_id": "interview.node.recommendation_ctr",
+      "target_node_id": "interview.node.system_design",
+      "kind": "SOFT",
+      "weight": 0.5
+    }
+  ],
+  "objectives": [
+    {
+      "objective_id": "obj.interview.recommendation_ctr.mastery",
+      "title": "推荐/CTR面试能力达成",
+      "description": "在 synthetic 推荐/CTR 面试题上展示概念、实验与线上证据能力。",
+      "target_node_ids": [
+        "interview.node.recommendation_ctr"
+      ],
+      "success_criteria": {
+        "min_mastery": 0.6,
+        "required_node_ids": [
+          "interview.node.recommendation_ctr"
+        ],
+        "max_error_rate": 0.3
+      },
+      "estimated_minutes": 90
+    },
+    {
+      "objective_id": "obj.interview.ml_fundamentals.mastery",
+      "title": "机器学习基础面试能力达成",
+      "description": "在 synthetic 机器学习基础 面试题上展示概念、实验与线上证据能力。",
+      "target_node_ids": [
+        "interview.node.ml_fundamentals"
+      ],
+      "success_criteria": {
+        "min_mastery": 0.6,
+        "required_node_ids": [
+          "interview.node.ml_fundamentals"
+        ],
+        "max_error_rate": 0.3
+      },
+      "estimated_minutes": 90
+    },
+    {
+      "objective_id": "obj.interview.engineering_metrics.mastery",
+      "title": "工程与指标面试能力达成",
+      "description": "在 synthetic 工程与指标 面试题上展示概念、实验与线上证据能力。",
+      "target_node_ids": [
+        "interview.node.engineering_metrics"
+      ],
+      "success_criteria": {
+        "min_mastery": 0.6,
+        "required_node_ids": [
+          "interview.node.engineering_metrics"
+        ],
+        "max_error_rate": 0.3
+      },
+      "estimated_minutes": 90
+    },
+    {
+      "objective_id": "obj.interview.system_design.mastery",
+      "title": "系统设计面试能力达成",
+      "description": "在 synthetic 系统设计 面试题上展示概念、实验与线上证据能力。",
+      "target_node_ids": [
+        "interview.node.system_design"
+      ],
+      "success_criteria": {
+        "min_mastery": 0.6,
+        "required_node_ids": [
+          "interview.node.system_design"
+        ],
+        "max_error_rate": 0.3
+      },
+      "estimated_minutes": 90
+    }
+  ],
+  "teaching": {
+    "interview.node.recommendation_ctr": {
+      "EXPLAIN": "本节点聚焦推荐/CTR：面试中需要先讲清概念与边界，再给出可验证的假设、量级与实验结果。",
+      "HINT_L1": "先确认推荐/CTR问题的边界与关键术语，再给出第一版思路（只给方向，不给完整答案）。",
+      "HINT_L2": "把推荐/CTR结论变成可证伪假设：说明它为什么成立、在什么条件下会失效。",
+      "HINT_L3": "用真实项目中的指标、实验设计与线上观测支撑推荐/CTR结论；没有数据时要明确说明，不要编造。",
+      "REVIEW": "回顾推荐/CTR闭环：概念定义 → 可证伪假设 → 复杂度/量级 → 实验设计 → 线上定位。"
+    },
+    "interview.node.ml_fundamentals": {
+      "EXPLAIN": "本节点聚焦机器学习基础：面试中需要先讲清概念与边界，再给出可验证的假设、量级与实验结果。",
+      "HINT_L1": "先确认机器学习基础问题的边界与关键术语，再给出第一版思路（只给方向，不给完整答案）。",
+      "HINT_L2": "把机器学习基础结论变成可证伪假设：说明它为什么成立、在什么条件下会失效。",
+      "HINT_L3": "用真实项目中的指标、实验设计与线上观测支撑机器学习基础结论；没有数据时要明确说明，不要编造。",
+      "REVIEW": "回顾机器学习基础闭环：概念定义 → 可证伪假设 → 复杂度/量级 → 实验设计 → 线上定位。"
+    },
+    "interview.node.engineering_metrics": {
+      "EXPLAIN": "本节点聚焦工程与指标：面试中需要先讲清概念与边界，再给出可验证的假设、量级与实验结果。",
+      "HINT_L1": "先确认工程与指标问题的边界与关键术语，再给出第一版思路（只给方向，不给完整答案）。",
+      "HINT_L2": "把工程与指标结论变成可证伪假设：说明它为什么成立、在什么条件下会失效。",
+      "HINT_L3": "用真实项目中的指标、实验设计与线上观测支撑工程与指标结论；没有数据时要明确说明，不要编造。",
+      "REVIEW": "回顾工程与指标闭环：概念定义 → 可证伪假设 → 复杂度/量级 → 实验设计 → 线上定位。"
+    },
+    "interview.node.system_design": {
+      "EXPLAIN": "本节点聚焦系统设计：面试中需要先讲清概念与边界，再给出可验证的假设、量级与实验结果。",
+      "HINT_L1": "先确认系统设计问题的边界与关键术语，再给出第一版思路（只给方向，不给完整答案）。",
+      "HINT_L2": "把系统设计结论变成可证伪假设：说明它为什么成立、在什么条件下会失效。",
+      "HINT_L3": "用真实项目中的指标、实验设计与线上观测支撑系统设计结论；没有数据时要明确说明，不要编造。",
+      "REVIEW": "回顾系统设计闭环：概念定义 → 可证伪假设 → 复杂度/量级 → 实验设计 → 线上定位。"
+    }
+  },
+  "questions": [
+    {
+      "question_id": "q-eng-001",
+      "item_id": "interview.item.q-eng-001",
+      "track": "engineering_metrics",
+      "topic": "线上延迟优化经历",
+      "node_ids": [
+        "interview.node.engineering_metrics"
+      ],
+      "item_type": "SHORT_ANSWER",
+      "difficulty": 3,
+      "prompt": "请描述你实际参与过的一次线上服务延迟优化：优化前基线、你的角色、采取的手段、优化后指标和验证方式。",
+      "options": [],
+      "function_name": null,
+      "max_score": 1.0,
+      "deterministic": false,
+      "assessment_mode": "RULE_RUBRIC",
+      "scoring_spec_ref": "scoring/q-eng-001.json",
+      "requires_project_facts": true,
+      "follow_up_ladder": [
+        {
+          "stage": "concept",
+          "label": "概念澄清",
+          "prompt": "先不用展开：用一句话定义「线上延迟优化经历」的核心概念，并说明它解决什么问题。"
+        },
+        {
+          "stage": "hypothesis",
+          "label": "可证伪假设",
+          "prompt": "假设要在真实推荐系统里应用「线上延迟优化经历」：你会先验证哪个关键假设？给出可证伪的预测。"
+        },
+        {
+          "stage": "complexity",
+          "label": "复杂度与量级",
+          "prompt": "复杂度分析：数据规模、训练/推理延迟、存储与成本分别卡在哪里？请给出量级估算。"
+        },
+        {
+          "stage": "experiment_design",
+          "label": "实验设计",
+          "prompt": "设计实验验证「线上延迟优化经历」的方案：离线指标、线上 A/B、样本量与护栏指标分别怎么定？"
+        },
+        {
+          "stage": "online_triage",
+          "label": "线上定位",
+          "prompt": "上线后若核心收益指标下降，你会按什么顺序定位到召回/排序/特征/实验层？列出前三个检查点。"
+        }
+      ],
+      "synthetic": true,
+      "license": "CC0-1.0"
+    },
+    {
+      "question_id": "q-eng-002",
+      "item_id": "interview.item.q-eng-002",
+      "track": "engineering_metrics",
+      "topic": "离线涨线上跌的排查",
+      "node_ids": [
+        "interview.node.engineering_metrics"
+      ],
+      "item_type": "SHORT_ANSWER",
+      "difficulty": 4,
+      "prompt": "离线 AUC 提升但线上 CTR 下降，你会如何系统排查？请按可能性排序并说明每一步的验证方法。",
+      "options": [],
+      "function_name": null,
+      "max_score": 1.0,
+      "deterministic": false,
+      "assessment_mode": "RULE_RUBRIC",
+      "scoring_spec_ref": "scoring/q-eng-002.json",
+      "requires_project_facts": false,
+      "follow_up_ladder": [
+        {
+          "stage": "concept",
+          "label": "概念澄清",
+          "prompt": "先不用展开：用一句话定义「离线涨线上跌的排查」的核心概念，并说明它解决什么问题。"
+        },
+        {
+          "stage": "hypothesis",
+          "label": "可证伪假设",
+          "prompt": "假设要在真实推荐系统里应用「离线涨线上跌的排查」：你会先验证哪个关键假设？给出可证伪的预测。"
+        },
+        {
+          "stage": "complexity",
+          "label": "复杂度与量级",
+          "prompt": "复杂度分析：数据规模、训练/推理延迟、存储与成本分别卡在哪里？请给出量级估算。"
+        },
+        {
+          "stage": "experiment_design",
+          "label": "实验设计",
+          "prompt": "设计实验验证「离线涨线上跌的排查」的方案：离线指标、线上 A/B、样本量与护栏指标分别怎么定？"
+        },
+        {
+          "stage": "online_triage",
+          "label": "线上定位",
+          "prompt": "上线后若核心收益指标下降，你会按什么顺序定位到召回/排序/特征/实验层？列出前三个检查点。"
+        }
+      ],
+      "synthetic": true,
+      "license": "CC0-1.0"
+    },
+    {
+      "question_id": "q-eng-003",
+      "item_id": "interview.item.q-eng-003",
+      "track": "engineering_metrics",
+      "topic": "A/B 实验样本量与 MDE",
+      "node_ids": [
+        "interview.node.engineering_metrics"
+      ],
+      "item_type": "SHORT_ANSWER",
+      "difficulty": 3,
+      "prompt": "做一次 A/B 实验时，你如何确定样本量和最小可检测效应（MDE）？如果实验结论与预期相反，你的实际项目里是怎么处理的？",
+      "options": [],
+      "function_name": null,
+      "max_score": 1.0,
+      "deterministic": false,
+      "assessment_mode": "RULE_RUBRIC",
+      "scoring_spec_ref": "scoring/q-eng-003.json",
+      "requires_project_facts": true,
+      "follow_up_ladder": [
+        {
+          "stage": "concept",
+          "label": "概念澄清",
+          "prompt": "先不用展开：用一句话定义「A/B 实验样本量与 MDE」的核心概念，并说明它解决什么问题。"
+        },
+        {
+          "stage": "hypothesis",
+          "label": "可证伪假设",
+          "prompt": "假设要在真实推荐系统里应用「A/B 实验样本量与 MDE」：你会先验证哪个关键假设？给出可证伪的预测。"
+        },
+        {
+          "stage": "complexity",
+          "label": "复杂度与量级",
+          "prompt": "复杂度分析：数据规模、训练/推理延迟、存储与成本分别卡在哪里？请给出量级估算。"
+        },
+        {
+          "stage": "experiment_design",
+          "label": "实验设计",
+          "prompt": "设计实验验证「A/B 实验样本量与 MDE」的方案：离线指标、线上 A/B、样本量与护栏指标分别怎么定？"
+        },
+        {
+          "stage": "online_triage",
+          "label": "线上定位",
+          "prompt": "上线后若核心收益指标下降，你会按什么顺序定位到召回/排序/特征/实验层？列出前三个检查点。"
+        }
+      ],
+      "synthetic": true,
+      "license": "CC0-1.0"
+    },
+    {
+      "question_id": "q-eng-004",
+      "item_id": "interview.item.q-eng-004",
+      "track": "engineering_metrics",
+      "topic": "特征存储在线离线一致性",
+      "node_ids": [
+        "interview.node.engineering_metrics"
+      ],
+      "item_type": "SHORT_ANSWER",
+      "difficulty": 4,
+      "prompt": "什么是特征存储？它如何保证在线特征和离线特征的一致性？请说明你会如何设计监控来发现二者偏差。",
+      "options": [],
+      "function_name": null,
+      "max_score": 1.0,
+      "deterministic": false,
+      "assessment_mode": "RULE_RUBRIC",
+      "scoring_spec_ref": "scoring/q-eng-004.json",
+      "requires_project_facts": false,
+      "follow_up_ladder": [
+        {
+          "stage": "concept",
+          "label": "概念澄清",
+          "prompt": "先不用展开：用一句话定义「特征存储在线离线一致性」的核心概念，并说明它解决什么问题。"
+        },
+        {
+          "stage": "hypothesis",
+          "label": "可证伪假设",
+          "prompt": "假设要在真实推荐系统里应用「特征存储在线离线一致性」：你会先验证哪个关键假设？给出可证伪的预测。"
+        },
+        {
+          "stage": "complexity",
+          "label": "复杂度与量级",
+          "prompt": "复杂度分析：数据规模、训练/推理延迟、存储与成本分别卡在哪里？请给出量级估算。"
+        },
+        {
+          "stage": "experiment_design",
+          "label": "实验设计",
+          "prompt": "设计实验验证「特征存储在线离线一致性」的方案：离线指标、线上 A/B、样本量与护栏指标分别怎么定？"
+        },
+        {
+          "stage": "online_triage",
+          "label": "线上定位",
+          "prompt": "上线后若核心收益指标下降，你会按什么顺序定位到召回/排序/特征/实验层？列出前三个检查点。"
+        }
+      ],
+      "synthetic": true,
+      "license": "CC0-1.0"
+    },
+    {
+      "question_id": "q-eng-005",
+      "item_id": "interview.item.q-eng-005",
+      "track": "engineering_metrics",
+      "topic": "灰度发布与回滚",
+      "node_ids": [
+        "interview.node.engineering_metrics"
+      ],
+      "item_type": "SHORT_ANSWER",
+      "difficulty": 3,
+      "prompt": "上线一个新的排序模型时，你会如何设计灰度发布与回滚方案？请说明流量切分、观测指标和回滚触发条件。",
+      "options": [],
+      "function_name": null,
+      "max_score": 1.0,
+      "deterministic": false,
+      "assessment_mode": "RULE_RUBRIC",
+      "scoring_spec_ref": "scoring/q-eng-005.json",
+      "requires_project_facts": false,
+      "follow_up_ladder": [
+        {
+          "stage": "concept",
+          "label": "概念澄清",
+          "prompt": "先不用展开：用一句话定义「灰度发布与回滚」的核心概念，并说明它解决什么问题。"
+        },
+        {
+          "stage": "hypothesis",
+          "label": "可证伪假设",
+          "prompt": "假设要在真实推荐系统里应用「灰度发布与回滚」：你会先验证哪个关键假设？给出可证伪的预测。"
+        },
+        {
+          "stage": "complexity",
+          "label": "复杂度与量级",
+          "prompt": "复杂度分析：数据规模、训练/推理延迟、存储与成本分别卡在哪里？请给出量级估算。"
+        },
+        {
+          "stage": "experiment_design",
+          "label": "实验设计",
+          "prompt": "设计实验验证「灰度发布与回滚」的方案：离线指标、线上 A/B、样本量与护栏指标分别怎么定？"
+        },
+        {
+          "stage": "online_triage",
+          "label": "线上定位",
+          "prompt": "上线后若核心收益指标下降，你会按什么顺序定位到召回/排序/特征/实验层？列出前三个检查点。"
+        }
+      ],
+      "synthetic": true,
+      "license": "CC0-1.0"
+    },
+    {
+      "question_id": "q-ml-001",
+      "item_id": "interview.item.q-ml-001",
+      "track": "ml_fundamentals",
+      "topic": "过拟合识别与正则化",
+      "node_ids": [
+        "interview.node.ml_fundamentals"
+      ],
+      "item_type": "SHORT_ANSWER",
+      "difficulty": 3,
+      "prompt": "如何判断一个模型过拟合？请说明你常用的诊断信号和至少三种缓解手段，并解释各自的原理。",
+      "options": [],
+      "function_name": null,
+      "max_score": 1.0,
+      "deterministic": false,
+      "assessment_mode": "RULE_RUBRIC",
+      "scoring_spec_ref": "scoring/q-ml-001.json",
+      "requires_project_facts": false,
+      "follow_up_ladder": [
+        {
+          "stage": "concept",
+          "label": "概念澄清",
+          "prompt": "先不用展开：用一句话定义「过拟合识别与正则化」的核心概念，并说明它解决什么问题。"
+        },
+        {
+          "stage": "hypothesis",
+          "label": "可证伪假设",
+          "prompt": "假设要在真实推荐系统里应用「过拟合识别与正则化」：你会先验证哪个关键假设？给出可证伪的预测。"
+        },
+        {
+          "stage": "complexity",
+          "label": "复杂度与量级",
+          "prompt": "复杂度分析：数据规模、训练/推理延迟、存储与成本分别卡在哪里？请给出量级估算。"
+        },
+        {
+          "stage": "experiment_design",
+          "label": "实验设计",
+          "prompt": "设计实验验证「过拟合识别与正则化」的方案：离线指标、线上 A/B、样本量与护栏指标分别怎么定？"
+        },
+        {
+          "stage": "online_triage",
+          "label": "线上定位",
+          "prompt": "上线后若核心收益指标下降，你会按什么顺序定位到召回/排序/特征/实验层？列出前三个检查点。"
+        }
+      ],
+      "synthetic": true,
+      "license": "CC0-1.0"
+    },
+    {
+      "question_id": "q-ml-002",
+      "item_id": "interview.item.q-ml-002",
+      "track": "ml_fundamentals",
+      "topic": "AUC 与 LogLoss 的取舍",
+      "node_ids": [
+        "interview.node.ml_fundamentals"
+      ],
+      "item_type": "SHORT_ANSWER",
+      "difficulty": 2,
+      "prompt": "AUC 和 LogLoss 分别在评估什么？在点击率预估任务里为什么两个指标都要看？如果 AUC 提升但 LogLoss 变差，可能发生了什么？",
+      "options": [],
+      "function_name": null,
+      "max_score": 1.0,
+      "deterministic": false,
+      "assessment_mode": "RULE_RUBRIC",
+      "scoring_spec_ref": "scoring/q-ml-002.json",
+      "requires_project_facts": false,
+      "follow_up_ladder": [
+        {
+          "stage": "concept",
+          "label": "概念澄清",
+          "prompt": "先不用展开：用一句话定义「AUC 与 LogLoss 的取舍」的核心概念，并说明它解决什么问题。"
+        },
+        {
+          "stage": "hypothesis",
+          "label": "可证伪假设",
+          "prompt": "假设要在真实推荐系统里应用「AUC 与 LogLoss 的取舍」：你会先验证哪个关键假设？给出可证伪的预测。"
+        },
+        {
+          "stage": "complexity",
+          "label": "复杂度与量级",
+          "prompt": "复杂度分析：数据规模、训练/推理延迟、存储与成本分别卡在哪里？请给出量级估算。"
+        },
+        {
+          "stage": "experiment_design",
+          "label": "实验设计",
+          "prompt": "设计实验验证「AUC 与 LogLoss 的取舍」的方案：离线指标、线上 A/B、样本量与护栏指标分别怎么定？"
+        },
+        {
+          "stage": "online_triage",
+          "label": "线上定位",
+          "prompt": "上线后若核心收益指标下降，你会按什么顺序定位到召回/排序/特征/实验层？列出前三个检查点。"
+        }
+      ],
+      "synthetic": true,
+      "license": "CC0-1.0"
+    },
+    {
+      "question_id": "q-ml-003",
+      "item_id": "interview.item.q-ml-003",
+      "track": "ml_fundamentals",
+      "topic": "梯度消失与归一化",
+      "node_ids": [
+        "interview.node.ml_fundamentals"
+      ],
+      "item_type": "SHORT_ANSWER",
+      "difficulty": 3,
+      "prompt": "解释深度网络中的梯度消失/爆炸问题，以及 BatchNorm 和 LayerNorm 的区别和适用场景。",
+      "options": [],
+      "function_name": null,
+      "max_score": 1.0,
+      "deterministic": false,
+      "assessment_mode": "RULE_RUBRIC",
+      "scoring_spec_ref": "scoring/q-ml-003.json",
+      "requires_project_facts": false,
+      "follow_up_ladder": [
+        {
+          "stage": "concept",
+          "label": "概念澄清",
+          "prompt": "先不用展开：用一句话定义「梯度消失与归一化」的核心概念，并说明它解决什么问题。"
+        },
+        {
+          "stage": "hypothesis",
+          "label": "可证伪假设",
+          "prompt": "假设要在真实推荐系统里应用「梯度消失与归一化」：你会先验证哪个关键假设？给出可证伪的预测。"
+        },
+        {
+          "stage": "complexity",
+          "label": "复杂度与量级",
+          "prompt": "复杂度分析：数据规模、训练/推理延迟、存储与成本分别卡在哪里？请给出量级估算。"
+        },
+        {
+          "stage": "experiment_design",
+          "label": "实验设计",
+          "prompt": "设计实验验证「梯度消失与归一化」的方案：离线指标、线上 A/B、样本量与护栏指标分别怎么定？"
+        },
+        {
+          "stage": "online_triage",
+          "label": "线上定位",
+          "prompt": "上线后若核心收益指标下降，你会按什么顺序定位到召回/排序/特征/实验层？列出前三个检查点。"
+        }
+      ],
+      "synthetic": true,
+      "license": "CC0-1.0"
+    },
+    {
+      "question_id": "q-ml-004",
+      "item_id": "interview.item.q-ml-004",
+      "track": "ml_fundamentals",
+      "topic": "类别不平衡与评估",
+      "node_ids": [
+        "interview.node.ml_fundamentals"
+      ],
+      "item_type": "SHORT_ANSWER",
+      "difficulty": 2,
+      "prompt": "类别极不平衡（正样本 0.1%）时，为什么准确率不可用？你会选哪些指标，以及如何处理采样带来的概率校准问题？",
+      "options": [],
+      "function_name": null,
+      "max_score": 1.0,
+      "deterministic": false,
+      "assessment_mode": "RULE_RUBRIC",
+      "scoring_spec_ref": "scoring/q-ml-004.json",
+      "requires_project_facts": false,
+      "follow_up_ladder": [
+        {
+          "stage": "concept",
+          "label": "概念澄清",
+          "prompt": "先不用展开：用一句话定义「类别不平衡与评估」的核心概念，并说明它解决什么问题。"
+        },
+        {
+          "stage": "hypothesis",
+          "label": "可证伪假设",
+          "prompt": "假设要在真实推荐系统里应用「类别不平衡与评估」：你会先验证哪个关键假设？给出可证伪的预测。"
+        },
+        {
+          "stage": "complexity",
+          "label": "复杂度与量级",
+          "prompt": "复杂度分析：数据规模、训练/推理延迟、存储与成本分别卡在哪里？请给出量级估算。"
+        },
+        {
+          "stage": "experiment_design",
+          "label": "实验设计",
+          "prompt": "设计实验验证「类别不平衡与评估」的方案：离线指标、线上 A/B、样本量与护栏指标分别怎么定？"
+        },
+        {
+          "stage": "online_triage",
+          "label": "线上定位",
+          "prompt": "上线后若核心收益指标下降，你会按什么顺序定位到召回/排序/特征/实验层？列出前三个检查点。"
+        }
+      ],
+      "synthetic": true,
+      "license": "CC0-1.0"
+    },
+    {
+      "question_id": "q-ml-005",
+      "item_id": "interview.item.q-ml-005",
+      "track": "ml_fundamentals",
+      "topic": "GBDT 加法模型",
+      "node_ids": [
+        "interview.node.ml_fundamentals"
+      ],
+      "item_type": "SHORT_ANSWER",
+      "difficulty": 3,
+      "prompt": "从决策树到 GBDT：说明加法模型、残差拟合和 shrinkage 的作用，以及 GBDT 与随机森林的核心区别。",
+      "options": [],
+      "function_name": null,
+      "max_score": 1.0,
+      "deterministic": false,
+      "assessment_mode": "RULE_RUBRIC",
+      "scoring_spec_ref": "scoring/q-ml-005.json",
+      "requires_project_facts": false,
+      "follow_up_ladder": [
+        {
+          "stage": "concept",
+          "label": "概念澄清",
+          "prompt": "先不用展开：用一句话定义「GBDT 加法模型」的核心概念，并说明它解决什么问题。"
+        },
+        {
+          "stage": "hypothesis",
+          "label": "可证伪假设",
+          "prompt": "假设要在真实推荐系统里应用「GBDT 加法模型」：你会先验证哪个关键假设？给出可证伪的预测。"
+        },
+        {
+          "stage": "complexity",
+          "label": "复杂度与量级",
+          "prompt": "复杂度分析：数据规模、训练/推理延迟、存储与成本分别卡在哪里？请给出量级估算。"
+        },
+        {
+          "stage": "experiment_design",
+          "label": "实验设计",
+          "prompt": "设计实验验证「GBDT 加法模型」的方案：离线指标、线上 A/B、样本量与护栏指标分别怎么定？"
+        },
+        {
+          "stage": "online_triage",
+          "label": "线上定位",
+          "prompt": "上线后若核心收益指标下降，你会按什么顺序定位到召回/排序/特征/实验层？列出前三个检查点。"
+        }
+      ],
+      "synthetic": true,
+      "license": "CC0-1.0"
+    },
+    {
+      "question_id": "q-rec-001",
+      "item_id": "interview.item.q-rec-001",
+      "track": "recommendation_ctr",
+      "topic": "位置偏差与无偏评估",
+      "node_ids": [
+        "interview.node.recommendation_ctr"
+      ],
+      "item_type": "SHORT_ANSWER",
+      "difficulty": 3,
+      "prompt": "解释 CTR 预估中的位置偏差（position bias），说明它为什么会让离线评估与线上效果不一致，并给出至少两种缓解方法。",
+      "options": [],
+      "function_name": null,
+      "max_score": 1.0,
+      "deterministic": false,
+      "assessment_mode": "RULE_RUBRIC",
+      "scoring_spec_ref": "scoring/q-rec-001.json",
+      "requires_project_facts": false,
+      "follow_up_ladder": [
+        {
+          "stage": "concept",
+          "label": "概念澄清",
+          "prompt": "先不用展开：用一句话定义「位置偏差与无偏评估」的核心概念，并说明它解决什么问题。"
+        },
+        {
+          "stage": "hypothesis",
+          "label": "可证伪假设",
+          "prompt": "假设要在真实推荐系统里应用「位置偏差与无偏评估」：你会先验证哪个关键假设？给出可证伪的预测。"
+        },
+        {
+          "stage": "complexity",
+          "label": "复杂度与量级",
+          "prompt": "复杂度分析：数据规模、训练/推理延迟、存储与成本分别卡在哪里？请给出量级估算。"
+        },
+        {
+          "stage": "experiment_design",
+          "label": "实验设计",
+          "prompt": "设计实验验证「位置偏差与无偏评估」的方案：离线指标、线上 A/B、样本量与护栏指标分别怎么定？"
+        },
+        {
+          "stage": "online_triage",
+          "label": "线上定位",
+          "prompt": "上线后若核心收益指标下降，你会按什么顺序定位到召回/排序/特征/实验层？列出前三个检查点。"
+        }
+      ],
+      "synthetic": true,
+      "license": "CC0-1.0"
+    },
+    {
+      "question_id": "q-rec-002",
+      "item_id": "interview.item.q-rec-002",
+      "track": "recommendation_ctr",
+      "topic": "双塔召回与精排的差异",
+      "node_ids": [
+        "interview.node.recommendation_ctr"
+      ],
+      "item_type": "SHORT_ANSWER",
+      "difficulty": 4,
+      "prompt": "对比双塔召回模型和精排模型：它们的目标、特征使用方式、延迟预算分别有什么不同？为什么不能直接用精排模型做召回？",
+      "options": [],
+      "function_name": null,
+      "max_score": 1.0,
+      "deterministic": false,
+      "assessment_mode": "RULE_RUBRIC",
+      "scoring_spec_ref": "scoring/q-rec-002.json",
+      "requires_project_facts": false,
+      "follow_up_ladder": [
+        {
+          "stage": "concept",
+          "label": "概念澄清",
+          "prompt": "先不用展开：用一句话定义「双塔召回与精排的差异」的核心概念，并说明它解决什么问题。"
+        },
+        {
+          "stage": "hypothesis",
+          "label": "可证伪假设",
+          "prompt": "假设要在真实推荐系统里应用「双塔召回与精排的差异」：你会先验证哪个关键假设？给出可证伪的预测。"
+        },
+        {
+          "stage": "complexity",
+          "label": "复杂度与量级",
+          "prompt": "复杂度分析：数据规模、训练/推理延迟、存储与成本分别卡在哪里？请给出量级估算。"
+        },
+        {
+          "stage": "experiment_design",
+          "label": "实验设计",
+          "prompt": "设计实验验证「双塔召回与精排的差异」的方案：离线指标、线上 A/B、样本量与护栏指标分别怎么定？"
+        },
+        {
+          "stage": "online_triage",
+          "label": "线上定位",
+          "prompt": "上线后若核心收益指标下降，你会按什么顺序定位到召回/排序/特征/实验层？列出前三个检查点。"
+        }
+      ],
+      "synthetic": true,
+      "license": "CC0-1.0"
+    },
+    {
+      "question_id": "q-rec-003",
+      "item_id": "interview.item.q-rec-003",
+      "track": "recommendation_ctr",
+      "topic": "冷启动商品召回",
+      "node_ids": [
+        "interview.node.recommendation_ctr"
+      ],
+      "item_type": "SHORT_ANSWER",
+      "difficulty": 3,
+      "prompt": "新上架商品没有任何行为数据，你会如何设计冷启动召回？请说明冷启动不同阶段分别用什么信号，以及如何评估效果。",
+      "options": [],
+      "function_name": null,
+      "max_score": 1.0,
+      "deterministic": false,
+      "assessment_mode": "RULE_RUBRIC",
+      "scoring_spec_ref": "scoring/q-rec-003.json",
+      "requires_project_facts": false,
+      "follow_up_ladder": [
+        {
+          "stage": "concept",
+          "label": "概念澄清",
+          "prompt": "先不用展开：用一句话定义「冷启动商品召回」的核心概念，并说明它解决什么问题。"
+        },
+        {
+          "stage": "hypothesis",
+          "label": "可证伪假设",
+          "prompt": "假设要在真实推荐系统里应用「冷启动商品召回」：你会先验证哪个关键假设？给出可证伪的预测。"
+        },
+        {
+          "stage": "complexity",
+          "label": "复杂度与量级",
+          "prompt": "复杂度分析：数据规模、训练/推理延迟、存储与成本分别卡在哪里？请给出量级估算。"
+        },
+        {
+          "stage": "experiment_design",
+          "label": "实验设计",
+          "prompt": "设计实验验证「冷启动商品召回」的方案：离线指标、线上 A/B、样本量与护栏指标分别怎么定？"
+        },
+        {
+          "stage": "online_triage",
+          "label": "线上定位",
+          "prompt": "上线后若核心收益指标下降，你会按什么顺序定位到召回/排序/特征/实验层？列出前三个检查点。"
+        }
+      ],
+      "synthetic": true,
+      "license": "CC0-1.0"
+    },
+    {
+      "question_id": "q-rec-004",
+      "item_id": "interview.item.q-rec-004",
+      "track": "recommendation_ctr",
+      "topic": "特征穿越排查",
+      "node_ids": [
+        "interview.node.recommendation_ctr"
+      ],
+      "item_type": "SHORT_ANSWER",
+      "difficulty": 4,
+      "prompt": "在你实际参与的项目里排查一次特征穿越（feature leakage）：说明你如何发现、如何验证、如何修复，以及修复后离线指标有什么变化。",
+      "options": [],
+      "function_name": null,
+      "max_score": 1.0,
+      "deterministic": false,
+      "assessment_mode": "RULE_RUBRIC",
+      "scoring_spec_ref": "scoring/q-rec-004.json",
+      "requires_project_facts": true,
+      "follow_up_ladder": [
+        {
+          "stage": "concept",
+          "label": "概念澄清",
+          "prompt": "先不用展开：用一句话定义「特征穿越排查」的核心概念，并说明它解决什么问题。"
+        },
+        {
+          "stage": "hypothesis",
+          "label": "可证伪假设",
+          "prompt": "假设要在真实推荐系统里应用「特征穿越排查」：你会先验证哪个关键假设？给出可证伪的预测。"
+        },
+        {
+          "stage": "complexity",
+          "label": "复杂度与量级",
+          "prompt": "复杂度分析：数据规模、训练/推理延迟、存储与成本分别卡在哪里？请给出量级估算。"
+        },
+        {
+          "stage": "experiment_design",
+          "label": "实验设计",
+          "prompt": "设计实验验证「特征穿越排查」的方案：离线指标、线上 A/B、样本量与护栏指标分别怎么定？"
+        },
+        {
+          "stage": "online_triage",
+          "label": "线上定位",
+          "prompt": "上线后若核心收益指标下降，你会按什么顺序定位到召回/排序/特征/实验层？列出前三个检查点。"
+        }
+      ],
+      "synthetic": true,
+      "license": "CC0-1.0"
+    },
+    {
+      "question_id": "q-rec-005",
+      "item_id": "interview.item.q-rec-005",
+      "track": "recommendation_ctr",
+      "topic": "负采样与检索评估",
+      "node_ids": [
+        "interview.node.recommendation_ctr"
+      ],
+      "item_type": "SHORT_ANSWER",
+      "difficulty": 3,
+      "prompt": "训练召回模型时的负采样策略会怎样影响检索效果评估？硬负样本有什么收益和风险？",
+      "options": [],
+      "function_name": null,
+      "max_score": 1.0,
+      "deterministic": false,
+      "assessment_mode": "RULE_RUBRIC",
+      "scoring_spec_ref": "scoring/q-rec-005.json",
+      "requires_project_facts": false,
+      "follow_up_ladder": [
+        {
+          "stage": "concept",
+          "label": "概念澄清",
+          "prompt": "先不用展开：用一句话定义「负采样与检索评估」的核心概念，并说明它解决什么问题。"
+        },
+        {
+          "stage": "hypothesis",
+          "label": "可证伪假设",
+          "prompt": "假设要在真实推荐系统里应用「负采样与检索评估」：你会先验证哪个关键假设？给出可证伪的预测。"
+        },
+        {
+          "stage": "complexity",
+          "label": "复杂度与量级",
+          "prompt": "复杂度分析：数据规模、训练/推理延迟、存储与成本分别卡在哪里？请给出量级估算。"
+        },
+        {
+          "stage": "experiment_design",
+          "label": "实验设计",
+          "prompt": "设计实验验证「负采样与检索评估」的方案：离线指标、线上 A/B、样本量与护栏指标分别怎么定？"
+        },
+        {
+          "stage": "online_triage",
+          "label": "线上定位",
+          "prompt": "上线后若核心收益指标下降，你会按什么顺序定位到召回/排序/特征/实验层？列出前三个检查点。"
+        }
+      ],
+      "synthetic": true,
+      "license": "CC0-1.0"
+    },
+    {
+      "question_id": "q-rec-006",
+      "item_id": "interview.item.q-rec-006",
+      "track": "recommendation_ctr",
+      "topic": "多目标建模的取舍",
+      "node_ids": [
+        "interview.node.recommendation_ctr"
+      ],
+      "item_type": "SHORT_ANSWER",
+      "difficulty": 4,
+      "prompt": "推荐系统同时优化点击、时长、转化等多个目标时，share-bottom、MMoE、PLE 各有什么取舍？如何确定融合权重？",
+      "options": [],
+      "function_name": null,
+      "max_score": 1.0,
+      "deterministic": false,
+      "assessment_mode": "RULE_RUBRIC",
+      "scoring_spec_ref": "scoring/q-rec-006.json",
+      "requires_project_facts": false,
+      "follow_up_ladder": [
+        {
+          "stage": "concept",
+          "label": "概念澄清",
+          "prompt": "先不用展开：用一句话定义「多目标建模的取舍」的核心概念，并说明它解决什么问题。"
+        },
+        {
+          "stage": "hypothesis",
+          "label": "可证伪假设",
+          "prompt": "假设要在真实推荐系统里应用「多目标建模的取舍」：你会先验证哪个关键假设？给出可证伪的预测。"
+        },
+        {
+          "stage": "complexity",
+          "label": "复杂度与量级",
+          "prompt": "复杂度分析：数据规模、训练/推理延迟、存储与成本分别卡在哪里？请给出量级估算。"
+        },
+        {
+          "stage": "experiment_design",
+          "label": "实验设计",
+          "prompt": "设计实验验证「多目标建模的取舍」的方案：离线指标、线上 A/B、样本量与护栏指标分别怎么定？"
+        },
+        {
+          "stage": "online_triage",
+          "label": "线上定位",
+          "prompt": "上线后若核心收益指标下降，你会按什么顺序定位到召回/排序/特征/实验层？列出前三个检查点。"
+        }
+      ],
+      "synthetic": true,
+      "license": "CC0-1.0"
+    },
+    {
+      "question_id": "q-sys-001",
+      "item_id": "interview.item.q-sys-001",
+      "track": "system_design",
+      "topic": "短视频推荐系统设计",
+      "node_ids": [
+        "interview.node.system_design"
+      ],
+      "item_type": "SHORT_ANSWER",
+      "difficulty": 4,
+      "prompt": "请设计一个短视频推荐系统：从候选召回、排序、重排到线上服务，说明各层职责、数据流与延迟预算。",
+      "options": [],
+      "function_name": null,
+      "max_score": 1.0,
+      "deterministic": false,
+      "assessment_mode": "RULE_RUBRIC",
+      "scoring_spec_ref": "scoring/q-sys-001.json",
+      "requires_project_facts": false,
+      "follow_up_ladder": [
+        {
+          "stage": "concept",
+          "label": "概念澄清",
+          "prompt": "先不用展开：用一句话定义「短视频推荐系统设计」的核心概念，并说明它解决什么问题。"
+        },
+        {
+          "stage": "hypothesis",
+          "label": "可证伪假设",
+          "prompt": "假设要在真实推荐系统里应用「短视频推荐系统设计」：你会先验证哪个关键假设？给出可证伪的预测。"
+        },
+        {
+          "stage": "complexity",
+          "label": "复杂度与量级",
+          "prompt": "复杂度分析：数据规模、训练/推理延迟、存储与成本分别卡在哪里？请给出量级估算。"
+        },
+        {
+          "stage": "experiment_design",
+          "label": "实验设计",
+          "prompt": "设计实验验证「短视频推荐系统设计」的方案：离线指标、线上 A/B、样本量与护栏指标分别怎么定？"
+        },
+        {
+          "stage": "online_triage",
+          "label": "线上定位",
+          "prompt": "上线后若核心收益指标下降，你会按什么顺序定位到召回/排序/特征/实验层？列出前三个检查点。"
+        }
+      ],
+      "synthetic": true,
+      "license": "CC0-1.0"
+    },
+    {
+      "question_id": "q-sys-002",
+      "item_id": "interview.item.q-sys-002",
+      "track": "system_design",
+      "topic": "实时特征管道",
+      "node_ids": [
+        "interview.node.system_design"
+      ],
+      "item_type": "SHORT_ANSWER",
+      "difficulty": 5,
+      "prompt": "设计一个支持实时特征的推荐特征管道：数据源头、计算、存储、在线服务链路如何组织？如何保证低延迟与可回放？",
+      "options": [],
+      "function_name": null,
+      "max_score": 1.0,
+      "deterministic": false,
+      "assessment_mode": "RULE_RUBRIC",
+      "scoring_spec_ref": "scoring/q-sys-002.json",
+      "requires_project_facts": false,
+      "follow_up_ladder": [
+        {
+          "stage": "concept",
+          "label": "概念澄清",
+          "prompt": "先不用展开：用一句话定义「实时特征管道」的核心概念，并说明它解决什么问题。"
+        },
+        {
+          "stage": "hypothesis",
+          "label": "可证伪假设",
+          "prompt": "假设要在真实推荐系统里应用「实时特征管道」：你会先验证哪个关键假设？给出可证伪的预测。"
+        },
+        {
+          "stage": "complexity",
+          "label": "复杂度与量级",
+          "prompt": "复杂度分析：数据规模、训练/推理延迟、存储与成本分别卡在哪里？请给出量级估算。"
+        },
+        {
+          "stage": "experiment_design",
+          "label": "实验设计",
+          "prompt": "设计实验验证「实时特征管道」的方案：离线指标、线上 A/B、样本量与护栏指标分别怎么定？"
+        },
+        {
+          "stage": "online_triage",
+          "label": "线上定位",
+          "prompt": "上线后若核心收益指标下降，你会按什么顺序定位到召回/排序/特征/实验层？列出前三个检查点。"
+        }
+      ],
+      "synthetic": true,
+      "license": "CC0-1.0"
+    },
+    {
+      "question_id": "q-sys-003",
+      "item_id": "interview.item.q-sys-003",
+      "track": "system_design",
+      "topic": "推荐实验平台设计",
+      "node_ids": [
+        "interview.node.system_design"
+      ],
+      "item_type": "SHORT_ANSWER",
+      "difficulty": 4,
+      "prompt": "设计一个支撑多团队使用的推荐实验平台：实验配置、流量切分、指标计算、结果分析分别怎么设计？如何防止实验互相污染？",
+      "options": [],
+      "function_name": null,
+      "max_score": 1.0,
+      "deterministic": false,
+      "assessment_mode": "RULE_RUBRIC",
+      "scoring_spec_ref": "scoring/q-sys-003.json",
+      "requires_project_facts": false,
+      "follow_up_ladder": [
+        {
+          "stage": "concept",
+          "label": "概念澄清",
+          "prompt": "先不用展开：用一句话定义「推荐实验平台设计」的核心概念，并说明它解决什么问题。"
+        },
+        {
+          "stage": "hypothesis",
+          "label": "可证伪假设",
+          "prompt": "假设要在真实推荐系统里应用「推荐实验平台设计」：你会先验证哪个关键假设？给出可证伪的预测。"
+        },
+        {
+          "stage": "complexity",
+          "label": "复杂度与量级",
+          "prompt": "复杂度分析：数据规模、训练/推理延迟、存储与成本分别卡在哪里？请给出量级估算。"
+        },
+        {
+          "stage": "experiment_design",
+          "label": "实验设计",
+          "prompt": "设计实验验证「推荐实验平台设计」的方案：离线指标、线上 A/B、样本量与护栏指标分别怎么定？"
+        },
+        {
+          "stage": "online_triage",
+          "label": "线上定位",
+          "prompt": "上线后若核心收益指标下降，你会按什么顺序定位到召回/排序/特征/实验层？列出前三个检查点。"
+        }
+      ],
+      "synthetic": true,
+      "license": "CC0-1.0"
+    },
+    {
+      "question_id": "q-sys-004",
+      "item_id": "interview.item.q-sys-004",
+      "track": "system_design",
+      "topic": "多路召回融合与配额",
+      "node_ids": [
+        "interview.node.system_design"
+      ],
+      "item_type": "SHORT_ANSWER",
+      "difficulty": 5,
+      "prompt": "多路召回（协同、向量、热门、探索）如何融合与分配配额？请说明融合策略、去重、以及如何评估每一路的贡献。",
+      "options": [],
+      "function_name": null,
+      "max_score": 1.0,
+      "deterministic": false,
+      "assessment_mode": "RULE_RUBRIC",
+      "scoring_spec_ref": "scoring/q-sys-004.json",
+      "requires_project_facts": false,
+      "follow_up_ladder": [
+        {
+          "stage": "concept",
+          "label": "概念澄清",
+          "prompt": "先不用展开：用一句话定义「多路召回融合与配额」的核心概念，并说明它解决什么问题。"
+        },
+        {
+          "stage": "hypothesis",
+          "label": "可证伪假设",
+          "prompt": "假设要在真实推荐系统里应用「多路召回融合与配额」：你会先验证哪个关键假设？给出可证伪的预测。"
+        },
+        {
+          "stage": "complexity",
+          "label": "复杂度与量级",
+          "prompt": "复杂度分析：数据规模、训练/推理延迟、存储与成本分别卡在哪里？请给出量级估算。"
+        },
+        {
+          "stage": "experiment_design",
+          "label": "实验设计",
+          "prompt": "设计实验验证「多路召回融合与配额」的方案：离线指标、线上 A/B、样本量与护栏指标分别怎么定？"
+        },
+        {
+          "stage": "online_triage",
+          "label": "线上定位",
+          "prompt": "上线后若核心收益指标下降，你会按什么顺序定位到召回/排序/特征/实验层？列出前三个检查点。"
+        }
+      ],
+      "synthetic": true,
+      "license": "CC0-1.0"
+    },
+    {
+      "question_id": "q-sys-005",
+      "item_id": "interview.item.q-sys-005",
+      "track": "system_design",
+      "topic": "新用户首屏冷启动",
+      "node_ids": [
+        "interview.node.system_design"
+      ],
+      "item_type": "SHORT_ANSWER",
+      "difficulty": 4,
+      "prompt": "新用户没有任何行为数据，你会如何设计首屏推荐？请说明冷启动阶段的信号来源、探索策略与评估方式。",
+      "options": [],
+      "function_name": null,
+      "max_score": 1.0,
+      "deterministic": false,
+      "assessment_mode": "RULE_RUBRIC",
+      "scoring_spec_ref": "scoring/q-sys-005.json",
+      "requires_project_facts": false,
+      "follow_up_ladder": [
+        {
+          "stage": "concept",
+          "label": "概念澄清",
+          "prompt": "先不用展开：用一句话定义「新用户首屏冷启动」的核心概念，并说明它解决什么问题。"
+        },
+        {
+          "stage": "hypothesis",
+          "label": "可证伪假设",
+          "prompt": "假设要在真实推荐系统里应用「新用户首屏冷启动」：你会先验证哪个关键假设？给出可证伪的预测。"
+        },
+        {
+          "stage": "complexity",
+          "label": "复杂度与量级",
+          "prompt": "复杂度分析：数据规模、训练/推理延迟、存储与成本分别卡在哪里？请给出量级估算。"
+        },
+        {
+          "stage": "experiment_design",
+          "label": "实验设计",
+          "prompt": "设计实验验证「新用户首屏冷启动」的方案：离线指标、线上 A/B、样本量与护栏指标分别怎么定？"
+        },
+        {
+          "stage": "online_triage",
+          "label": "线上定位",
+          "prompt": "上线后若核心收益指标下降，你会按什么顺序定位到召回/排序/特征/实验层？列出前三个检查点。"
+        }
+      ],
+      "synthetic": true,
+      "license": "CC0-1.0"
+    },
+    {
+      "question_id": "q-sys-006",
+      "item_id": "interview.item.q-sys-006",
+      "track": "system_design",
+      "topic": "内容时效与新鲜度机制",
+      "node_ids": [
+        "interview.node.system_design"
+      ],
+      "item_type": "SHORT_ANSWER",
+      "difficulty": 5,
+      "prompt": "设计推荐系统的内容时效性机制：如何定义和度量新鲜度？如何防止旧内容长期占据流量？请给出可落地的策略。",
+      "options": [],
+      "function_name": null,
+      "max_score": 1.0,
+      "deterministic": false,
+      "assessment_mode": "RULE_RUBRIC",
+      "scoring_spec_ref": "scoring/q-sys-006.json",
+      "requires_project_facts": false,
+      "follow_up_ladder": [
+        {
+          "stage": "concept",
+          "label": "概念澄清",
+          "prompt": "先不用展开：用一句话定义「内容时效与新鲜度机制」的核心概念，并说明它解决什么问题。"
+        },
+        {
+          "stage": "hypothesis",
+          "label": "可证伪假设",
+          "prompt": "假设要在真实推荐系统里应用「内容时效与新鲜度机制」：你会先验证哪个关键假设？给出可证伪的预测。"
+        },
+        {
+          "stage": "complexity",
+          "label": "复杂度与量级",
+          "prompt": "复杂度分析：数据规模、训练/推理延迟、存储与成本分别卡在哪里？请给出量级估算。"
+        },
+        {
+          "stage": "experiment_design",
+          "label": "实验设计",
+          "prompt": "设计实验验证「内容时效与新鲜度机制」的方案：离线指标、线上 A/B、样本量与护栏指标分别怎么定？"
+        },
+        {
+          "stage": "online_triage",
+          "label": "线上定位",
+          "prompt": "上线后若核心收益指标下降，你会按什么顺序定位到召回/排序/特征/实验层？列出前三个检查点。"
+        }
+      ],
+      "synthetic": true,
+      "license": "CC0-1.0"
+    }
+  ]
+}

@@ -1,0 +1,165 @@
+{
+  "schema_version": "m1a.v0",
+  "scoring_version": "interview.rubric.v1",
+  "question_id": "q-rec-001",
+  "hidden": true,
+  "synthetic": true,
+  "license": "CC0-1.0",
+  "domain_id": "interview_coach",
+  "open_answer": true,
+  "max_status": "PARTIAL",
+  "requires_project_facts": false,
+  "weights": {
+    "factual_correctness": 0.35,
+    "explanation_clarity": 0.2,
+    "engineering_feasibility": 0.2,
+    "evidence_sufficiency": 0.25
+  },
+  "thresholds": {
+    "factual_min": 0.5,
+    "correct_min": 0.75,
+    "partial_min": 0.35,
+    "min_response_chars": 20
+  },
+  "misconception_penalty": 0.25,
+  "expectations": {
+    "factual_correctness": [
+      [
+        "位置偏差",
+        "position bias",
+        "曝光偏差"
+      ],
+      [
+        "高位置曝光",
+        "展示位置",
+        "位置越靠前",
+        "位置靠前"
+      ],
+      [
+        "逆倾向加权",
+        "ips",
+        "倾向分"
+      ],
+      [
+        "无偏评估",
+        "反事实",
+        "随机曝光",
+        "随机实验"
+      ]
+    ],
+    "explanation_clarity": [
+      [
+        "先定义",
+        "是什么",
+        "概念"
+      ],
+      [
+        "原因",
+        "为什么",
+        "因为"
+      ],
+      [
+        "方法",
+        "怎么做",
+        "步骤"
+      ],
+      [
+        "结论",
+        "总结",
+        "因此"
+      ]
+    ],
+    "engineering_feasibility": [
+      [
+        "延迟",
+        "latency",
+        "耗时"
+      ],
+      [
+        "qps",
+        "吞吐",
+        "并发",
+        "数据量",
+        "规模"
+      ],
+      [
+        "成本",
+        "资源",
+        "容量"
+      ],
+      [
+        "降级",
+        "回滚",
+        "监控"
+      ]
+    ],
+    "evidence_sufficiency": [
+      [
+        "来源",
+        "论文",
+        "官方文档",
+        "参考"
+      ],
+      [
+        "指标",
+        "口径",
+        "auc",
+        "评估"
+      ]
+    ]
+  },
+  "clarity_connectors": [
+    "首先",
+    "其次",
+    "然后",
+    "最后",
+    "因为",
+    "所以",
+    "因此",
+    "例如",
+    "比如",
+    "具体来说",
+    "第一",
+    "第二",
+    "第三",
+    "结论",
+    "总结",
+    "换句话说",
+    "对比",
+    "区别于"
+  ],
+  "vague_words": [
+    "一些",
+    "某些",
+    "相关",
+    "大概",
+    "差不多",
+    "可能",
+    "应该",
+    "估计",
+    "很多",
+    "各种",
+    "之类的",
+    "等等",
+    "比较复杂",
+    "看情况"
+  ],
+  "infeasible_markers": [
+    "每秒重训",
+    "全量实时训练",
+    "不做缓存",
+    "不需要降级",
+    "不需要缓存",
+    "暴力计算",
+    "全量物品暴力",
+    "所有特征全部实时",
+    "资源不是问题",
+    "无限机器",
+    "无限资源",
+    "没有资源上限"
+  ],
+  "unsourced_claim_patterns": [
+    "(?:提升|增长|提高|降低|减少|下降|节省|达到|做到)[^0-9，。；：\\n]{0,8}\\d+(?:\\.\\d+)?\\s*(?:%|％|倍|个百分点|ms|毫秒|秒|万|亿|QPS|qps)",
+    "\\d+(?:\\.\\d+)?\\s*(?:%|％|倍)\\s*(?:的)?\\s*(?:提升|增长|提高|降低|减少|下降)"
+  ]
+}
