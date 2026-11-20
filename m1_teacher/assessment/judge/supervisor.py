@@ -30,7 +30,7 @@ counts, never expected values or hidden argument values.
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Mapping, Sequence
 
 try:  # frozen worker protocol (owned by the sandbox workstream)
@@ -166,6 +166,9 @@ class JudgeVerdict:
     cases_passed: int
     failure_codes: tuple[str, ...] = ()
     infra_error: bool = False
+    #: Sanitised host/sandbox security evidence (no hidden fixture content).
+    #: Populated from ``worker.sandbox.security_profile()`` when available.
+    security_profile: dict[str, object] = field(default_factory=dict)
 
     @property
     def passed(self) -> bool:
@@ -179,6 +182,7 @@ class JudgeVerdict:
             "cases_passed": self.cases_passed,
             "failure_codes": list(self.failure_codes),
             "infra_error": self.infra_error,
+            "security_profile": dict(self.security_profile),
         }
 
 
@@ -240,6 +244,27 @@ class TrustedJudgeSupervisor:
         except Exception:  # noqa: BLE001 - any probe failure means "not available"
             return False
 
+    def _collect_security_profile(self) -> dict[str, object]:
+        """Return sanitised host/sandbox security evidence for the verdict.
+
+        Only host-principal/sandbox metadata (euid, uid_map, non-root flag,
+        availability) is recorded; hidden tests/expected values never enter it.
+        Missing/fake workers simply yield an empty profile.
+        """
+
+        worker = self._worker
+        if worker is None:
+            return {}
+        sandbox = getattr(worker, "sandbox", None)
+        profile_fn = getattr(sandbox, "security_profile", None)
+        if not callable(profile_fn):
+            return {}
+        try:
+            profile = profile_fn()
+        except Exception:  # noqa: BLE001 - evidence must never break judging
+            return {"profile": "UNKNOWN", "sandbox_available": False}
+        return dict(profile) if isinstance(profile, Mapping) else {}
+
     # -- evaluation --------------------------------------------------------
     def evaluate(
         self,
@@ -258,16 +283,17 @@ class TrustedJudgeSupervisor:
 
         tests_list = self._validate_tests(tests)
         total = len(tests_list)
+        security_profile = self._collect_security_profile()
         if not self._trusted_fixture_only:
-            return self._blocked(total, STATUS_UNTRUSTED_CODE_EXECUTION_BLOCKED)
+            return self._blocked(total, STATUS_UNTRUSTED_CODE_EXECUTION_BLOCKED, security_profile)
         if self._worker is None:
-            return self._blocked(total, STATUS_JUDGE_SANDBOX_UNAVAILABLE)
+            return self._blocked(total, STATUS_JUDGE_SANDBOX_UNAVAILABLE, security_profile)
         if not self.worker_available():
-            return self._blocked(total, STATUS_JUDGE_SANDBOX_UNAVAILABLE)
+            return self._blocked(total, STATUS_JUDGE_SANDBOX_UNAVAILABLE, security_profile)
         if not isinstance(code, str):
-            return self._infra(total, "INVALID_CODE")
+            return self._infra(total, "INVALID_CODE", security_profile)
         if not isinstance(function_name, str) or not function_name.strip():
-            return self._infra(total, "INVALID_FUNCTION_NAME")
+            return self._infra(total, "INVALID_FUNCTION_NAME", security_profile)
 
         effective_timeout = self._effective_timeout(timeout_s)
         cases_passed = 0
@@ -279,14 +305,14 @@ class TrustedJudgeSupervisor:
                     code, function_name, list(case["args"]), effective_timeout
                 )
             except Exception:  # noqa: BLE001 - worker failure is infrastructure
-                return self._infra(total, "WORKER_EXCEPTION")
+                return self._infra(total, "WORKER_EXCEPTION", security_profile)
             try:
                 parsed = self._coerce_observation(observation)
             except _ObservationInvalid:
-                return self._infra(total, "WORKER_PROTOCOL_ERROR")
+                return self._infra(total, "WORKER_PROTOCOL_ERROR", security_profile)
             status = parsed["status"]
             if status == _WORKER_INFRA_ERROR:
-                return self._infra(total, "WORKER_INFRA_ERROR")
+                return self._infra(total, "WORKER_INFRA_ERROR", security_profile)
             if status == _WORKER_TIMEOUT:
                 had_timeout = True
                 case_statuses.append(_WORKER_TIMEOUT)
@@ -294,18 +320,18 @@ class TrustedJudgeSupervisor:
             if status == _WORKER_COMPLETED:
                 actual = parsed["actual_canonical"]
                 if not isinstance(actual, str):
-                    return self._infra(total, "WORKER_PROTOCOL_ERROR")
+                    return self._infra(total, "WORKER_PROTOCOL_ERROR", security_profile)
                 try:
                     decoded_actual = json.loads(actual)
                     actual_canonical = _canonical(decoded_actual)
                     expected_canonical = _canonical(case["expected"])
                 except (TypeError, ValueError, json.JSONDecodeError):
-                    return self._infra(total, "WORKER_PROTOCOL_ERROR")
+                    return self._infra(total, "WORKER_PROTOCOL_ERROR", security_profile)
                 if actual_canonical != actual:
                     # The frozen protocol requires the worker to emit the exact
                     # canonical rendering (no duplicate keys/whitespace/non-JSON
                     # rewrites); anything else is a protocol violation, not data.
-                    return self._infra(total, "WORKER_PROTOCOL_ERROR")
+                    return self._infra(total, "WORKER_PROTOCOL_ERROR", security_profile)
                 if actual_canonical != expected_canonical:
                     case_statuses.append(status)
                 else:
@@ -314,7 +340,7 @@ class TrustedJudgeSupervisor:
             if status in _STUDENT_FAILURE_STATUSES:
                 case_statuses.append(status)
                 continue
-            return self._infra(total, "WORKER_PROTOCOL_ERROR")  # pragma: no cover
+            return self._infra(total, "WORKER_PROTOCOL_ERROR", security_profile)  # pragma: no cover
 
         ratio = (cases_passed / total) if total else 0.0
         if had_timeout:
@@ -325,6 +351,7 @@ class TrustedJudgeSupervisor:
                 cases_passed=cases_passed,
                 failure_codes=("STUDENT_TLE", f"CASES_PASSED:{cases_passed}/{total}"),
                 infra_error=False,
+                security_profile=security_profile,
             )
         if not case_statuses:
             return JudgeVerdict(
@@ -334,6 +361,7 @@ class TrustedJudgeSupervisor:
                 cases_passed=total,
                 failure_codes=(),
                 infra_error=False,
+                security_profile=security_profile,
             )
         failed = total - cases_passed
         first_status = STATUS_WA if _WORKER_COMPLETED in case_statuses else STATUS_RE
@@ -349,6 +377,7 @@ class TrustedJudgeSupervisor:
             cases_passed=cases_passed,
             failure_codes=tuple(codes),
             infra_error=False,
+            security_profile=security_profile,
         )
 
     # -- internal ----------------------------------------------------------
@@ -411,7 +440,9 @@ class TrustedJudgeSupervisor:
         return {"status": status, "actual_canonical": actual}
 
     @staticmethod
-    def _blocked(total: int, status: str) -> JudgeVerdict:
+    def _blocked(
+        total: int, status: str, security_profile: Mapping[str, object] | None = None
+    ) -> JudgeVerdict:
         return JudgeVerdict(
             status=status,
             score_ratio=0.0,
@@ -419,10 +450,13 @@ class TrustedJudgeSupervisor:
             cases_passed=0,
             failure_codes=(status,),
             infra_error=True,
+            security_profile=dict(security_profile or {}),
         )
 
     @staticmethod
-    def _infra(total: int, code: str) -> JudgeVerdict:
+    def _infra(
+        total: int, code: str, security_profile: Mapping[str, object] | None = None
+    ) -> JudgeVerdict:
         return JudgeVerdict(
             status=STATUS_JUDGE_INFRA_ERROR,
             score_ratio=0.0,
@@ -430,4 +464,5 @@ class TrustedJudgeSupervisor:
             cases_passed=0,
             failure_codes=(f"JUDGE_INFRA_ERROR:{code}",),
             infra_error=True,
+            security_profile=dict(security_profile or {}),
         )
