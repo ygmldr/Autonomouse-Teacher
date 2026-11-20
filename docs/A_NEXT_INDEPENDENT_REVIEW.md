@@ -1022,3 +1022,102 @@ $ run_matrix.py --mode baseline --stage /tmp/does-not-exist -> exit 1 STAGE_MISS
 Owner reruns: 20261120T200752Z-baseline / 20261120T200757Z-two-turn-bash -> verified=true, exit_code=0
 identity.txt: run_matrix sha 8067fcea… (== current), test sha 81f664b2… (== current)
 ```
+
+
+---
+
+## 12. 阶段 2 batch-3：A-PR0 v2 append-only 更正复核（`86edfd7`）— 2026-11-20T20:25Z–20:40Z
+
+### 12.1 对象与分支提交链
+
+| 项 | Reviewer 实测 |
+|---|---|
+| 分支/HEAD | `docs/a-next-baseline` @ **`86edfd7e4a18423906216547f533c88dd1d9efad`** |
+| 提交链 | `e1fa0b9`（v1 三 docs）→ `94c81a1`（**修改** baseline/branch 两 v1 docs：protected-file 分组 + F-02 行号，13 行/文件）→ `fbea535`（新增 `A_NEXT_ENVIRONMENT_INCIDENT.md` 246 行）→ `86edfd7`（新增 2 个 v2 addendum，+182） |
+| 新增 v2 文件 | `docs/A_NEXT_REVIEW_STATUS_RECONCILIATION_V2_ADDENDUM.md`（88 行）、`docs/A_NEXT_BASELINE_ADDENDUM_V2.md`（94 行） |
+| 未改 | 冻结 CSV `741d7d55…`、Review `0599856a…`、`docs/g4r_review_evidence/**`：`git diff fd1d3a6..HEAD -- <冻结件>` = **空**；`src/`/`config/`/`scripts` 零改动 |
+
+### 12.2 append-only 核验
+
+- **对账 v1 字节未动**：`A_NEXT_REVIEW_STATUS_RECONCILIATION.md` sha256 **`81ecae3c…ce59b`**、
+  git blob **`5729eb74…`**（与 addendum 声明一致）；`git diff e1fa0b9..HEAD -- 该文件` = **0 行**。✓
+- **v2 只新增自身**（`86edfd7` 仅 A 两个文件）；A0-02 的 65 行 v1 表保留原值，v2 另表给出 old→new。✓
+- **但发现披露不完整（P2-A0-1，见 §12.6）**：`94c81a1` 曾**就地修改** v1 `A_NEXT_BASELINE.md` 与
+  `A_NEXT_BRANCH_RECONCILIATION.md`（各 13 行）；`A_NEXT_BASELINE_ADDENDUM_V2.md` 引用 baseline
+  “v1, commit `e1fa0b9`; sha256 `597811ff…`”，但 **`597811ff…` 是 `94c81a1` 之后的当前字节**
+  （`e1fa0b9` 时实测 sha 为 `5ebbe39c…`、blob `265a2663…`）。addendum 未记录这次 pre-v2 就地更正，
+  “v1 字节不改”的表述在 baseline 上不严谨（对账 v1 本身确实未改）。
+
+### 12.3 更正内容准确性（R4-05 / R4-12 / R4-13）
+
+- `R4-05` SQLite backup provenance：v1 reviewer `PASS`（归因 R-REV5）→ v2 **`PARTIAL`**（reviewer final=`NO_DIRECT`，
+  frozen PARTIAL 保留）。Reviewer 复核：与 §8.1 建议一致；`r_rev5_packet_verify.json` 顶层键实测确为
+  `expected_impl_sha/issues/mutation_undetected/packet/status` **5 键**，无 provenance/path 字段 → **correct**。
+- `R4-12` Evidence path correction：v1 `PASS` → v2 **`UNVERIFIED`**（reviewer final=`NO_DIRECT`，frozen PARTIAL
+  仅为 Owner 记录）。Reviewer 复核：可取“更严格”的 UNVERIFIED（我的 §8.1 建议为 NO_DIRECT/PARTIAL；
+  UNVERIFIED 属保守上界，未夸大）→ **acceptable**。
+- `R4-13` LiveGate reason snapshot equality：维持 `PASS`（R-REV5 livegate 快照一致性支撑）→ **correct**。
+- 更正后计数：v1 `25/18/10/2/4/6 = 65` → v2 **`23/19/10/3/4/6 = 65`**
+  （−2 PASS、+1 PARTIAL、+1 UNVERIFIED，其余不变），推导与 Reviewer 独立解析一致；未出现“全 PASS”表述。✓
+
+### 12.4 A0-04 / A0-03 / A5 终态复核
+
+| 项 | v2 自报 | Reviewer 判定 | 依据 |
+|---|---|---|---|
+| **A0-04**（Packet/Review 冻结） | `PASS` → **`PARTIAL / LOST`** | **同意**：v1 Packet `LOST_IN_INCIDENT_20261121`（全盘/备份 tar 均无副本，Reviewer §9 已独立确认）；v2 Packet 恢复副本经 Reviewer 自建 verifier **PASS**（`issues=[]`/`mutation_undetected=[]`）；需注明“恢复 provenance、非原始 in-place 链” | 本报告 §9.3/§9.4 |
+| **A0-03**（rootfs 防写/不可变） | 真实部署 **`NOT_RUN`**；工具层 PASS(条件) | **同意**：19:52Z 真实树 rootfs_guard=OK/sha 匹配（pre-incident），恢复后再次 OK（`25491e45…`，`mount.read_only=false`）；真实防写仍 HUMAN_REQUIRED；事件后 OCI/L2 必须标注恢复来源 | 本报告 §8.2/§9.4；`16a4187` 已复核 |
+| **A5**（Packet/证据卫生） | **`PARTIAL`** | **同意**：v1 Packet LOST、`g4f` 0 files、`g4` 仅 `c/` 13,246 files、`g4r` 2,982 files（多副本合并，完整性不可证）——Reviewer 独立复核上述计数/状态一致；Packet v3 必须披露事件+恢复证据+backup tar sha | 本报告 §9.4；§12.5 |
+
+### 12.5 环境事故记录（`A_NEXT_ENVIRONMENT_INCIDENT.md`）独立抽查
+
+Reviewer 抽查（不是全文采信）：
+
+```text
+g4f files = 0；g4 = 13,246 files（仅 c/）；g4r = 2,982 files
+顶层 symlink g3a-provider-bridge / g3c / g3d：均自指且 test -e=false（RESTORE_ANOMALY）
+backup tar sha256=11172f02…159d42（916,480,000 bytes，mtime 19:56:30Z）——与 Reviewer §9 实测一致
+v1 Packet：全盘找不到、backup tar 0 entries；rootfs=25491e45…、deps=e07729d7…（恢复后与冻结值一致）
+```
+
+事故文档自述状态 `PARTIAL_RECOVERY`、v1 `LOST_IN_INCIDENT_20261121`、backup tar 为**恢复后**快照而非事故前备份、
+禁止“全程 NO_DRIFT/证据完整”表述——**与 Reviewer §9 结论一致，无淡化/夸大**。
+（事故文档中 `L-02/L-03` 的 G4-F/G4-D/E5 丢失清单属 Owner 记录；Reviewer 仅抽查了可计数项，其余标注 `NOT_RUN` 不背书完整性。）
+
+### 12.6 发现
+
+- **P2-A0-1（披露/元数据不一致，必须在 Packet v3 前修正）**：v2 baseline addendum 把 `94c81a1` 更正后的
+  baseline 字节标为“v1, commit e1fa0b9; sha 597811ff…”，与 `e1fa0b9` 实际 sha `5ebbe39c…` 不符；且未在
+  append-only 版本记录中登记 `94c81a1` 的就地修改（2 文件各 13 行）。要求：追加 v3 澄清
+  “e1fa0b9 原字节 sha=5ebbe39c…；94c81a1 就地更正 2 文件（列出 diff/sha）；v2 addendum 只追加不改这些字节”，
+  并保持对账 v1 未被修改的事实。**不影响 v2 更正内容本身的正确性**。
+- **P3-A0-2**：baseline addendum 对 v2 Packet 的描述“来自 worktree g4r-packet-final 副本”应与事件文档的恢复源
+  清单（`/tmp/at-g4f-review/artifacts` + 各 worktree 副本）保持措辞一致；建议统一。
+- 其余内容（v1 对账表字节未动、更正行与计数、batch-1 条件登记、A0-04/A5 降级、状态常量）**准确、无伪报 PASS**。
+
+### 12.7 裁定
+
+| 项 | 裁定 | 是否允许集成 |
+|---|---|---|
+| A-PR0 docs v2 更正（`86edfd7`） | **PASS（条件：P2-A0-1 披露修正）** | 可以（docs）；Packet v3 前必须追加 v3 澄清，且更正后不得自称“A-PR0 docs 已 PASS”超出本报告范围 |
+| **A0-02 终态** | **PASS**（fp；65 行对账准确、v1 字节未动、2 行过度归因已更正；冻结 CSV 仍 741d7d55…） | — |
+| **A0-04 终态** | **PARTIAL / LOST**（v1 LOST；v2 恢复副本可验证） | Packet v3 需披露恢复 provenance；不得称“冻结件全部可核验” |
+| **A0-03 终态** | **NOT_RUN（真实部署防写）/ PASS(条件)（工具层 `16a4187`）** | 真实部署 HUMAN_REQUIRED；OCI/L2 证据须注明 rootfs/deps 恢复来源 |
+| **A5 终态** | **PARTIAL** | Packet v3 必须含事件披露+恢复证据+backup tar sha；不得称“全部证据可核验” |
+
+> 本批未跑 OCI（A4 窗口约束保持）；未改变任何门状态；A0-02 的 PASS 仅指“对账文档准确/append-only”，
+> **不是** G4-R 矩阵整体 PASS，也不改变 R2 L2/R4-09/R4-10/R5/R-REV6 的 NOT_RUN/PARTIAL/UNVERIFIED。
+
+---
+
+## 附录 G：batch-3（A-PR0 v2）命令与输出（§12）
+
+```text
+$ git -C worktrees/a-next-baseline log --oneline -4 -> 86edfd7 / fbea535 / 94c81a1 / e1fa0b9
+$ sha256sum docs/A_NEXT_REVIEW_STATUS_RECONCILIATION.md -> 81ecae3c…ce59b (git blob 5729eb74…);
+  git diff e1fa0b9..HEAD -- 该文件 -> 0 行（v1 对账字节未动）
+$ git show e1fa0b9:docs/A_NEXT_BASELINE.md | sha256sum -> 5ebbe39c…（addendum 引用的 597811ff… 实为 94c81a1 后字节）
+$ git diff fd1d3a6..HEAD -- src/ config/ scripts/ -> empty；冻结 CSV 741d7d55… / Review 0599856a… 未变
+$ v2 计数：23 PASS / 19 PARTIAL / 10 NOT_RUN / 3 UNVERIFIED / 4 NO_DIRECT / 6 N/A = 65
+$ 事故抽查：g4f=0 files；g4=13246 files(c/ only)；g4r=2982 files；3 个 symlink 自指悬空；
+  backup tar sha256=11172f02…；v1 Packet 不存在；rootfs=25491e45… / deps=e07729d7…
+```
