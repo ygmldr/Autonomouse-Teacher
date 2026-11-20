@@ -16,7 +16,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import shutil
 import sqlite3
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -25,6 +27,11 @@ from m1_teacher import demo
 from m1_teacher.contracts.errors import ConflictError, ValidationError
 from m1_teacher.contracts.types import AssessmentItem, AssessmentResult, LearnerGoal
 from m1_teacher.learner.history import LearningHistory
+from m1_teacher.idempotency import (
+    legacy_default_result_id,
+    legacy_request_digest,
+    request_digest,
+)
 from m1_teacher.learner.repository import SCHEMA_VERSION, SqliteRepository
 from m1_teacher.session.engine import TeachingSessionEngine
 
@@ -572,5 +579,228 @@ def test_v2_database_self_heals_a_missing_additive_table(tmp_path: Path) -> None
             == 0
         )
         assert repository.list_learners() == [LEARNER]
+    finally:
+        repository.close()
+
+
+# ---------------------------------------------------------------------------
+# Genuine pre-B-PR3 v1 fixture (review P1-1: old JSON projection)
+# ---------------------------------------------------------------------------
+
+MIGRATION_FIXTURES = (
+    Path(__file__).resolve().parents[2] / "fixtures" / "m1_teacher" / "migration"
+)
+PR3_LEGACY_FIXTURE = MIGRATION_FIXTURES / "pr3_v1_structured_legacy.sqlite"
+PR3_LEGACY_MANIFEST = MIGRATION_FIXTURES / "pr3_v1_structured_legacy.manifest.json"
+
+STRUCTURED_LEARNER = "m1b.pr3.legacy.structured"
+STRUCTURED_SESSION = "session.pr3.legacy.structured"
+STRUCTURED_TOKEN = "legacy.structured.token.1"
+STRUCTURED_OLD_DIGEST_PREFIX = "622f5b364e154174"
+
+
+@pytest.fixture(scope="module")
+def structured_manifest() -> dict:
+    return json.loads(PR3_LEGACY_MANIFEST.read_text(encoding="utf-8"))
+
+
+def copy_structured_fixture(tmp_path: Path) -> Path:
+    target = tmp_path / "structured_legacy.sqlite"
+    shutil.copy2(PR3_LEGACY_FIXTURE, target)
+    return target
+
+
+def test_real_pre_pr3_structured_legacy_replays_with_old_projection(
+    components: demo.Components, tmp_path: Path, structured_manifest: dict
+) -> None:
+    """P1-1: a real old-engine v1 DB with dict/list response must replay safely.
+
+    The fixture was written by the pre-B-PR3 engine (commit 4706250); its digest
+    used the default-separator JSON projection.  Same dict + same token must
+    return the old result with zero writes and zero scorer calls; a different
+    dict must still conflict; a foreign learner must still be rejected.
+    """
+
+    db_path = copy_structured_fixture(tmp_path)
+    response = structured_manifest["response"]
+    fixture = structured_manifest["fixtures"][STRUCTURED_LEARNER]
+    assert fixture["session_id"] == STRUCTURED_SESSION
+    assert fixture["explicit_token"] == STRUCTURED_TOKEN
+    assert request_digest(response)[:16] != legacy_request_digest(response)[:16]
+    assert legacy_request_digest(response)[:16] == STRUCTURED_OLD_DIGEST_PREFIX
+
+    repository = SqliteRepository(db_path)
+    try:
+        # v1 -> v2 migration backfills the legacy row with the *stored* old
+        # 16-hex marker; it does not recompute it with the new projection.
+        assert repository.schema_version == 2
+        row = read_scope_rows(db_path)
+        assert len(row) == 2
+        structured_row = next(item for item in row if item[0] == STRUCTURED_TOKEN)
+        assert structured_row[5] == "legacy:" + STRUCTURED_OLD_DIGEST_PREFIX
+        assert structured_row[4] == fixture["turn_index"]
+        assert structured_row[7] == "legacy"
+
+        scorer = ScriptedScorer()
+        engine, history = demo._make_engine(  # noqa: SLF001 - test wiring
+            components, repository, scorer
+        )
+        event_count = len(repository.list_events(STRUCTURED_LEARNER))
+        snapshot_before = repository.get_snapshot(STRUCTURED_LEARNER)
+
+        replay = engine.submit_response(
+            STRUCTURED_SESSION,
+            fixture["item_id"],
+            dict(response),
+            result_id=STRUCTURED_TOKEN,
+        )
+        assert replay.result_id == STRUCTURED_TOKEN
+        assert replay.learner_id == STRUCTURED_LEARNER
+        assert replay.to_dict()["status"] == "CORRECT"
+        assert scorer.calls == 0, "legacy replay must not re-score"
+        assert len(repository.list_events(STRUCTURED_LEARNER)) == event_count
+        assert repository.get_snapshot(STRUCTURED_LEARNER) == snapshot_before
+        assert history.verify_rebuild(STRUCTURED_LEARNER) is True
+
+        # Different structured payload with the same token: explicit conflict.
+        with pytest.raises(ConflictError) as excinfo:
+            engine.submit_response(
+                STRUCTURED_SESSION,
+                fixture["item_id"],
+                {"answer": "B", "why": "different"},
+                result_id=STRUCTURED_TOKEN,
+            )
+        assert excinfo.value.code == "IDEMPOTENCY_CONFLICT"
+        assert excinfo.value.details["reason"] == "REQUEST_DIGEST_MISMATCH"
+        assert len(repository.list_events(STRUCTURED_LEARNER)) == event_count
+
+        # Foreign learner replaying the same legacy token: reject, no read.
+        engine_other, _ = demo._make_engine(  # noqa: SLF001 - test wiring
+            components, repository, ScriptedScorer()
+        )
+        goal = LearnerGoal(
+            goal_id=f"goal.{OTHER_LEARNER}.{components.objective.objective_id}",
+            learner_id=OTHER_LEARNER,
+            objective_id=components.objective.objective_id,
+            created_at=TS,
+        )
+        other_state = engine_other.start_session(
+            OTHER_LEARNER,
+            goal,
+            components.objective,
+            session_id="session.structured.other",
+        )
+        other_pending = drive_to_pending(engine_other, repository, other_state.session_id)
+        other_events = len(repository.list_events(OTHER_LEARNER))
+        with pytest.raises(ConflictError) as excinfo:
+            engine_other.submit_response(
+                other_state.session_id,
+                other_pending.pending_item_id,
+                dict(response),
+                result_id=STRUCTURED_TOKEN,
+            )
+        assert excinfo.value.code == "IDEMPOTENCY_CONFLICT"
+        assert excinfo.value.details["reason"] == "LEGACY_SCOPE_MISMATCH"
+        assert STRUCTURED_LEARNER not in json.dumps(excinfo.value.details)
+        assert len(repository.list_events(OTHER_LEARNER)) == other_events
+    finally:
+        repository.close()
+
+
+def test_pre_pr3_structured_default_id_uses_old_projection(
+    structured_manifest: dict,
+) -> None:
+    """P1-1: the old default-id shape is reproduced with the legacy projection."""
+
+    response = structured_manifest["response"]
+    fixture = structured_manifest["fixtures"]["m1b.pr3.legacy.default"]
+    assert fixture["default_id_used"] is True
+    expected = legacy_default_result_id(
+        fixture["session_id"], fixture["turn_index"], fixture["item_id"], response
+    )
+    assert expected == fixture["result_id"]
+    assert expected.endswith(":" + STRUCTURED_OLD_DIGEST_PREFIX)
+
+
+# ---------------------------------------------------------------------------
+# P2-4: event-log fallback must also enforce the legacy turn rule
+# ---------------------------------------------------------------------------
+
+
+def test_legacy_event_fallback_enforces_turn_rule(
+    components: demo.Components, tmp_path: Path
+) -> None:
+    db_path = tmp_path / "fallback_turn.sqlite"
+    legacy = build_legacy_database(components, db_path)
+    repository = SqliteRepository(db_path)
+    try:
+        # Simulate a missing additive index row (e.g. manual recovery) so the
+        # event-log fallback is the only legacy adapter available.
+        repository._conn.execute(  # noqa: SLF001 - white-box test setup
+            "DELETE FROM result_scopes WHERE result_id = ?", (TOKEN,)
+        )
+        repository._conn.commit()  # noqa: SLF001
+        engine, _ = demo._make_engine(  # noqa: SLF001 - test wiring
+            components, repository, ScriptedScorer()
+        )
+        event_count = len(repository.list_events(LEARNER))
+
+        # just-consumed turn retry: accepted (attempt turn 0, current turn 1).
+        replay = engine.submit_response(
+            legacy["session_id"], legacy["item_id"], "A", result_id=TOKEN
+        )
+        assert replay.result_id == TOKEN
+        assert len(repository.list_events(LEARNER)) == event_count
+
+        # Reusing the token two turns later is not the same logical submission.
+        current = repository.load_session(legacy["session_id"])
+        assert current is not None
+        repository.save_session(
+            replace(
+                current,
+                turn_index=current.turn_index + 2,
+                updated_at="2026-11-20T00:00:02Z",
+            )
+        )
+        with pytest.raises(ConflictError) as excinfo:
+            engine.submit_response(
+                legacy["session_id"], legacy["item_id"], "A", result_id=TOKEN
+            )
+        assert excinfo.value.code == "IDEMPOTENCY_CONFLICT"
+        assert excinfo.value.details["reason"] == "TURN_MISMATCH"
+        assert len(repository.list_events(LEARNER)) == event_count
+    finally:
+        repository.close()
+
+
+# ---------------------------------------------------------------------------
+# P2-5: schema-level defense for v1 rows with turn_index=-1
+# ---------------------------------------------------------------------------
+
+
+def test_schema_rejects_v1_rows_with_unknown_turn(tmp_path: Path) -> None:
+    db_path = tmp_path / "turn_check.sqlite"
+    repository = SqliteRepository(db_path)
+    repository.ensure_learner(LEARNER)
+    repository.close()
+    conn = sqlite3.connect(db_path)
+    try:
+        insert = (
+            "INSERT INTO result_scopes(result_id, scope_version, learner_id, "
+            "session_id, item_id, turn_index, request_digest, status, attempt_id, "
+            "origin, created_at, updated_at) VALUES (?, 'm1b.scope.v1', ?, 's', "
+            "'i', ?, 'digest', 'TERMINAL', 'a', ?, 't', 't')"
+        )
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute(insert, ("v1.minus.one", LEARNER, -1, "v1"))
+        conn.execute(insert, ("legacy.minus.one", LEARNER, -1, "legacy"))
+        conn.commit()
+    finally:
+        conn.close()
+    repository = SqliteRepository(db_path)
+    try:
+        legacy_row = repository.find_scope_owner("legacy.minus.one")
+        assert legacy_row is not None and legacy_row.turn_index == -1
+        assert legacy_row.origin == "legacy"
     finally:
         repository.close()

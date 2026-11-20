@@ -31,6 +31,7 @@ from m1_teacher.assessment.judge.supervisor import (
     JudgeVerdict,
     TrustedJudgeSupervisor,
 )
+from m1_teacher.contracts.errors import ValidationError
 
 SENTINEL_EXPECTED = "SENTINEL_DO_NOT_LEAK_EXPECTED_0001"
 SENTINEL_ARG = "SENTINEL_DO_NOT_LEAK_ARG_0002"
@@ -346,8 +347,10 @@ def test_to_dict_exposes_only_aggregate_fields() -> None:
         "cases_passed",
         "failure_codes",
         "infra_error",
+        "security_profile",
     }
     assert payload["failure_codes"] == []
+    assert payload["security_profile"] == {}
 
 
 # ---------------------------------------------------------------------------
@@ -441,7 +444,7 @@ def test_constructor_opt_in_is_explicit_and_validated() -> None:
     assert scorer.trusted_fixture_only is False
     explicit = DeterministicScorer(components.fixtures_root, trusted_fixture_only=True)
     assert explicit.trusted_fixture_only is True
-    with pytest.raises(Exception):
+    with pytest.raises(ValidationError):
         DeterministicScorer(components.fixtures_root, trusted_fixture_only=1)
 
 

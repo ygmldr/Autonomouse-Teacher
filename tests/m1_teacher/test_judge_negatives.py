@@ -25,6 +25,7 @@ from pathlib import Path
 import pytest
 
 from m1_teacher.assessment.judge.protocol import (
+
     REQUEST_FIELDS,
     WORKER_STATUS_COMPLETED,
     WORKER_STATUS_IMPORT_ERROR,
@@ -36,7 +37,9 @@ from m1_teacher.assessment.judge.protocol import (
     canonical_json,
 )
 from m1_teacher.assessment.judge.sandbox import BwrapSandbox
-from m1_teacher.assessment.judge.worker import UntrustedExecutionWorker
+from m1_teacher.assessment.judge.worker import WORK_DIR_PREFIX, UntrustedExecutionWorker
+
+from judge_os_gate import require_os_sandbox
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 JUDGE_DIR = REPO_ROOT / "fixtures" / "m1_teacher" / "judge"
@@ -103,15 +106,14 @@ def _temp_worker_dirs() -> set:
     return {
         entry.name
         for entry in Path(tempfile.gettempdir()).iterdir()
-        if entry.name.startswith("m1b_judge_worker_")
+        if entry.name.startswith(WORK_DIR_PREFIX)
     }
 
 
 @pytest.fixture(scope="module")
 def real_sandbox() -> BwrapSandbox:
     sandbox = BwrapSandbox()
-    if not sandbox.available():
-        pytest.skip(f"bwrap sandbox unavailable on this host: {sandbox.probe_failure_reason()}")
+    require_os_sandbox(sandbox.available())
     return sandbox
 
 

@@ -149,8 +149,10 @@ request_digest = sha256(canonical_response(response))    # 64 hex，见 §2.2
 
 ### 2.2 request_digest（规范）
 
-- 复用现有 `_canonical_response`（`engine.py` 顶部）：`dict/list` 用 `json.dumps(..., ensure_ascii=False, sort_keys=True, allow_nan=False)`；`str` 按 `str(response)`；其他类型按 `str(response)`。
-- 存储 **完整 64-hex** `request_digest`；当前 `RESPONSE_SUBMITTED`/`ASSESSMENT_PREPARED` payload 的 `response_digest` 是前 16 hex（`engine.py:542-548`；PR2 `_prepare_attempt` 同），PR3 保留该字段作为兼容展示，但 scope 判定以完整 digest 为准；legacy 事件只能用 16-hex 前缀比较（§4.5）。
+- **两套投影并存（独立评审 P1-1 修正）**：
+  - 新写入：`canonical_response` 对 `dict/list` 用 `json.dumps(..., ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False)`（compact）；`str` 按 `str(response)`。`request_digest = sha256(canonical_response(response))`。
+  - legacy 比较：pre-PR3 engine 的 `_canonical_response` **没有** `separators`（默认 `", "`/`": "` 空格），因此旧 `response_digest`/旧默认 id 必须用 `legacy_canonical_response` / `legacy_request_digest` 重算后再比较；不得混用两套投影，否则结构化 response 的可证明 digest 会被误判为 mismatch。
+- 存储 **完整 64-hex** `request_digest`；当前 `RESPONSE_SUBMITTED`/`ASSESSMENT_PREPARED` payload 的 `response_digest` 是前 16 hex（`engine.py:542-548`；PR2 `_prepare_attempt` 同），PR3 保留该字段作为兼容展示，但 scope 判定以完整 digest 为准；legacy 事件只能用 16-hex 前缀比较（§4.5），且该前缀按 legacy 投影计算。
 - **不**把 session/turn/result_id 混进 digest：它们已由 scope 绑定，重复计算会破坏"同 scope 同 digest"的清晰语义。
 - digest 只对 response 内容敏感：同一 response 的字符串/结构化等价表示必须得到同一 digest（排序键 + 无 NaN）。
 
@@ -232,6 +234,10 @@ attempt_id_v1 = "attempt.v1." + sha256(canonical_json(attempt_scope))[:32]
 | M18 | repo 不支持 scoped API 且 caller 尝试显式 result_id 重试 | 拒绝（fail-closed） | 否 | 否 | `UnsupportedOperationError`（`IDEMPOTENCY_UNSUPPORTED`） | 不得回退到全局 `get_event` |
 
 > 错误码统一用 `ConflictError(code="IDEMPOTENCY_CONFLICT", details={"reason": <上图枚举>, "requested_scope": {...}}) `；`details` 只含**请求方**自己的 scope 与 policy 版本，不含他人数据（§6 T-7 扫描验证）。`INVALID_RESULT_ID` 用 `ValidationError`；能力缺失用 `UnsupportedOperationError`。既有 `ConflictError`/`SESSION_VERSION_CONFLICT`/`DUPLICATE_EVENT`/`EVENT_SEQ_CONFLICT` 语义不改，只新增专用 code。
+>
+> **实现澄清（P2-1）**：M16 的"收敛"即验收语义——同 scope、同 payload 的并发双提交是 **convergent retry**：两个调用最终都返回**同一份**已存 result，DB 恰好一份终态/一次 mastery；只有不同 payload 或跨 scope 才是 explicit `IDEMPOTENCY_CONFLICT`。测试名：`test_concurrent_same_scope_same_response_converges_to_one_result`。
+>
+> **实现澄清（P2-2）**：同一 scope 的 TERMINAL 快速查找在 `PAUSED`/`COMPLETE` phase 门禁**之前**执行，因此"提交成功但客户端丢响应、随后 session 完成/暂停"的同 token 重试仍返回已存 result（零写入）；非本 scope 调用仍被 phase 门禁拒绝。
 
 ### 3.2 裁决：CONTENT 相同但显式 result_id 不同
 
@@ -387,7 +393,8 @@ SCOPE_VERSION = "m1b.scope.v1"
 IDEMPOTENCY_POLICY_VERSION = "m1b.idempotency.v1"
 
 def validate_result_id(result_id: str) -> str: ...            # 非法 -> ValidationError(INVALID_RESULT_ID)
-def request_digest(response: str | dict) -> str: ...          # 64-hex, reuses canonical_response
+def request_digest(response: str | dict) -> str: ...          # 64-hex, new compact projection
+def legacy_request_digest(response: str | dict) -> str: ...   # 64-hex, pre-PR3 default-separator projection (legacy only)
 def make_scope(learner_id, session_id, item_id, turn_id, result_id) -> ResultScope: ...
 def default_result_id(learner_id, session_id, item_id, turn_id, response) -> str
 def default_attempt_id(learner_id, session_id, item_id, turn_id) -> str
@@ -465,6 +472,8 @@ submit_response(session_id, item_id, response, *, result_id=None, caller_learner
 ```
 
 需改动的既有函数（base line 供对照）：`_find_existing_result` 删除/私有化为 `_find_existing_result_in_scope`（`engine.py:833-850`）；显式/default/score 后三处调用（`:516, :531, :537`）全部替换；`_default_attempt_result_id`（`:783-790`）改为 §2.3 版本；`_handle_eval_error`（`:855-895`）的 `evt.evalerror.<result_id>` 写入与 scope 行/终态绑定；`_handle_observed_result`（`:938-...`）经 `apply_assessment`/事务 B 写 scope；`LearningHistory.apply_assessment`（`history.py:210-330`）的 `get_event(assessed_event_id(...))`（`:266`）改为 scoped 查找；`assessed_event_id`/`mastery_updated_event_id`（`history.py:109-118`）保留旧函数（历史/测试用）并新增 scope-aware 版本；`known_result_ids`（`:374`）语义不变（per learner）。
+
+> **实现状态（评审 P1-2）**：`LearningHistory.apply_assessment` 的重复判定已改为 learner-filtered/scoped 查找（`get_event_for_learner` + `find_scope_owner` 元数据）：同一 learner+session+item 的重复 apply 仍幂等；命中其他 learner/session/item 或 engine 管理的 PREPARED attempt 时抛稳定 `IDEMPOTENCY_CONFLICT`（不静默丢弃、不返回他人成绩）；无 scoped 扩展的协议-only repo 保留文档化的 legacy fallback，但异主事件仍冲突。
 **PR2 未提交实现（`/root/m1b/pr2`）需同步加固的点**：`_terminal_result`（约 `:1177`）仍全局读；`_lookup_result_for_retry`（约 `:1193`）先全局读并解析他人 payload 再抛冲突；`_commit_result_turn` 的 `DUPLICATE_EVENT` 捕获（约 `:902-929`）**无条件返回全局 terminal**（并发窗口可能返回他人结果）→ 必须改为 scoped 复核；legacy fallback `_find_existing_result`（约 `:1772`）仍全局；`history.assessment_event_drafts`（约 `:248`）仍产出 legacy id（PR3 可保持 id 形状，但 scope 写入走事务 B）。合并顺序建议：PR2 先合并/冻结，PR3 rebase 后在这些位置替换为 scoped API，避免双改冲突。
 
 ### 5.5 与 PR2 `commit_teaching_turn` / session_version CAS 的关系
@@ -484,6 +493,9 @@ submit_response(session_id, item_id, response, *, result_id=None, caller_learner
 - 老版 repository（无 `ScopedIdempotencyRepository`）：engine 检测 `supports_scoped_idempotency` 为假 → `submit_response` 显式 result_id 路径 fail closed（`IDEMPOTENCY_UNSUPPORTED`）；新写入仍可走默认路径但同样要求能力（否则拒绝并提示升级）；文档化 M1-A legacy 模式仅用于只读/演示，不承诺幂等。
 - 新 engine + 旧 DB（schema v1）：打开时自动 v2 迁移（§4.5）；迁移前只读预览可由 CLI `--check-migration` 提供（PR5 可选）。
 - 旧 engine + 新 DB（schema v2）：`schema_meta.version` 高于支持版本 → fail-closed（现有 `SqliteRepository` 行为），不猜测。
+- legacy 投影（P1-1）：旧库的结构化 response 一律用 `legacy_request_digest` 比较；新写入仍用 compact 投影。测试使用由 base `4706250` 真实 engine 生成并提交的 v1 fixture（`fixtures/m1_teacher/migration/pr3_v1_structured_legacy.sqlite`），不是"新 engine 生成后降级"。
+- legacy event-log fallback（P2-4）：当 `result_scopes` 索引行缺失时，fallback 除 learner/session/item/result_id/digest 外还校验 attempt turn（允许 `-1`/当前 turn/刚消费的前一 turn），旧 turn 重用 token 仍冲突。
+- schema 防御（P2-5）：`result_scopes` 增加表级 `CHECK (origin = 'legacy' OR turn_index >= 0)`；读取 `_scope_metadata` 亦做同样应用层校验（兼容早期 v2 表未带新 CHECK 的情况）。
 
 ---
 
@@ -526,6 +538,8 @@ submit_response(session_id, item_id, response, *, result_id=None, caller_learner
 | `tests/m1_teacher/test_concurrent_idempotency.py` | `test_concurrent_same_scope_converges_to_single_evidence`；`test_concurrent_cross_learner_result_id_single_winner`；`test_session_version_cas_blocks_lost_update` | M16/M17、T-9/T-10、B2-03 交叉 | CONCURRENCY/DETERMINISTIC |
 | `tests/m1_teacher/test_no_unscoped_result_lookup.py` | `test_no_unscoped_result_lookup_in_engine_source` | T-14 | STATIC |
 | 更新既有 | `tests/m1_teacher/test_session_engine.py::test_duplicate_submit_with_same_result_id_is_idempotent`（保持，同 digest 路径）；`test_e2e_resume_idempotency.py::test_duplicate_result_id_updates_mastery_once`（改为：同 response 重试 → 同结果；不同 response → conflict，拆成两个用例） | B3-02 语义变更显式化 | DETERMINISTIC |
+
+> **实现落地（评审后）**：测试按 Lead 指定合并为 `tests/m1_teacher/test_scoped_idempotency.py`（31 个用例，含 P1-2/P2-2/P2-1）与 `tests/m1_teacher/test_scope_migration.py`（15 个用例，含 P1-1/P2-4/P2-5）；上面草案中的其余文件名不再单独创建，用例映射见实现报告 §5.2/§5.3 与 §8。
 
 ### 7.2 与证据矩阵映射
 
@@ -616,3 +630,19 @@ cd /root/m1b/pr3design
 | PR2 未提交实现（供兼容参考） | `/root/m1b/pr2`：`session/engine.py` `_commit_result_turn` `:902`（`:924` 全局 terminal 返回）、`_find_prepared_payload_for_result` `:1155`、`_terminal_result` `:1177`、`_lookup_result_for_retry` `:1193`、legacy `_find_existing_result` `:1772`；`learner/history.py` `assessment_event_drafts` `:248`、`:385` 全局已存在判断；`learner/repository.py` `commit_teaching_turn` `:771`、`session_version`、`ASSESSMENT_PREPARED`/failpoints |
 
 **本文档不包含实现，也不包含任何 PASS/NOT_RUN 状态变更；B3-01/B3-02 保持 `NOT_RUN` 直至实现 PR 与独立 Reviewer 复跑。**
+
+---
+
+## 10. 实现后独立评审行动关闭（P1/P2）
+
+独立评审 commit `db636ea`（报告 `docs/M1_B_PR3_REVIEW.md`，结论 `PASS_WITH_ACTIONS`）提出 P1=2、P2=5；实现分支的关闭方式如下（证据见 `docs/M1_B_SCOPED_IDEMPOTENCY_IMPLEMENTATION.md` §8 与真实 pytest 输出）：
+
+| 编号 | 处置 | 验收测试 |
+| --- | --- | --- |
+| P1-1 legacy 投影 | 新增 `legacy_canonical_response`/`legacy_request_digest`（pre-PR3 默认分隔符投影），legacy row/event/默认 id 全部按旧投影比较；新写入仍 compact；真实 base `4706250` v1 fixture 入库 | `test_real_pre_pr3_structured_legacy_replays_with_old_projection`、`test_pre_pr3_structured_default_id_uses_old_projection` |
+| P1-2 apply_assessment 全局查重 | 改为 learner-filtered/scoped 查重；异 learner/session/item/PREPARED 稳定 `IDEMPOTENCY_CONFLICT`，不静默丢弃 | `test_apply_assessment_cross_learner_token_is_explicit_conflict`、`test_apply_assessment_same_scope_replay_stays_idempotent`、`test_apply_assessment_same_token_other_session_conflicts` |
+| P2-1 并发语义 | 文档明确 M16 = convergent retry（同一 result、1 份终态），测试命名对齐并断言两进程结果完全相同 | `test_concurrent_same_scope_same_response_converges_to_one_result` |
+| P2-2 phase 门禁顺序 | 同 scope TERMINAL 快速查找前移到 `PAUSED`/`COMPLETE` 之前，保留非本 scope 的 phase 拒绝 | `test_same_token_retry_after_complete_returns_stored_result`、`test_same_token_retry_after_paused_returns_stored_result` |
+| P2-3 报告计数 | 实现报告改为最终树真实计数，632/595 标注为历史基线 | 本 doc §7.1 注 + 实现报告 §5.1 |
+| P2-4 legacy fallback turn | `_legacy_event_lookup` 增加 attempt turn 校验（-1/当前/前一 turn） | `test_legacy_event_fallback_enforces_turn_rule` |
+| P2-5 schema v1 turn | 表级 `CHECK (origin = 'legacy' OR turn_index >= 0)` + 应用层校验 | `test_schema_rejects_v1_rows_with_unknown_turn` |

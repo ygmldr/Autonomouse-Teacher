@@ -340,13 +340,18 @@ def finalize_goal_completion_after_recovery(db_path: Path, setup: PendingSetup) 
         mode="submit",
         result_id=result_id,
     )
-    # The session is COMPLETE: a repeated submission fails closed before touching
-    # state (no duplicate result/mastery; recovery itself is the zero-event no-op).
-    assert retry.returncode != 0, retry.stdout + retry.stderr
-    assert json.loads(retry.stdout).get("code") == "CONFLICT"
+    # B-PR3 review P2-2: the scoped TERMINAL fast path runs before the
+    # PAUSED/COMPLETE phase gates, so a same-token retry of the just-completed
+    # submission returns the stored result (zero events) instead of a phase
+    # conflict.  It must not create a duplicate result/mastery/goal.
+    assert retry.returncode == 0, retry.stdout + retry.stderr
+    retry_payload = json.loads(retry.stdout)
+    assert retry_payload["result"]["result_id"] == result_id
     after = db_summary(db_path, setup.session_id)
-    assert after["event_count"] == before, "rejected retry must append zero events"
+    assert after["event_count"] == before, "idempotent retry must append zero events"
     assert after["goal_status"] == "COMPLETED"
+    assert after["goal_completed_events"] == 1
+    assert after["terminal_results"] == 1
     return summary
 
 

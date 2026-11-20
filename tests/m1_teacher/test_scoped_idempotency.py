@@ -751,7 +751,14 @@ def test_scope_conflict_rolls_back_events_and_session(
 # ---------------------------------------------------------------------------
 
 
-def test_concurrent_same_token_same_response_converges(tmp_path: Path) -> None:
+def test_concurrent_same_scope_same_response_converges_to_one_result(
+    tmp_path: Path,
+) -> None:
+    """P2-1 acceptance semantics: same-scope/same-payload concurrency is a
+    **convergent retry** (both callers get the identical stored result; exactly
+    one terminal assessment/snapshot).  It is not the explicit-conflict case --
+    different payloads or cross-scope reuse are (see the other negative tests).
+    """
     db_path = tmp_path / "concurrent.sqlite"
     setup = setup_pending(db_path)
     barrier = tmp_path / "barrier"
@@ -778,11 +785,16 @@ def test_concurrent_same_token_same_response_converges(tmp_path: Path) -> None:
     time.sleep(0.4)
     barrier.write_text("go", encoding="utf-8")
     outputs = [process.communicate(timeout=120) for process in processes]
+    results: list[dict] = []
     for process, (stdout, stderr) in zip(processes, outputs):
         assert process.returncode == 0, stdout + stderr
         payload = json.loads(stdout)
         assert payload["result"]["result_id"] == "pr3.tok.concurrent"
         assert payload["result"]["learner_id"] == "m1b.crash.learner"
+        results.append(payload["result"])
+    assert results[0] == results[1], (
+        "convergent retry: both callers must observe the identical result"
+    )
     summary = db_summary(db_path, setup.session_id)
     assert summary["terminal_results"] == 1, "exactly one terminal result may be committed"
     assert summary["event_types"].get("ASSESSED") == 1
@@ -1002,5 +1014,187 @@ def test_concurrent_cross_learner_same_token_single_winner(tmp_path: Path) -> No
         ]
         assert len(assessed) == 1
         assert LearningHistory(repository).verify_rebuild(LEARNER) is True
+    finally:
+        repository.close()
+
+
+# ---------------------------------------------------------------------------
+# P1-2: LearningHistory.apply_assessment duplicate detection is scoped
+# ---------------------------------------------------------------------------
+
+
+def _first_item(components: demo.Components, item_id: str | None = None):
+    for item in components.adapter.assessment_items():
+        if item_id is None or item.item_id == item_id:
+            return item
+    raise AssertionError(f"unknown fixture item {item_id!r}")
+
+
+def test_apply_assessment_cross_learner_token_is_explicit_conflict(
+    components: demo.Components, tmp_path: Path
+) -> None:
+    """P1-2: B must get a stable conflict, never a silent drop of its assessment."""
+
+    repository = SqliteRepository(tmp_path / "history_cross.sqlite")
+    try:
+        engine, _ = build_engine(components, repository, ScriptedScorer())
+        state = start_pending(engine, repository, components, LEARNER)
+        item = _first_item(components, state.pending_item_id)
+        first = engine.submit_response(
+            state.session_id, item.item_id, "A", result_id="pr3.tok.history"
+        )
+        events_a_before = events_of(repository, LEARNER)
+        snapshot_a_before = snapshot_projection(repository, LEARNER)
+
+        result_b = ScriptedScorer().score(
+            item, LEARNER_B, "A", result_id="pr3.tok.history"
+        )
+        events_b_before = events_of(repository, LEARNER_B)
+        history = LearningHistory(repository)
+        with pytest.raises(ConflictError) as excinfo:
+            history.apply_assessment(
+                LEARNER_B, "session.b.history", item, result_b
+            )
+        assert excinfo.value.code == "IDEMPOTENCY_CONFLICT"
+        assert excinfo.value.details["reason"] == "RESULT_ID_SCOPE_MISMATCH"
+        assert excinfo.value.details["requested_scope"]["learner_id"] == LEARNER_B
+        assert LEARNER not in json.dumps(excinfo.value.details)
+        # B's assessment was not silently dropped as a success: nothing written.
+        assert events_of(repository, LEARNER_B) == events_b_before
+        assert repository.get_snapshot(LEARNER_B) is None
+        # A's state is untouched and still the owner of the token.
+        assert events_of(repository, LEARNER) == events_a_before
+        assert snapshot_projection(repository, LEARNER) == snapshot_a_before
+        assert first.learner_id == LEARNER
+    finally:
+        repository.close()
+
+
+def test_apply_assessment_same_scope_replay_stays_idempotent(
+    components: demo.Components, tmp_path: Path
+) -> None:
+    repository = SqliteRepository(tmp_path / "history_same.sqlite")
+    try:
+        engine, _ = build_engine(components, repository, ScriptedScorer())
+        state = start_pending(engine, repository, components, LEARNER)
+        item = _first_item(components, state.pending_item_id)
+        result = engine.submit_response(
+            state.session_id, item.item_id, "A", result_id="pr3.tok.history.same"
+        )
+        events_before = events_of(repository, LEARNER)
+        snapshot_before = repository.get_snapshot(LEARNER)
+        history = LearningHistory(repository)
+        returned = history.apply_assessment(
+            LEARNER, state.session_id, item, result
+        )
+        assert snapshot_before is not None
+        assert returned.to_dict() == snapshot_before.to_dict()
+        assert events_of(repository, LEARNER) == events_before
+    finally:
+        repository.close()
+
+
+def test_apply_assessment_same_token_other_session_conflicts(
+    components: demo.Components, tmp_path: Path
+) -> None:
+    repository = SqliteRepository(tmp_path / "history_session.sqlite")
+    try:
+        engine, _ = build_engine(components, repository, ScriptedScorer())
+        state = start_pending(engine, repository, components, LEARNER)
+        item = _first_item(components, state.pending_item_id)
+        result = engine.submit_response(
+            state.session_id, item.item_id, "A", result_id="pr3.tok.history.session"
+        )
+        events_before = events_of(repository, LEARNER)
+        history = LearningHistory(repository)
+        with pytest.raises(ConflictError) as excinfo:
+            history.apply_assessment(LEARNER, "session.other.apply", item, result)
+        assert excinfo.value.code == "IDEMPOTENCY_CONFLICT"
+        assert excinfo.value.details["reason"] == "RESULT_ID_SCOPE_MISMATCH"
+        assert events_of(repository, LEARNER) == events_before
+    finally:
+        repository.close()
+
+
+# ---------------------------------------------------------------------------
+# P2-2: same-scope TERMINAL replay works before PAUSED/COMPLETE gates
+# ---------------------------------------------------------------------------
+
+
+def test_same_token_retry_after_complete_returns_stored_result(
+    components: demo.Components, tmp_path: Path
+) -> None:
+    repository = SqliteRepository(tmp_path / "complete_replay.sqlite")
+    scorer = ScriptedScorer()
+    try:
+        engine, _ = build_engine(components, repository, scorer)
+        state = start_pending(engine, repository, components)
+        item_id = state.pending_item_id
+        assert item_id is not None
+        first = engine.submit_response(
+            state.session_id, item_id, "A", result_id="pr3.tok.complete"
+        )
+        after = repository.load_session(state.session_id)
+        assert after is not None
+        # White-box: force the terminal phase without appending any event; the
+        # scoped fast path must run before the COMPLETE gate.
+        repository.save_session(
+            replace(after, phase="COMPLETE", updated_at="2026-11-20T00:00:03Z")
+        )
+        events_before = events_of(repository, LEARNER)
+        snapshot_before = snapshot_projection(repository, LEARNER)
+        calls_before = scorer.calls
+
+        replay = engine.submit_response(
+            state.session_id, item_id, "A", result_id="pr3.tok.complete"
+        )
+        assert replay.to_dict() == first.to_dict()
+        assert scorer.calls == calls_before
+        assert events_of(repository, LEARNER) == events_before
+        assert snapshot_projection(repository, LEARNER) == snapshot_before
+
+        # A different scope/token is still rejected by the phase gate.
+        with pytest.raises(ConflictError) as excinfo:
+            engine.submit_response(
+                state.session_id, item_id, "A", result_id="pr3.tok.complete.other"
+            )
+        assert excinfo.value.code == "CONFLICT"
+        assert events_of(repository, LEARNER) == events_before
+    finally:
+        repository.close()
+
+
+def test_same_token_retry_after_paused_returns_stored_result(
+    components: demo.Components, tmp_path: Path
+) -> None:
+    repository = SqliteRepository(tmp_path / "paused_replay.sqlite")
+    scorer = ScriptedScorer()
+    try:
+        engine, _ = build_engine(components, repository, scorer)
+        state = start_pending(engine, repository, components)
+        item_id = state.pending_item_id
+        assert item_id is not None
+        first = engine.submit_response(
+            state.session_id, item_id, "A", result_id="pr3.tok.paused"
+        )
+        after = repository.load_session(state.session_id)
+        assert after is not None
+        repository.save_session(
+            replace(after, phase="PAUSED", updated_at="2026-11-20T00:00:04Z")
+        )
+        events_before = events_of(repository, LEARNER)
+        calls_before = scorer.calls
+        replay = engine.submit_response(
+            state.session_id, item_id, "A", result_id="pr3.tok.paused"
+        )
+        assert replay.to_dict() == first.to_dict()
+        assert scorer.calls == calls_before
+        assert events_of(repository, LEARNER) == events_before
+        with pytest.raises(ConflictError) as excinfo:
+            engine.submit_response(
+                state.session_id, item_id, "A", result_id="pr3.tok.paused.other"
+            )
+        assert excinfo.value.code == "CONFLICT"
+        assert events_of(repository, LEARNER) == events_before
     finally:
         repository.close()

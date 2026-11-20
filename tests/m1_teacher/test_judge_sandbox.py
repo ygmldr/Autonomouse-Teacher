@@ -13,6 +13,7 @@ user namespaces are unavailable; the fail-closed tests still run everywhere.
 from __future__ import annotations
 
 import json
+import math
 import os
 import shutil
 import tempfile
@@ -21,6 +22,7 @@ from pathlib import Path
 import pytest
 
 from m1_teacher.assessment.judge.protocol import JUDGE_SANDBOX_UNAVAILABLE
+
 from m1_teacher.assessment.judge.sandbox import (
     BWRAP_BINARY,
     BwrapSandbox,
@@ -29,6 +31,8 @@ from m1_teacher.assessment.judge.sandbox import (
     SandboxUnavailable,
     WORKER_PYTHON,
 )
+
+from judge_os_gate import require_os_sandbox
 
 
 def _write_work_script(work_dir: Path, name: str, source: str) -> Path:
@@ -40,8 +44,7 @@ def _write_work_script(work_dir: Path, name: str, source: str) -> Path:
 
 def _make_sandbox(**kwargs) -> BwrapSandbox:
     sandbox = BwrapSandbox(**kwargs)
-    if not sandbox.available():
-        pytest.skip(f"bwrap sandbox unavailable on this host: {sandbox.probe_failure_reason()}")
+    require_os_sandbox(sandbox.available())
     return sandbox
 
 
@@ -155,8 +158,7 @@ def test_failed_canary_probe_is_unavailable_and_never_falls_back(monkeypatch):
 
 def test_probe_is_cached_between_available_checks(monkeypatch):
     sandbox = BwrapSandbox()
-    if not sandbox.available():
-        pytest.skip(f"bwrap sandbox unavailable: {sandbox.probe_failure_reason()}")
+    require_os_sandbox(sandbox.available())
     calls = {"count": 0}
     original = sandbox._run_probe
 
@@ -352,8 +354,7 @@ finally:
 
 def test_real_sandbox_bounds_stdout_and_continues_draining():
     sandbox = BwrapSandbox(max_stdout_bytes=1024, max_stderr_bytes=1024)
-    if not sandbox.available():
-        pytest.skip(f"bwrap sandbox unavailable: {sandbox.probe_failure_reason()}")
+    require_os_sandbox(sandbox.available())
     work_dir = Path(tempfile.mkdtemp(prefix="m1b_sandbox_output_"))
     try:
         _write_work_script(
@@ -393,3 +394,92 @@ def test_sandbox_result_shape_is_plain_data():
     )
     assert result.exit_code == 0
     assert result.timed_out is False
+
+
+# ---------------------------------------------------------------------------
+# Review P1-2: host non-root principal reporting
+# ---------------------------------------------------------------------------
+def test_security_profile_records_host_euid_uid_map_and_non_root_flag():
+    sandbox = BwrapSandbox()
+    require_os_sandbox(sandbox.available())
+    profile = sandbox.security_profile()
+    assert profile["sandbox_available"] is True
+    assert profile["sandbox_uid"] == sandbox._uid
+    assert profile["sandbox_gid"] == sandbox._gid
+    assert profile["host_euid"] == os.geteuid()
+    assert isinstance(profile["uid_map"], str) and profile["uid_map"]
+    assert isinstance(profile["mapped_host_uids"], list)
+    if os.geteuid() == 0:
+        # Local worktree runs bwrap as root: inside-uid 65534 may map to host 0.
+        assert profile["host_is_root"] is True
+        assert profile["non_root_principal_verified"] is False
+        assert profile["profile"] == "LOCAL_ONLY"
+        assert profile["limitation"]
+    else:  # pragma: no cover - exercised on a non-root deployment runner
+        assert profile["non_root_principal_verified"] is True
+        assert profile["profile"] == "NON_ROOT_PRINCIPAL"
+
+
+def test_non_root_principal_verification_logic():
+    verify = BwrapSandbox._non_root_principal_verified
+    assert verify(0, "65534 0 1") is False
+    assert verify(1000, "65534 1000 1") is True
+    assert verify(1000, "65534 0 1") is False
+    assert verify(1000, "") is False
+    assert verify(1000, "65534 1000 1\n65536 0 1") is False
+
+
+def test_cpu_limit_never_fires_before_wall_budget():
+    for wall_s in (0.5, 1.5, 2.0, 2.5, 5.5):
+        cpu_limit = BwrapSandbox._cpu_limit_for_timeout(wall_s)
+        assert cpu_limit >= math.ceil(wall_s) + 2 or cpu_limit >= 10
+        assert cpu_limit > wall_s
+
+
+# ---------------------------------------------------------------------------
+# Review addendum P1-2: startup fail-closed non-root enforcement
+# ---------------------------------------------------------------------------
+def test_nonroot_requirement_fails_closed_on_root_host(monkeypatch):
+    monkeypatch.setenv("M1B_REQUIRE_NONROOT_SANDBOX", "1")
+    sandbox = BwrapSandbox()
+    assert sandbox.available() is False
+    failure = sandbox.probe_failure_reason() or ""
+    assert "non-root sandbox required but not verified" in failure
+    profile = sandbox.security_profile()
+    assert profile["profile"] == "LOCAL_ONLY"
+    assert profile["non_root_requirement_enforced"] is True
+    assert profile["non_root_requirement_satisfied"] is False
+    assert profile["sandbox_available"] is False
+    # run() must refuse before any learner-code execution.
+    work_dir = Path(tempfile.mkdtemp(prefix="m1b_nonroot_gate_"))
+    try:
+        with pytest.raises(SandboxUnavailable):
+            sandbox.run(work_dir, [WORKER_PYTHON, "/worker/worker_runner.py"], 1.0)
+    finally:
+        shutil.rmtree(work_dir, ignore_errors=True)
+
+
+def test_nonroot_requirement_default_keeps_local_synthetic_available(monkeypatch):
+    monkeypatch.delenv("M1B_REQUIRE_NONROOT_SANDBOX", raising=False)
+    sandbox = BwrapSandbox()
+    require_os_sandbox(sandbox.available())
+    profile = sandbox.security_profile()
+    assert profile["non_root_requirement_enforced"] is False
+    # Not enforced locally, but the local root principal gap is still reported.
+    assert profile["non_root_principal_verified"] is False
+    assert profile["non_root_requirement_satisfied"] is True
+    assert profile["profile"] == "LOCAL_ONLY"
+
+
+def test_nonroot_requirement_passes_when_principal_is_verified(monkeypatch):
+    monkeypatch.setenv("M1B_REQUIRE_NONROOT_SANDBOX", "1")
+    monkeypatch.setattr(
+        BwrapSandbox,
+        "_non_root_principal_verified",
+        staticmethod(lambda host_euid, uid_map: True),
+    )
+    sandbox = BwrapSandbox()
+    assert sandbox.available() is True
+    profile = sandbox.security_profile()
+    assert profile["non_root_requirement_enforced"] is True
+    assert profile["non_root_requirement_satisfied"] is True

@@ -1,0 +1,26 @@
+{
+  "commit": "4706250",
+  "fixtures": {
+    "m1b.pr3.legacy.default": {
+      "default_id_used": true,
+      "explicit_token": null,
+      "item_id": "item.bs.mcq.001",
+      "result_id": "result:session.pr3.legacy.default:0:item.bs.mcq.001:622f5b364e154174",
+      "session_id": "session.pr3.legacy.default",
+      "turn_index": 0
+    },
+    "m1b.pr3.legacy.structured": {
+      "default_id_used": false,
+      "explicit_token": "legacy.structured.token.1",
+      "item_id": "item.bs.mcq.001",
+      "result_id": "legacy.structured.token.1",
+      "session_id": "session.pr3.legacy.structured",
+      "turn_index": 0
+    }
+  },
+  "response": {
+    "answer": "A",
+    "why": "because"
+  },
+  "schema_version": 1
+}

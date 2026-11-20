@@ -20,6 +20,13 @@ Design rules (see ``docs/M1_B_SCOPED_IDEMPOTENCY.md`` and
   reused verbatim on retry.
 * ``request_digest`` is computed from the canonical response only; the session
   and turn are bound through the scope, not mixed into the digest.
+* **Two JSON projections are intentionally kept** (B-PR3 review P1-1):
+  ``canonical_response`` (compact separators) is the projection used by *new*
+  B-PR3 writes, while ``legacy_canonical_response``/``legacy_request_digest``
+  reproduce the pre-B-PR3 engine projection (``json.dumps`` with default
+  ``", "``/``": "`` separators).  Legacy evidence written by the old engine only
+  becomes comparable through the latter; mixing them silently would make a
+  provable legacy digest look like a mismatch.
 * Everything here is a pure function of its arguments; no clock, no I/O, no
   environment, no network, no hidden scoring material.
 
@@ -44,6 +51,8 @@ __all__ = [
     "ScopeMetadata",
     "canonical_response",
     "request_digest",
+    "legacy_canonical_response",
+    "legacy_request_digest",
     "validate_result_id",
     "validate_request_digest",
     "default_result_id",
@@ -94,12 +103,13 @@ def _require_nonempty_str(value: Any, where: str) -> str:
 
 
 def canonical_response(response: str | dict) -> str:
-    """Canonical text form of a learner response.
+    """Canonical text form used by **new B-PR3 writes**.
 
     ``dict``/``list`` are serialised with sorted keys and compact separators
-    (JSON-stable); anything else uses ``str()``.  This is the same projection
-    the session engine has always used for its 16-hex ``response_digest``, so
-    legacy digest prefixes remain comparable.
+    (``json.dumps(..., separators=(",", ":"))``); anything else uses ``str()``.
+    This projection differs from the pre-B-PR3 engine projection for structured
+    responses, so it must never be used to verify legacy 16-hex digests -- use
+    :func:`legacy_request_digest` for that.
     """
 
     if isinstance(response, (dict, list)):
@@ -113,10 +123,37 @@ def canonical_response(response: str | dict) -> str:
     return str(response)
 
 
+def legacy_canonical_response(response: str | dict) -> str:
+    """Pre-B-PR3 engine projection (read-only compatibility).
+
+    The old ``session.engine._canonical_response`` used
+    ``json.dumps(..., ensure_ascii=False, sort_keys=True, allow_nan=False)``
+    *without* ``separators``, i.e. the default ``", "``/``": "`` spacing for
+    dicts/lists (``str()`` otherwise).  Every legacy 16-hex ``response_digest``
+    and every ``result:<session>:<turn>:<item>:<digest16>`` default id was
+    produced with this projection.
+    """
+
+    if isinstance(response, (dict, list)):
+        return json.dumps(
+            response,
+            ensure_ascii=False,
+            sort_keys=True,
+            allow_nan=False,
+        )
+    return str(response)
+
+
 def request_digest(response: str | dict) -> str:
-    """Full 64-hex ``sha256(canonical_response(response))``."""
+    """Full 64-hex ``sha256(canonical_response(response))`` (new projection)."""
 
     return hashlib.sha256(canonical_response(response).encode("utf-8")).hexdigest()
+
+
+def legacy_request_digest(response: str | dict) -> str:
+    """Full 64-hex digest under the pre-B-PR3 projection (legacy comparison)."""
+
+    return hashlib.sha256(legacy_canonical_response(response).encode("utf-8")).hexdigest()
 
 
 def validate_result_id(result_id: Any, where: str = "result_id") -> str:
@@ -343,7 +380,7 @@ def legacy_default_result_id(
     a same-request retry after an upgrade.
     """
 
-    digest16 = request_digest(response)[:16]
+    digest16 = legacy_request_digest(response)[:16]
     return f"{_LEGACY_DEFAULT_RESULT_ID_PREFIX}{session_id}:{turn_index}:{item_id}:{digest16}"
 
 
@@ -432,13 +469,14 @@ def legacy_digest_prefix_matches(
 
     if type(stored_digest) is not str:
         return None
+    expected_prefix = legacy_request_digest(response)[:16]
     if stored_digest.startswith("legacy:"):
         marker = stored_digest[len("legacy:") :]
         if _LEGACY_DIGEST_PREFIX_RE.match(marker):
-            return request_digest(response)[:16] == marker
+            return expected_prefix == marker
         return None
     # A raw 16-hex prefix is accepted for rows written by early migrations.
     if _LEGACY_DIGEST_PREFIX_RE.match(stored_digest):
-        return request_digest(response)[:16] == stored_digest
+        return expected_prefix == stored_digest
     return None
 
