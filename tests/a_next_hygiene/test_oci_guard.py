@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from conftest import canonical_sha, make_tree, output_json, run_script
+from a_next_hygiene_helpers import canonical_sha, make_tree, output_json, run_script
 
 
 def _base_args(frozen: tuple[Path, str], evidence: Path) -> list[object]:

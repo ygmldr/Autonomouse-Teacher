@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from conftest import commit, git, make_tree, output_json, run_script
+from a_next_hygiene_helpers import commit, git, make_tree, output_json, run_script
 
 
 def _write_and_commit(repo: Path, relative: str, content: str, message: str) -> str:

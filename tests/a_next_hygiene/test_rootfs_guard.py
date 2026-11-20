@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-from conftest import canonical_sha, make_tree, output_json, run_script
+from a_next_hygiene_helpers import canonical_sha, make_tree, output_json, run_script
 
 
 def test_missing_path_exits_33(tmp_path):
