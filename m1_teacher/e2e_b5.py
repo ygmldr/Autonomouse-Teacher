@@ -74,7 +74,7 @@ BASE_SHA = "3e7afee077845a071cd364e93ab209cac20b2d5f"
 #: updated *only* when the evidence is regenerated from a new frozen tree; the
 #: runtime never reads ``git`` (the summary must stay reproducible without
 #: ``.git`` or a live HEAD).
-IMPLEMENTATION_COMMIT = "c420d19390d87e0d3faa3f716c7b2a3904c36891"
+IMPLEMENTATION_COMMIT = "12f6290c43523d5c3930915fe18810adca8609a4"
 
 CF_STUDENTS = ("a", "b")
 CROSS_DOMAIN_LEARNER = "b5.cross_domain.learner"

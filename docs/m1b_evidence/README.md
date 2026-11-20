@@ -18,3 +18,12 @@ network access, real learner data or real provider is used. `utc` timestamps in 
 are wall-clock audit metadata and must not be treated as deterministic artifact content.
 A packet without a command, without a hash, or without Reviewer re-execution cannot be
 used as PASS evidence.
+
+
+## Provenance / append-only notes (final review P1-2)
+
+- 本证据包按 append-only 维护：既有 16+11 条记录原样保留；P1-2 重新生成时只**追加**新条目
+  （`limitation` 中标注 generated-against SHA / supersedes），不覆盖/删除旧行。
+- 生成与提交 SHA 的绑定在 `docs/M1_B_EVALUATION_REPORT.md` §13 与本文件下方 provenance 块给出：
+  生成时工作树必须 `git status --porcelain` 为空（生成过程只修改 `docs/m1b_evidence/**` 证据文件），
+  被测量代码与 `git_sha`/`tree_sha` 由 collector 记录；evidence 文件由后续 commit 提交。
