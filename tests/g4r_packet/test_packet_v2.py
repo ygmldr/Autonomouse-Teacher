@@ -16,7 +16,7 @@ import sys
 
 import pytest
 
-import support
+import packet_support as support
 
 MANIFEST = "manifest.json"
 HASHES = "hashes.sha256"
