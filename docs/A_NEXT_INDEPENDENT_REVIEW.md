@@ -22,12 +22,14 @@
 | A0-02 65-case CSV 对账 | Reviewer 亲自解析：**65 行，PASS=29 / PARTIAL=14 / NOT_RUN=12 / UNVERIFIED=4 / BLOCKED=6**（与 handoff 声明一致）；`REV-01..08` 全 `NOT_RUN`、reviewer/utc 空；与最终 Review（`e72255d`/`9768933` 链）存在**7 行 R-REV 时态差**（清单见 §2） | **PARTIAL**（CSV 为冻结前快照；append-only 对账待 Owner 产出，冻结 CSV 不得改字节） |
 | A0-03 冻结 rootfs 防写 | 当前 rootfs canonical=`25491e45…`、`podman ps -a`=0（Reviewer 只读复算）；但仓库历史 OCI 命令仍**直接 `--rootfs` 冻结 rootfs**（旧矩阵大量实例）；基线 `fd1d3a6` 尚无新防写实现/证据 | **NOT_RUN（待 A-PR0/PR4 实现+独立证据）** |
 | 基线 sanity | Reviewer 亲自跑 `pytest tests/g4r_packet tests/unit/security/test_authorization.py -q` = **59 passed in 31.43s**（fd1d3a6；Python 3.11.15/pytest 9.2.0） | **PASS（限定子集）** |
-| 设计门（A-PR1/A-PR2/A-PR3/Owner docs） | `A_NEXT_BRANCH_RECONCILIATION.md`、`A_NEXT_AUTH_RECORD_REPORT.md`、`A_NEXT_RUN_ADMISSION_DESIGN.md` **均未出现**（见 §5）；**任何 PR 均不得判 PASS、不得开始实现** | **BLOCKED（等待 Owner 设计文档）** |
+| 设计门 A-PR1（A1+A2） | A1 报告（`a-next-auth-record/docs/A_NEXT_AUTH_RECORD_REPORT.md`，**未提交草稿**）与 A2 ADR（`feat/a-next-run-admission` @ **960724b**，DESIGN_ONLY）已出现并逐份独立审阅：A1 设计 **PASS（条件：先提交设计文档）**；A2 设计 **PASS（带前置条件 C1–C8，见 §7）**；均**允许进入实现（条件式）** | **PASS（条件式）** |
+| 设计门 A-PR0/A-PR2/A-PR3 | `A_NEXT_BRANCH_RECONCILIATION.md` 等仍未出现（§5） | **BLOCKED（等待文档）** |
 | H0 F-02（dir fsync）是否被 G4-R 覆盖 | **是，已覆盖**：G4-R 在 link 后 `_fsync_directory` + 失败返回 `AUTHORIZATION_USE_LOG_DURABILITY_UNKNOWN`（fail-closed，不返回成功），并有定向测试；H0 分支**无**目录 fsync/该错误码/相关测试（§1.4） | **VERIFIED（源码+测试行号）** |
 
-> **设计门裁定（本版本）**：A-PR0 事实项 PASS（除 A0-03 待实现）；A-PR1/A-PR2/A-PR3 的**是否允许进入实现** =
-> **暂缓/拒绝（BLOCKED）**，直到 Owner 设计文档出现并由 Reviewer 逐份判 PASS/PARTIAL（安全降级必须
-> 明确拒绝进入实现）。A-PR4 属阶段 2。
+> **设计门裁定（本版本）**：A-PR0 事实项 PASS（除 A0-03 待实现）；**A-PR1（A1+A2）设计门
+> = PASS（条件式，见 §7）**——A1 设计文档须先提交为 commit（当前为 worktree 未跟踪草稿），
+> A2 实现须满足 §7 的 C1–C8 前置条件；**A-PR2/A-PR3 = BLOCKED（设计文档未出现）**；
+> A-PR4 属阶段 2。安全降级若出现即拒绝进入实现。
 >
 > 本报告**不**宣称：任何 PR PASS、G4-H1 部署、E5-Full、G5 授权、M0/G6 GO、生产安全。
 
@@ -225,7 +227,7 @@ a-next-* 工作树 HEAD 均 = fd1d3a6（未提交设计文档）
 | PR | 设计文档 | 本版本裁定 | 是否允许进入实现 |
 |---|---|---|---|
 | A-PR0 baseline-and-branch-arbitration | A_NEXT_BRANCH_RECONCILIATION.md + REVIEW_STATUS_RECONCILIATION.md | **BLOCKED（文档缺失）**；Reviewer 侧事实矩阵 §1/§2 已提供，Owner docs 到达后核对 | **否（待文档+本报告核对）** |
-| A-PR1 auth-record-and-admission | A_NEXT_AUTH_RECORD_REPORT.md（设计部分）| **BLOCKED（文档缺失）** | **否** |
+| A-PR1 auth-record-and-admission | A1 `A_NEXT_AUTH_RECORD_REPORT.md`（worktree 未提交草稿）+ A2 `A_NEXT_RUN_ADMISSION_DESIGN.md`（ait 960724b）| **PASS（设计门，条件式；见 §7）**：A1 设计先提交后实现；A2 带 C1–C8 条件允许实现 | **是（条件式）** |
 | A-PR2 registry-authority-decision | （方案 A/B 决策文档）| **BLOCKED（文档缺失）** | **否** |
 | A-PR3 rrev6-l2-failure-matrix | A_NEXT_RREV6_* / 设计说明 | **BLOCKED（文档缺失）** | **否** |
 | A-PR4 packet-freeze-and-review | 阶段 2 下达 | 本阶段不评 | — |
@@ -254,8 +256,8 @@ Owner 文档出现后 Reviewer 将逐份审阅并给出：**每 PR PASS/PARTIAL/
 
 - **A0 事实门**：A0-01 PASS；A0-02 PARTIAL（对账文档待 Owner，冻结 CSV 不改）；A0-03 NOT_RUN（待实现）；
   baseline sanity PASS（59 项子集）。
-- **设计门**：A-PR1/A-PR2/A-PR3 **BLOCKED（Owner 设计文档缺失）**——任何“已审阅通过/允许实现”结论
-  在本版本均不成立；实现方不得据本报告开始实现。Owner 文档出现后 Reviewer 补审并更新本章节。
+- **设计门**：**A-PR1（A1+A2）= PASS（条件式，允许进入实现，见 §7）**；A-PR2/A-PR3 仍 BLOCKED（文档缺失）。
+  A1 设计文档必须先提交为 commit；A2 实现须满足 §7 C1–C8；未满足条件不得开始实现。
 - **H0 仲裁**：canonical=G4-R；**H0 cherry-pick = 0（禁止）**；H0 仅选择性吸收已审阅非代码产物。
 - **门状态不变**：`LiveGate=BLOCKED`、`G4-H=NOT_AUTHORIZED`、`G5=BLOCKED`、`G6=NOT_RUN`、
   `M0=DECISION_PENDING`、`E5_PRELIVE_FULL=BLOCKED_PENDING_HUMAN_DEPLOYMENT`、`B03/E5-P04=UNVERIFIED`。
@@ -275,3 +277,183 @@ Owner 文档出现后 Reviewer 将逐份审阅并给出：**每 PR PASS/PARTIAL/
   3. `pytest tests/g4r_packet tests/unit/security/test_authorization.py -q` = 59 passed/31.43s（§3）。
   4. `tar --sort=name --mtime=@0 ... | sha256sum` rootfs = `25491e45…`；`podman ps -a` = 0（§4）。
   5. `find .../worktrees -maxdepth 3 -name "A_NEXT_*.md"` = 无结果（§5，Owner 文档状态）。
+
+
+---
+
+## 7. A-PR1 设计门（A1 + A2）独立审查（2026-11-20T19:47–20:05Z）
+
+### 7.1 审阅对象与证据绑定
+
+| 对象 | 位置/提交 | 状态 |
+|---|---|---|
+| A1 设计报告 | `worktrees/a-next-auth-record/docs/A_NEXT_AUTH_RECORD_REPORT.md`（mtime 19:38，**未跟踪草稿**，worktree `fix/a-next-auth-record` @ fd1d3a6 + 2 untracked test files） | **未提交 → 证据仅绑定工作树，不构成可归档 SHA**（见 C1） |
+| A1 设计测试骨架 | `tests/integration/a_next_auth/{conftest,test_a1_use_record_integrity}.py`（untracked） | Reviewer 亲自运行：**24 passed / 15 xfailed / 93.70s**（`xfail(strict=True)` 表示设计契约在基线未实现，符合预期；不是 PASS 结果） |
+| A2 设计 ADR | `worktrees/a-next-run-admission/docs/A_NEXT_RUN_ADMISSION_DESIGN.md`，branch `feat/a-next-run-admission` @ **`960724b37bab31a017786cff28c0cbf85ee172e9`**（parent fd1d3a6，仅 docs 1 文件） | 已提交，DESIGN_ONLY |
+
+### 7.2 现网证据独立复核（A2 §1 声明，Reviewer 亲自 grep）
+
+```text
+$ git grep -n "consume_execution_authorization" fd1d3a6 -- src/
+src/autoteacher_m0/security/authorization.py:988:def consume_execution_authorization(...)
+# → src/ 内仅定义，0 生产调用方：与 A2 §1.2 一致
+
+$ git grep -n "load_execution_authorization\|require_execution_authorization" fd1d3a6 -- src/
+security/__init__.py:10,11,110,113（import/export）；authorization.py:478 def / :700 def；
+live_controller.py:29 import, :132 调用
+# → 唯一生产调用点是 inspect-only live_controller.authorization_decision()；
+#   live_controller 仍永远 BLOCKED、从不 consume（:66 ALWAYS_BLOCKED_REASONS，:251/263-265）。
+#   注：A2 附录说“仅 live_controller.py:29/132”，严格说还有 __init__ import/export 行（不构成调用方），
+#   结论“0 生产 consume 调用方”成立；建议附录措辞精确化。
+```
+
+- `tests/`+`scripts/` 中 `consume_execution_authorization` 出现 10 处（fixture/探针），属非生产；
+  不能作为生产接线证据（A2 已如实承认 A-Q3=0 调用方，**未夸大**）。
+- A2 附录 A 的 `git rev-parse HEAD # fd1d3a6` 是其**提交前**采集值；审阅对象 ADR 实际提交为
+  `960724b`，实现报告应更正为“design commit 960724b + 采集时 fd1d3a6”（nit）。
+
+### 7.3 A1 设计审查（P2-01 body id 完整性）
+
+**独立核对文档行号/事实**（`git show fd1d3a6:src/autoteacher_m0/security/authorization.py`）：
+
+| 文档声明 | Reviewer 实测 | 结论 |
+|---|---|---|
+| `_read_use_record` L802–L847 | def 在 **L802**，函数体至 ~L845 | 基本准确 |
+| `_read_use_record_settled` L850–L870 | def L850 | ✓ |
+| `_replay_reason` L872–L874 | def L872 | ✓ |
+| 写入侧 id 校验 L521–L525 | L521–L525 为 `authorization_id` `_IDENTIFIER` 校验 | ✓ |
+| `record_path` L1034 / 快路径 L1038–L1041 | L1033–34 计算、L1038 快路径 | ✓（±1 行） |
+| `_fsync_directory`/DURABILITY_UNKNOWN | L918/L1095 | ✓ |
+| `os.open(...O_RDONLY|O_NOFOLLOW|O_CLOEXEC)` **L809** | 实际 **L813** | **nit（文档行号偏 4 行，需修正）** |
+| `_UTC_TEXT` 用于 `consumed_utc` 校验 | `_UTC_TEXT` 存在（L112），写入侧 `moment.strftime("%Y-%m-%dT%H:%M:%SZ")` | ✓ 设计可行、不会误杀既有合法记录 |
+| 读取侧完全不校验 `authorization_id` | 实测 L842–845 仅校验字段集合/schema/run_epoch | ✓ 缺口属实 |
+
+**设计质量判定**：
+- 校验规则（id 类型/`_IDENTIFIER`、body↔path `sha256(id)+".json"`、body↔expected id、
+  `consumed_utc` 严格格式、多 key/坏 JSON 仍 INVALID）**严格单调收紧、无放宽**；不新增错误码；
+  不引入旧直写回退；`expected_authorization_id` 为内部关键字参数（唯一生产调用方 consume 传入
+  已验证签名 id）——与 A2 契约 C-1..C-7 一致，未见冲突（§7.5）。
+- FIFO 阻塞修复（`O_NONBLOCK`）属 P2-01 之外的附加 fail-closed 加固；方向正确且不改变普通文件语义，
+  但**必须**由定向测试（fork+timeout、无挂起）+ `S_ISREG` 拒绝证明；建议在实现报告中单列。
+- 三态语义（REJECTED_NO_CONSUMPTION / CONSUMED_DURABILITY_UNKNOWN / NO_CONSUMPTION）与 G4-R
+  fail-closed 一致。
+- 测试骨架（20 个 test 函数 + 参数化）覆盖 spec 要求，且以 `xfail(strict=True)` 标注未实现契约
+  （Reviewer 基线运行 24 passed/15 xfailed 符合预期，**不是**实现通过证据）。
+- **文档未提交**：当前为 worktree 未跟踪文件（`git status` 显示 3 个 untracked）→ 无法绑定 SHA、
+  不可作为归档证据；实现前必须先提交（C1）。
+
+**A1 设计裁定：`PASS（条件式）`；允许进入实现（条件 C1 + 实现验收 C4–C8）。**
+- 实现验收点：取消 xfail 后 **全部新测试通过**；`AUTHORIZATION_USE_RECORD_INVALID` 不得变成
+  REPLAYED；合法同/异 epoch replay 仍分类正确；FIFO 用例证明不阻塞（子进程超时控制）；
+  无 `src/` 网络/Key/新 env 开关；`_read_use_record` 私有签名变更不得影响其它调用方（仅 consume + tests）。
+
+### 7.4 A2 设计审查（run-level 一次性消费接线）
+
+**INV-R1..R8 维持性判断**（设计层面）：
+
+| 不变量 | 设计是否维持 | Reviewer 说明 |
+|---|---|---|
+| INV-R1 一次消费是进入 Reserve 的必要条件 | **是** | `begin_run_admission` 在 Broker 构造前调用；失败 exit、Broker/Fake 未创建（结构性 0） |
+| INV-R2 同 Run 多次合法 calls 不误判重放 | **是** | run-level 仅消费 1 次；per-dispatch token（ordinal≤min(auth,admission) max_calls） |
+| INV-R3 run 身份 vs business call 身份分离 | **是** | run_epoch 由 admission_id+nonce+run_id 派生；call_id 保持现有 request identity；审计并列 |
+| INV-R4 任一校验/未知失败 → 不 Reserve/Claim/Fake、无新 Attempt | **是（设计）** | §7 R-01..R-26；`DURABILITY_UNKNOWN`→BLOCKED_PENDING_RECONCILE；结构断言（Broker 进程未创建/requests=0） |
+| INV-R5 token 默认拒绝/跨 Run 不可复用 | **是（设计）** | `_issued[id(token)] is token` 身份 registry + ordinal + digest + TTL；JSON/复制对象 deny |
+| INV-R6 历史 PENDING/UNCERTAIN hold 只读不改写 | **是（设计）** | R-22 明确唯一既有 hold 例外；只读计数；无 release/resend/settle 新路径 |
+| INV-R7 无 Key/网络/Live allow path | **是（设计）** | 仅 test-only harness；LiveGate/CLI/Adapter/run_live 零 diff（实现须静态+负例证明） |
+| INV-R8 审计不含 Key/原始 prompt/敏感内容 | **是（设计）** | §5.1 封闭 allowlist（枚举/标识符/hex 摘要）；§5.2 禁止项明确 |
+
+**契约自洽性 / 绕过与重放窗口审查**：
+- run_epoch 派生（admission nonce 确定性）：同 Run 重启 → `AUTHORIZATION_REPLAYED`；新 Run（新 nonce）
+  → `AUTHORIZATION_EPOCH_MISMATCH`；与 call_id 分离——**自洽**。错误使用 admission 文档（同 nonce
+  二次启动）会 REPLAYED 拒绝（fail-closed，运维需新 Admission）——已在 §10.1(5) 声明。
+- **发现 F-A2-1（须写入 A2 实现验收，非设计否决）**：`begin_run_admission` 先
+  `load_execution_authorization` 得到授权身份，随后 `consume_execution_authorization` **内部会再次
+  load**（G4-R 语义），两次 load 间 external 文件存在 TOCTOU/替换窗口。虽然 consume 内部再次校验
+  且 record_path 由它自己加载的 id 推导，但可能出现“RunAdmissionContext 绑定 id A、实际消费记录属于
+  id B”的审计错配。**前置条件 C2**：consume 成功返回后必须断言
+  `use.authorization_id == context.authorization_id` 且 `use.run_epoch == run_epoch`，
+  不匹配 → `RUN_ADMISSION_AUTHORIZATION_DRIFT` fail-closed（BLOCKED_PENDING_RECONCILE，不发送），
+  并对授权文件 sha256 在 load 前后做绑定记录。
+- **F-A2-2（opt-in 绕过面，Lead Q1）**：默认 `run_admission=None` 保留冻结行为是合理的兼容策略；
+  但若 trusted entry 的 strict policy 未启用 run admission 就静默走旧路径，则“生产强制”不成立。
+  **前置条件 C3**：trusted entry 在 `run_admission_required: true` 时若缺失 context/配置 →
+  启动前 fail-closed 拒绝；“opt-in 未启用”只能显式标注为 legacy/test，并列 **G4-H1 BLOCKER**
+  （人类 handoff + Packet limitations），不得在 Packet 中以“已强制”表述。
+- **F-A2-3（crash-after-consume-before-Broker）**：设计 R-24 已承认同 Run 重启 → REPLAYED、
+  需人工对账。**接受**（fail-closed），前置条件 C4：Runbook/audit 明确“已消费未启动 Broker”的人工
+  对账步骤，且不得自动重发/自动清理 use record。
+- **F-A2-4（retry vs ordinal）**：token ordinal 按 dispatch 计数；需明确现有 dispatch 内部
+  `max_attempts` 重试不额外消耗 ordinal（一次 `_handle_payload_serial` 至多 1 token），否则可能把
+  合法重试误判 `RUN_BUDGET_CALLS_EXCEEDED`。前置条件 C5：实现与测试显式覆盖重试不增 ordinal。
+- 其余：token pre-Reserve consume 可测试（A2-H10/H11）；拒绝对 Broker 进程/requests=0/attempts=0/fake=0
+  的断言设计合理；审计 allowlist 无 Key/原始请求（已核字段表）。
+
+**A2 设计裁定：`PASS（条件式）`；允许进入实现（条件式），L2 不在本 PR。**
+前置条件清单（**全部满足才可在实现完成后判 PASS；设计门允许开始实现**）：
+- **C1**：A1 设计文档先提交为 commit（当前 untracked），A1 实现 commit 取消 xfail 且新测试全绿。
+- **C2**：consume 后授权身份/epoch 一致性校验（F-A2-1）+ 文件摘要绑定；不符 fail-closed 不发送。
+- **C3**：Q1 采纳“opt-in 默认不变 + strict policy 强制模式 fail-closed”；G4-H1 BLOCKER 书面化；
+  Packet/矩阵不得声称已强制。
+- **C4**：crash-after-consume-before-Broker 人工对账路径写入 Runbook/audit；禁止自动重发/清理 final。
+- **C5**：dispatch 内部重试不增 ordinal 的测试；budget/deadline 在 token pre-Reserve 拒绝。
+- **C6**：§7 R-01..R-26 逐行落地为 host/Fake 测试；launcher-deny 需断言 Broker 进程未创建
+  （或结构性 0），token-deny 断言 requests=0/reservations=0/attempts=0/fake=0。
+- **C7**：test-only/no-key + 无 Live allow path 的静态与负例证据（gates/run_live/cli/adapter 零 diff、
+  LiveGate BLOCKED、CLI smoke --live exit 3、新增代码无网络/Key env、默认路径 1420 回归不变）。
+- **C8**：A2 只做 host/Fake L1；A2-01/02/03 的 L2 判据保持 `NOT_RUN`，由 A-PR3 独占窗口执行
+  （Lead Q7 立场 Reviewer **接受**）。
+- **另**：附录 A 采集口径更正（design commit 960724b）；`_read_use_record` 文档行号 L809→L813。
+
+### 7.5 A1 ↔ A2 契约冲突核查（C-1..C-7）
+
+| 契约 | A2 声明 | A1 设计实际 | 判定 |
+|---|---|---|---|
+| C-1 consume 公共签名/返回不变 | 只调 public consume | A1 只改 `_read_use_record`（私有）返回 tuple/加 kwarg；consume 签名不变 | **无冲突** |
+| C-2 错误码语义稳定 | 依赖既有码 | A1 不新增码、不放宽 | **一致** |
+| C-3 body id 不符 → INVALID 非 REPLAYED | 映射依赖 | A1 §3.1(5) 明确 INVALID | **一致** |
+| C-4 不得在 reader 加 expected-epoch | 需保留 EPOCH_MISMATCH | A1 不改 epoch 比较（仍由 `_replay_reason`） | **一致** |
+| C-5 record_path 语义不变 | 失败归因依赖 | A1 保留 path 映射 | **一致** |
+| C-6 原子发布/dir fsync/DURABILITY_UNKNOWN 不变 | 依赖 | A1 明确不 fallback、保持 | **一致** |
+| C-7 A2 不 import A1 私有函数 | — | A1 私有签名可变 | **一致** |
+| Q6（先 body/path 校验再 epoch 分类） | 建议 | A1 设计正是先校验后返回 epoch | **一致** |
+
+**未发现 A1/A2 设计契约冲突。** 唯一协同要求：A1 需先合入并冻结、A2 rebase（A2 §11 已列）。
+
+### 7.6 Lead Q1 / Q7 立场判定
+
+- **Q1（本轮 opt-in、默认不变、G4-H1 前强制化）**：**有条件接受**（C3）。理由：默认 `None` 才能
+  保持 1420 回归与冻结行为；但必须在 trusted entry 有 `run_admission_required` fail-closed 模式 +
+  G4-H1 BLOCKER + Packet 不得声称“已强制”。若实现只做“可选、无 required 模式”，则判 **安全降级→拒绝**。
+- **Q7（L2 由 A-PR3 窗口，A-PR1 只 host/Fake L1）**：**接受**（C8）；A2-01/02/03 矩阵在 L2 证据前
+  保持 `NOT_RUN`，不得以 host 结果冒充 L2。
+
+### 7.7 本阶段 A-PR1 设计门结论
+
+| 对象 | 裁定 | 是否允许进入实现 |
+|---|---|---|
+| A1 设计（P2-01 body id） | **PASS（条件 C1/C4–C8）** | **允许（条件式）**：先提交设计文档 + 实现验收 |
+| A2 设计（run admission） | **PASS（条件 C2–C8）** | **允许（条件式）**：按 C2–C8 实现/测试；L2 不在本 PR |
+| A-PR1 总体设计门 | **PASS（条件式）** | **允许进入实现**；实现完成后由 Reviewer Stage-2 逐项验收（C1–C8 全部满足才 PASS，否则 PARTIAL/FAIL） |
+| A-PR2 / A-PR3 / A-PR0 对账文档 | **BLOCKED（文档未出现）** | **否** |
+
+> 本裁定仅设计门；**未**验证任何实现/测试结果，**未**改变门状态；A2 现网仍无 run-level 强制
+> （P2-02 保持开放直至实现合入+Fake/L2 证据）。
+
+---
+
+## 附录 B：阶段 1 追加证据命令（§7）
+
+```text
+$ git -C worktrees/a-next-run-admission rev-parse HEAD -> 960724b37bab31a017786cff28c0cbf85ee172e9
+$ git -C worktrees/a-next-run-admission log --oneline -2 -> 960724b docs(a-next): design run-level ...; fd1d3a6 merge...
+$ git grep -n "consume_execution_authorization" fd1d3a6 -- src/
+  -> only src/autoteacher_m0/security/authorization.py:988 (definition); 0 production callers
+$ git grep -n "load_execution_authorization\|require_execution_authorization" fd1d3a6 -- src/
+  -> __init__ import/export; authorization.py:478/:700 defs; live_controller.py:29/:132 (inspect-only, BLOCKED)
+$ git grep -n "consume_execution_authorization" fd1d3a6 -- tests/ scripts/ | wc -l -> 10 (non-production only)
+$ cd worktrees/a-next-auth-record && pytest tests/integration/a_next_auth -q
+  -> 24 passed, 15 xfailed in 93.70s (xfail strict design-contract skeleton on baseline fd1d3a6)
+$ git -C worktrees/a-next-auth-record status --porcelain -uall
+  -> ?? docs/A_NEXT_AUTH_RECORD_REPORT.md; ?? tests/integration/a_next_auth/{conftest,test_a1_use_record_integrity}.py
+     (uncommitted -> evidence not yet SHA-bound; C1)
+```
