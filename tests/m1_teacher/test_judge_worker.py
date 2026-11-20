@@ -654,3 +654,27 @@ def test_interpret_positive_cpu_kill_too_early_is_infra():
         _timeout_sandbox_result(137, 0.3), "req", 2.0
     )
     assert observation.status == WORKER_STATUS_INFRA_ERROR
+
+
+# ---------------------------------------------------------------------------
+# Review addendum P1-2: startup non-root enforcement blocks worker execution
+# ---------------------------------------------------------------------------
+def test_nonroot_requirement_blocks_worker_before_any_execution(monkeypatch):
+    probe = UntrustedExecutionWorker()
+    if not probe.sandbox_available():  # pragma: no cover - non-bwrap host
+        require_os_sandbox(available=False)
+    monkeypatch.setenv("M1B_REQUIRE_NONROOT_SANDBOX", "1")
+    worker = UntrustedExecutionWorker()
+    assert worker.sandbox_available() is False
+    before_dirs = _temp_worker_dirs()
+    observation = worker.run_case(
+        "from pathlib import Path\n"
+        "Path('/tmp/m1b_p1_2_should_not_run').write_text('x')\n"
+        "def target(*_args, **_kwargs):\n"
+        "    return 0\n",
+        "target",
+        [],
+    )
+    after_dirs = _temp_worker_dirs()
+    assert observation.status == WORKER_STATUS_INFRA_ERROR
+    assert before_dirs == after_dirs

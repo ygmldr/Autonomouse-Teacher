@@ -3,7 +3,7 @@
 - 工作树：`/root/m1b/pr1-sandbox`，分支 `b-next/pr1-untrusted-worker`
 - 基线：`4706250`（`work/m1a-mvp`），先 merge `b-next/pr1-judge-fixtures`（`0fd3ed4`，认证语料）
 - 设计依据：`docs/M1_B_THREAT_MODEL_JUDGE.md`（b-cf，§3 协议 / §4 bwrap 规格 / §6 负例矩阵 / §8 泄漏规格）
-- 状态：**IMPLEMENTED + LOCAL/MOCK 证据**。独立评审（`docs/M1_B_PR1_REVIEW.md`）后已修复 P1-1（默认超时 TLE 误分类）/P1-2（宿主非 root principal 报告）/P1-3（安全 CI 不得跳过）；B1-04 仍为 `PARTIAL`（本机 root 运行 bwrap，`LOCAL_ONLY`），最终 PASS 仍须独立 Reviewer 在冻结 SHA 上复跑 + 人类批准；本文件不声称安全验收通过，也不开启对真实用户 CODE 的执行。
+- 状态：**IMPLEMENTED + LOCAL/MOCK 证据**。独立评审（`docs/M1_B_PR1_REVIEW.md`）后已修复 P1-1（默认超时 TLE 误分类）/P1-2（宿主非 root principal 报告）/P1-3（安全 CI 不得跳过）；B1-04 仍为 `PARTIAL`（本机 root 运行 bwrap，`LOCAL_ONLY`；目标部署须设 `M1B_REQUIRE_NONROOT_SANDBOX=1`），最终 PASS 仍须独立 Reviewer 在冻结 SHA 上复跑 + 人类批准；本文件不声称安全验收通过，也不开启对真实用户 CODE 的执行。
 - 默认策略不变：真实 learner CODE 仍为 `UNTRUSTED_CODE_EXECUTION_BLOCKED`（本 PR 只提供被集成方 b-cf 的 supervisor 调用的 worker 组件；supervisor 集成未在本 PR 内）。
 
 ## 1. 范围与文件
@@ -77,7 +77,9 @@ canonical comparator / verdict                    function_name, args, timeout_m
 
 canary 在真实沙箱内检查并全部通过才返回 `True`：uid/gid=65534、hostname=`m1b-worker`、pid ≥ 2、`/root` 与 `/etc/passwd` 不可见、宿主 sentinel 文件不可读、`socket.if_nameindex()==['lo']`、`/proc/net/dev` 仅 `lo`、`/usr` 只读、`/worker` 只读、`/tmp` 可写；并记录 `uid_map` 与沙箱内 `python_version`。任一失败 → `available()=False`，`run()` 抛 `SandboxUnavailable`；**绝不回退裸子进程**。
 
-**P1-2 宿主 principal 报告**：`BwrapSandbox.security_profile()` 返回 `host_euid`、`host_is_root`、`sandbox_uid/gid`、`uid_map`、`mapped_host_uids`、`sandbox_python_version`、`non_root_principal_verified`、`profile`（`LOCAL_ONLY` / `NON_ROOT_PRINCIPAL`）与 `limitation`。本机以 root 运行 bwrap，实测 `uid_map=65534 0 1` → `non_root_principal_verified=False`、`profile=LOCAL_ONLY`。**namespace 内 uid 65534 不证明宿主非 root principal**；B1-04 需要目标部署使用专用非 root 服务账号（或单独评审的 setuid bwrap）并由该 profile 验证，本地不能满足。
+**P1-2 宿主 principal 报告 + 启动校验**：`BwrapSandbox.security_profile()` 返回 `host_euid`、`host_is_root`、`sandbox_uid/gid`、`uid_map`、`mapped_host_uids`、`sandbox_python_version`、`non_root_principal_verified`、`non_root_requirement_enforced`、`non_root_requirement_satisfied`、`profile`（`LOCAL_ONLY` / `NON_ROOT_PRINCIPAL`）与 `limitation`。本机以 root 运行 bwrap，实测 `uid_map=65534 0 1` → `non_root_principal_verified=False`、`profile=LOCAL_ONLY`。
+
+启动期 fail-closed：目标部署设置 `M1B_REQUIRE_NONROOT_SANDBOX=1` 时，canary 在 `_run_probe` 内校验宿主 euid≠0 且 uid_map 不映射到 0；不满足 → `SandboxUnavailable`（`available()=False`），`run()` 拒绝执行 learner code，supervisor/scorer 返回 BLOCKED/EVAL_ERROR，绝不执行 learner code。默认不设该 env 时本地 synthetic 可用但保留 `LOCAL_ONLY` 报告。**namespace 内 uid 65534 不证明宿主非 root principal**；目标部署必须有非 root 服务账号（或单独评审 setuid bwrap），本地不能满足且本机负向验证为 fail-closed。
 
 ### 4.3 主机侧 rlimits（`preexec_fn`）
 
@@ -230,7 +232,7 @@ $ "/root/Autonomous Teacher/.venv/bin/python" -m pytest tests/m1_teacher -q
 ## 9. 已知限制与残余风险
 
 1. **证据等级**：本文件为 IMPLEMENTED + LOCAL/MOCK；bwrap 隔离依赖宿主内核/userns 配置，目标 CI/生产环境是否允许 bwrap 仍 `NOT_RUN`；不能据此开启真实用户 CODE。
-2. **P1-2（LOCAL_ONLY，未满足）** bwrap/内核 0day、侧信道、宿主本身以 root 运行 bwrap 的风险不在防护范围；本机 `uid_map=65534 0 1`（inside→host 0），`security_profile()["non_root_principal_verified"]=False`。生产部署必须使用非 root 服务账号（或单独评审的 setuid 方案）并复跑 B1-04。
+2. **P1-2（启动校验已实现；目标部署 PARTIAL/NOT_RUN）** bwrap/内核 0day、侧信道、宿主本身以 root 运行 bwrap 的风险不在防护范围；本机 `uid_map=65534 0 1`（inside→host 0），默认 `security_profile()["non_root_principal_verified"]=False`/`LOCAL_ONLY`；设置 `M1B_REQUIRE_NONROOT_SANDBOX=1` 时 canary fail-closed（`available()=False`）。生产部署必须使用非 root 服务账号（或单独评审的 setuid 方案）并复跑 B1-04；本地不满足。
 3. `RLIMIT_NPROC` 在不同内核/userns 映射下语义不同：宿主侧必须宽松，真正上限在沙箱内施加；cgroup v2 限额未使用（增强项）。
 4. 每 case 一进程的启动成本实测 ~30–50 ms（112 case ≈ 3.9 s），并发/吞吐上限、目标部署延迟与本机差异未测。
 5. `exit_code_tamper` 类（`os._exit`）在 worker 侧表现为"无有效响应 → INFRA"，与 fixture 声明的 RE 同属 fail-closed；supervisor 映射时需把无响应/非 0 退出统一归入 `JUDGE_INFRA_ERROR`（b-cf 集成）。
@@ -238,6 +240,18 @@ $ "/root/Autonomous Teacher/.venv/bin/python" -m pytest tests/m1_teacher -q
 7. learner 若直接写协议 fd，可抢先输出一行；严格解析只会得到 INFRA/WA/RE，不可能 PASS，但可能掩盖 runner 的真实响应（fail-closed 可接受，记录为已知面）。
 8. 协议限值偏离（§5）已由 Lead 批准并注释在代码；若后续 Reviewer 要求回到 4096B，则 large hidden cases 需另行协议（如 supervisor 侧标记 unsupported 或分片），否则 B1-05 的 112/112 不成立。
 9. 认证语料含 hidden expected，属 JUDGE 内部资产；Teacher 可见性隔离由 `test_judge_fixture_integrity.py` 与 supervisor 集成共同保证。
+
+### 9.1 安全 CI 接线（review addendum P1-3）
+
+仓库内提供了安全 CI 入口脚本 `scripts/m1b/run_safety_ci.sh`：
+
+```bash
+PYTHON=/path/to/venv/bin/python ./scripts/m1b/run_safety_ci.sh
+# 本地 root 合成验证（非部署安全证据）：
+./scripts/m1b/run_safety_ci.sh --allow-root-synthetic
+```
+
+脚本默认 `export M1B_REQUIRE_OS_SANDBOX=1 M1B_REQUIRE_NONROOT_SANDBOX=1`，运行 `pytest tests/m1_teacher -q -rs` 并断言 exit 0、输出无 `skipped`、无 `s` progress 行；`--allow-root-synthetic` 仅用于本地 root 合成评估（把 `M1B_REQUIRE_NONROOT_SANDBOX` 设为 0），**不可作为部署安全证据**。当前仓库 `.github/workflows/` 未配置该 job（= `NOT_CONFIGURED`/`NOT_RUN`），需维护者/CI owner 接线；本 PR 不修改 `.github`。
 
 ## 10. 运行方式
 

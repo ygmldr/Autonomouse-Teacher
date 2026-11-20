@@ -32,6 +32,7 @@ from m1_teacher.assessment.scorer import DeterministicScorer
 from m1_teacher.contracts.types import AssessmentItem
 
 from m1_teacher.assessment.judge.supervisor import (
+    STATUS_JUDGE_INFRA_ERROR,
     STATUS_JUDGE_SANDBOX_UNAVAILABLE,
     STATUS_PASS,
     STATUS_RE,
@@ -331,3 +332,32 @@ def test_scorer_default_timeout_slow_correct_solution_passes(
     result = scorer.score(_default_timeout_item(), "learner.p1_1", _SLOW_CORRECT)
     assert result.status == "CORRECT"
     assert result.failure_reason == ""
+
+
+# ---------------------------------------------------------------------------
+# Review addendum P1-2: supervisor fail-closed + security evidence
+# ---------------------------------------------------------------------------
+def test_nonroot_requirement_blocks_supervisor_and_records_profile(
+    monkeypatch,
+) -> None:
+    probe = UntrustedExecutionWorker()
+    if not probe.sandbox_available():  # pragma: no cover - non-bwrap host
+        pytest.skip("OS sandbox unavailable; enforcement covered by sandbox/worker unit tests")
+    monkeypatch.setenv("M1B_REQUIRE_NONROOT_SANDBOX", "1")
+    worker = UntrustedExecutionWorker()
+    assert worker.sandbox_available() is False
+    supervisor = TrustedJudgeSupervisor(worker, trusted_fixture_only=True)
+    verdict = supervisor.evaluate(
+        "def target(*_args, **_kwargs):\n    return 42\n",
+        "target",
+        [{"args": [], "expected": 42}],
+        timeout_s=1.0,
+    )
+    assert verdict.infra_error is True
+    assert verdict.status in {STATUS_JUDGE_SANDBOX_UNAVAILABLE, STATUS_JUDGE_INFRA_ERROR}
+    payload = verdict.to_dict()
+    profile = payload["security_profile"]
+    assert profile["non_root_requirement_enforced"] is True
+    assert profile["non_root_principal_verified"] is False
+    assert profile["profile"] == "LOCAL_ONLY"
+    assert payload["cases_passed"] == 0
