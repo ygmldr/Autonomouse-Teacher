@@ -1289,3 +1289,118 @@ A4: 6 顶层文件 sha 匹配；stage tree 独立 tar 重算匹配（2b9edab8/db
     digest joins prepared=11/payload=9、0 mismatch；R6-05/R6-09/R6-10/R6-11 终态如 §14.2；
     evidence-index 114 文件校验通过（receipts 路径 typo 见 §14.4）；podman ps -a 空；冻结 CSV 未改
 ```
+
+
+---
+
+## 15. 阶段 2 batch-4：A4 R-REV6 **Reviewer 独立 OCI L2 复跑**（2026-11-20T20:45–21:10Z 批准窗口）
+
+### 15.1 窗口与准备（Reviewer 独立执行）
+
+Lead 批准独占窗口 **2026-11-20T20:45:00Z–21:10:00Z**；Reviewer 未借用 Owner 结果，独立执行：
+
+- **临时 Reviewer worktree**：`git -C main worktree add --detach /tmp/reviewer-l2 d083c54…`（Owner worktree 未改动；
+  用后 `worktree remove --force` 清理）。
+- 从 Owner 工作树复制**已哈希验证的冻结输入**到临时 worktree：rootfs=`25491e45…`、deps=`e07729d7…`
+  （复制后重算 canonical 一致）。
+- Stage 采用 Owner 构建的 **`stage-20261120T202016Z`**（Lead 允许；Reviewer 先以
+  `validate_stage_g4(base_sha=d083c54, verify_git=True)` 复核：`ok=true`、manifest `34b3db73…`、
+  tree `2b9edab8…`、trusted `dbf3ca36…`、candidate `b2c73100…`、adapter builtJs `2cb42461…`）。
+- 每次 case 使用 **独立可写 rootfs 工作副本**（runner 复制后校验 canonical，case 后删除）；
+  **从未** `podman --rootfs <frozen>`；网络 `--network none`/Fake-only/无 Key。
+
+### 15.2 尝试 1（无效，未计入证据；暴露 runner fail-open）
+
+运行起点 `20:44:43Z`（**比批准窗口早 17 秒**，Reviewer 调度误差；当时 podman 空、无其它 OCI 并发）。
+所有 case `launch_case` 因 Reviewer 临时 worktree 缺少 runner fixture 目录
+`artifacts/g4/c/runs` 失败（case-runner `failure=INTERNAL FileNotFoundError`）；
+**但 runner 仍 `EXIT=0` 且 summary `ok:true`**（13 case PARTIAL、R6-13 PASS）——说明 Owner runner
+**不按 case 成功/审计失败设置退出码（fail-open）**。该 run 目录保留为
+`…/l2/run-20261120T204440Z`（attempt1），**不作为 A4 证据**。
+
+### 15.3 尝试 2（Reviewer 正式独立 L2 证据）
+
+补齐 runner fixture（从 Owner worktree 复制 `artifacts/g4/c` 与 `plugins/offline-fixture/node_modules`）后重跑：
+
+| 项 | Reviewer 实测 |
+|---|---|
+| 运行窗口 | **20:46:56Z – 20:49:54Z**（批准窗口内） |
+| run root | `/root/Autonomous Teacher/worktrees/a-next-review/artifacts/a_next/rrev6-reviewer/l2/run-20261120T204654Z-attempt2` |
+| HEAD / Stage | `d083c54e…` / stage `stage-20261120T202016Z`（manifest/tree/trusted/candidate 同上） |
+| T0/T1 | rootfs **25491e45…**、deps **e07729d7…**（canonical=true；T1==T0；`frozen_*_unchanged=true`） |
+| containers | `containers_after=[]`；运行后 `podman ps -a` 亦空 |
+| 结果 | **14/14 PASS**（R6-01..R6-13 + R6-04B；13 个容器 case 目录；R6-13 audit-only） |
+| digest 绑定 | prepared==claim.request_digest **11 行**、payload==receipt.raw_sha256 **9 receipt**、0 mismatch、prepared!=payload 恒成立 |
+| 关键终态 | R6-05 0 dispatch/0 reserve/0 attempt/0 receipt；R6-09/R6-10 PENDING + 0 attempt；R6-11 Broker **FAILED** + WORST_CASE_HELD；R6-12 PENDING（Broker restart 后守恒） |
+| per-case checks | Reviewer 自建审计脚本：全部 case `checks_failed=[]`（Owner `evidence_audit` 复核亦 14/14 PASS） |
+| uid-map/peercred | 各 case 均在（R6-01/10/12 抽查） |
+
+**证据 SHA256（Reviewer 独立 run）**：
+
+```text
+t0.json       b79c3b141a7766bcfe3f5ccb6754ae42fba39ec92ecedeee5cbfd24ce60a9410
+t1.json       b16f713bc3c796426d19b7325fc49f237779fbfc3695de9521fb30214672910d
+summary.json  098cd26b70d0a522c21dbafa8a03a83137be60c0f816a98bd7a19f92d2ea8fcf
+matrix.json   6ccf85aa0ad3093a105efa9630897c00f4c38f5d97a047915c1390c358361f25
+audit.json    bff414ba392770ffe24c4c5f4a87478b649eda9fc3d49bbc9a79acf567109353
+REVIEWER_EVIDENCE_MANIFEST.json 88def328d195db0e2e1e13af4123fb4040488d7c73af0fca2c2148c37c073bb4
+             （覆盖 run root 下 1691 个文件；每个 case 目录逐文件 sha 见该 manifest）
+```
+
+**与 Owner run（`20261120T202039Z`）一致性**：14/14 case 状态**完全相同**；T0/T1 相同；containers 相同；
+digest join 计数相同（11/15→11/9）；**未发现 Owner 证据与 Reviewer 复跑不一致**；R6-04/R6-09/R6-11 的
+限制说明（DSH 层 replay、SIGKILL 落 pre-attempt、Fake crash→Broker FAILED 终态权威）在复跑中同样成立。
+
+### 15.4 A4-01..A4-03 矩阵（Reviewer 独立 L2 结果）
+
+| 矩阵行 | 要求 | Reviewer 独立证据 | 状态建议 |
+|---|---|---|---|
+| **A4-01** R-REV6 dual principal / Echo Tool Resume Replay + authentic digest joins | Reviewer independently reruns | R6-01/02/03/04/04B + R6-13 审计：14/14 PASS；digest joins 11/9、0 mismatch | **PASS（L2-REAL-DSH-FAKE，no-key）** |
+| **A4-02** Candidate crash / Controller alive | Injection proves no duplicate dispatch + held unknown cost | R6-10（candidate SIGKILL at after_reserve：Broker PENDING、0 attempt、0 Fake、held>0、无 FREE/重复 dispatch）；R6-08/09 一并复跑 PASS | **PASS（保守限制：R6-09 SIGKILL 落 pre-attempt；R6-04 DSH 层 replay 限制）** |
+| **A4-03** Broker crash/restart | Reserve/Claim/receipt/settlement conservation, no double charge | R6-12（broker SIGKILL→restart：PENDING held、0 settle、同 DB 恢复）+ R6-11（Fake crash→Broker FAILED 权威终态、不双结算）+ R6-06/07 held PENDING：全部 PASS | **PASS（L2-REAL-DSH-FAKE）** |
+
+**限制（必须与结论同读）**：Fake-only、`--network none`、0 真实 Provider/Key、0 外部 HTTP；R6-04 的
+真实 DSH 同 session replay 在 SDK 侧被拒（字节级 Controller replay 由 R6-04B 覆盖）；R6-09 的 SIGKILL
+落在 test-only pre-attempt 窗口；R6-11 以 Broker `FAILED` 终态为权威。**不得**外推 E5-Full/G5/G4-H1/M0 GO。
+
+### 15.5 发现
+
+- **P2-A4-2（runner fail-open）**：case 全部 `INTERNAL` 失败时 runner 仍 `EXIT=0`/`ok:true`（仅检查 T0/T1/
+  containers）。建议 Owner 修正：审计/矩阵出现非 PASS 时 runner 必须非零退出；本项不影响 attempt2 结果。
+- **P2-A4-3（独立复跑前置未文档化/未 fail-fast）**：fresh worktree 除 staged rootfs/deps 外还需 runner
+  fixture 目录（`artifacts/g4/c/runs` 等）与 `plugins/offline-fixture/node_modules`；否则首 case 即 INTERNAL。
+  建议 runner 启动前检查并 fail-fast + 在报告复现步骤列出。
+- **P3-A4-4（程序性偏差，已披露）**：attempt1 于 20:44:43Z 启动（比批准窗口早 17 秒，Reviewer 调度误差）；
+  该 run 无效、未计证据；attempt2 在窗口内。运行期间 podman 空、无其它 OCI 并发。
+- **P2-A4-1（沿用）**：Owner `evidence-index.json` `receipts` vs `receipt/` 路径 typo 仍待 a-g4r-recovery v2；
+  Reviewer 证据用自建 manifest 规避。
+
+### 15.6 裁定（更新 §14）
+
+| 项 | 结论 |
+|---|---|
+| **A4 / R-REV6** | **PASS（Reviewer 独立 L2，L2-REAL-DSH-FAKE，no-key）** — §14 的 PARTIAL 由本节独立 OCI 复跑升级；§14 历史保留 |
+| A4-01 / A4-02 / A4-03 | **PASS（限定上述 L2-REAL-DSH-FAKE 范围与限制；矩阵需记录 Reviewer 独立证据路径/SHA）** |
+| 是否允许集成 | 是（Owner docs/scripts/tests 无 runtime 变更）；Owner 需按 P2-A4-1/2/3 修正/说明，不影响 Reviewer 证据 |
+| 不得外推 | E5-Full / G5 / G4-H1 / M0 / 真实 Provider / Live 均**不**因此解锁；`LiveGate=BLOCKED` 等门不变 |
+
+### 15.7 清理
+
+Reviewer 临时 worktree `/tmp/reviewer-l2` 与 `/tmp` 工作副本已删除；podman 容器 0；Owner worktree 未被修改；
+Reviewer 证据仅存于 `worktrees/a-next-review/artifacts/a_next/rrev6-reviewer/l2/`（gitignored），
+本评审文档仅提交 docs。
+
+---
+
+## 附录 I：batch-4（Reviewer OCI）关键命令与 SHA
+
+```text
+git -C main worktree add --detach /tmp/reviewer-l2 d083c54…        # 临时 Reviewer worktree（用后 remove）
+cp -a a-next-rrev6/artifacts/{security/rootfs,foundation/deps} …    # 重算 25491e45… / e07729d7…
+validate_stage_g4(stage-20261120T202016Z, base_sha=d083c54, verify_git=True) -> ok
+cd /tmp/reviewer-l2 && python scripts/a_next/rrev6/run_l2_matrix.py   --stage …/stage-20261120T202016Z --out <reviewer-evidence>/run-20261120T204654Z-attempt2   --work-root /tmp/reviewer-l2-work2 --expected-head d083c54…
+  -> EXIT=0；utc 20:46:56–20:49:54Z；14/14 PASS；containers_after=[]；T0=T1=25491e45…/e07729d7…
+reviewer audit: prepared=11/payload=9，0 mismatch；R6-05/09/10/11/12 终态如 §15.3
+evidence manifest: 1691 files，sha256 88def328…
+attempt1（无效）: 20:44:43Z 起，缺 artifacts/g4/c/runs → 13 case INTERNAL/PARTIAL，runner 仍 EXIT=0（P2-A4-2）
+```
