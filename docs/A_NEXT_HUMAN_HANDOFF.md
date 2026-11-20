@@ -220,3 +220,16 @@ G5 authorization：NOT ISSUED
 - **请维护者决策**（仍为空栏）：D-14 P2-01/P2-02 处置、D-15..D-22、A4/A2 的 NOT_RUN 结论接受与否、incident/EXISTING finding 的处理方式。Agent 不得代填。
 
 > 本节追加不改变任何签核状态；STOP，等待维护者。
+
+## 10. Reviewer 终态与 OCI 结果追加（append-only，2026-11-20 集成轮；不覆盖上文）
+
+- **A4-01..03 = PASS（Reviewer 独立 L2，限 L2-REAL-DSH-FAKE/no-key）**：Reviewer 独立 OCI 复跑 14/14、T0=T1、digest 11/9、Stage SHA 一致；**R-REV6 = PASS（Reviewer 复跑）**。保留限制：Fake-only/无 Provider/Key/HTTP；R6-04 DSH replay 限制、R6-09 SIGKILL pre-attempt、R6-11 Broker FAILED 权威。
+- **A2-01..03 维持 NOT_RUN**（A2 admission L2 未跑）；**A1-01/02 维持 PARTIAL**；**A3-01/02 维持 PARTIAL**（registry UNVERIFIED + 补偿控制）；**A5/A0/X 维持 PARTIAL**；A6-01/02 维持 BLOCKED。
+- **P2-A4-1** 已由 `0735d7b` 修复；**P2-A4-2/P2-A4-3** 由 a-g4r-recovery addendum V2（`fc935bd`，`docs/A_NEXT_RREV6_L2_REPORT_ADDENDUM_V2.md` sha `28a2bba4…`）修复并合并为 #8.2（集成树 rrev6 28 passed）。runner fail-open → fail-closed、prereq fail-fast 已记录。
+- **EXISTING security finding**（LeadB m1_teacher 合成 sentinel，masked）= EXISTING/ENVIRONMENT，非 A-NEXT 回归。
+- **OCI filtered 有效 run**：tests 1287 / failures 97 / errors 54 / skipped 31 / deselected 69 cases / exit 1；151 failure+error 全 ENVIRONMENT_ONLY（缺 host tar/git、uid-owner、env 断言衍生）→ **A-NEXT 测试 OCI 可移植性 NOT_VERIFIED**；未静默扩大 deselect。
+- **P2-ENV-1 披露**：早期 Stage build 经 `artifacts/security` symlink 使用 frozen rootfs 作为 `--rootfs`（Lead 20:57Z 检测；frozen hash 未变 `25491e45…`）；已改为真实可写副本并在副本上重建 Stage（`stage-20261120T210101Z`，manifest `b3fd4cbc…`，base `c687738`）。**不得写“全程只用副本/无事件”**；失效尝试证据不计入。
+- **最终集成 HEAD**：`4d7c282…`（含 #8.2）；最终 Packet v3 待冻结后构建。
+- **全部人类决策仍 UNSIGNED**；G4-H/G5/G6/LiveGate/M0 状态不变。
+
+> 本节追加不改变任何签核状态；STOP，等待维护者。

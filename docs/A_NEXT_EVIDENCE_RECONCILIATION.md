@@ -226,3 +226,39 @@ OCI filtered 新计数（rootfs 副本、显式 deselect 后）：total 1081 / p
 - **P2-A4-1**：evidence-index v2 路径键修正由 rrev6 addendum `0735d7b` 完成（evidence-index-v2 sha `bac7b550…`）。
 
 > 本 §9 为 Owner-measured 追加；Reviewer 独立复核后才可回填终态，Agent 不得代签。
+
+## 10. Reviewer 终态与 OCI 结果追加（append-only；2026-11-20 集成轮）
+
+> 追加于 Reviewer 独立结论与 OCI filtered 有效 run 之后；**不修改**上文 §9 与冻结 65 行。
+
+### 10.1 状态更新（A-NEXT 19 行 delta）
+
+| case_id | 终态（按 Reviewer/Lead） | 依据 |
+|---|---|---|
+| A4-01 / A4-02 / A4-03 | **PASS** | Reviewer 独立 OCI L2 复跑 14/14、T0=T1、digest 11/9、Stage SHA 一致；**限 L2-REAL-DSH-FAKE（no-key）**；保留限制：Fake-only/无 Provider/Key/HTTP、R6-04 DSH replay 限制、R6-09 SIGKILL pre-attempt、R6-11 Broker FAILED 权威 |
+| R-REV6（A4 整体） | **PASS（Reviewer 复跑）** | 同上；Owner L2 host 级为 PARTIAL 的差异已由 Reviewer 独立复跑覆盖 |
+| A2-01 / A2-02 / A2-03 | 维持 **NOT_RUN** | A2 admission L2 未跑；代码合并不改变该状态 |
+| A1-01 / A1-02 | 维持 **PARTIAL** | Owner/Host 覆盖，Reviewer 独立复测待办（A2 PASS 条件式引用 A1 代码但不等于 A1-02 独立 L2） |
+| A3-01 / A3-02 | 维持 **PARTIAL** | registry UNVERIFIED + 补偿控制；Reviewer batch-2 PASS 条件式，终态待定 |
+| A5-01 / A5-02 | 维持 **PARTIAL** | packet v3 工具已合并但最终 Packet 未构建；OCI 例外已逐项文档化（见下） |
+| A0-01..03 | 维持 **PARTIAL** | 文档已合并；Reviewer 对账/Packet 冻结待办 |
+| A6-01 / A6-02 | 维持 **BLOCKED** | HUMAN_REQUIRED |
+| X-01 / X-02 | 维持 **PARTIAL** | 受保护文件边界/0 网络证据见集成报告 |
+
+**19 行统计（当前）**：PASS 3 / PARTIAL 11 / NOT_RUN 3 / BLOCKED 2。旧 65 行统计不变（PASS 29 / PARTIAL 14 / NOT_RUN 12 / UNVERIFIED 4 / BLOCKED 6）。全部 reviewer 列仍由 Reviewer 签署，不由 Agent 预填。
+
+### 10.2 Reviewer P2 修正登记
+
+- **P2-A4-1**：evidence-index v2 路径键修复（addendum `0735d7b`；`evidence-index-v2.json` sha `bac7b550…`）。
+- **P2-A4-2 / P2-A4-3**：runner fail-open + 前置清单 → 由 a-g4r-recovery 修正 addendum V2（`fc935bd`；`docs/A_NEXT_RREV6_L2_REPORT_ADDENDUM_V2.md` sha256 `28a2bba43ad21933c1180b30f4300ba4f0df59e5752dd7bae0ad663ad4d34319`，已合并为 #8.2；集成树 `tests/a_next_rrev6` 28 passed）。
+- **EXISTING security finding**：`fixtures/m1_teacher/judge/sentinels/sentinels.json` 合成 sentinel（LeadB 线，masked，历史 blob be92c3f/c993519d）；记 **EXISTING/ENVIRONMENT**，非 A-NEXT/A2 回归（Reviewer batch-3 三处复现）。
+
+### 10.3 Host/OCI 例外（集成轮）
+
+- **Host**：7 failures（见 `docs/A_NEXT_IMPLEMENTATION_REPORT.md` §2.1）：g3d stale-baseline、g4_b ×3（INCIDENT/ENVIRONMENT：本 worktree 缺 gitignored G3-D stage）、g4_d PermissionError、runtime profile mode、scanner history EXISTING。**0 REAL_REGRESSION**。
+- **OCI**：有效 run tests 1287 / failures 97 / errors 54 / skipped 31 / deselected 69 cases / exit 1；151 failure+error 全 **ENVIRONMENT_ONLY**（64 缺 host tar/git、61 uid-owner、26 env 断言衍生）→ A-NEXT 测试 OCI 可移植性 **NOT_VERIFIED**；未静默扩大 deselect（43 legacy + 26 g4r_auth 固定）。
+- **P2-ENV-1 / 失效尝试**：见集成报告 §6.2（frozen-symlink --rootfs 尝试、旧 g4r stage 模板尝试均标 INVALID，证据不计）；冻结 rootfs `25491e45…` 未漂移。
+
+### 10.4 最终集成身份
+
+`work/a-next` HEAD `4d7c2821e7907be7fa846855e7df25e3616c9fa1`（base `fd1d3a6`；含 #8.2）。最终 Packet v3 待 Lead 冻结 SHA 后构建（本文件 §7 身份占位待填）。

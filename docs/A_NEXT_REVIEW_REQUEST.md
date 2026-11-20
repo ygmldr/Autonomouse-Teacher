@@ -2,7 +2,7 @@
 
 - **文档 ID**：`A-NEXT-REVIEW-REQUEST-v1`
 - **发起**：Integrator（a-impl-core）；本文不构成自证/PASS。
-- **base**：`fd1d3a6d101f17e6a86d7c43f06c630326e3e3af`；**集成 HEAD（合并+文档前）**：`d553bba4e0cee61410f5e08a462c4ead8e7862b9`；Host 回归运行 HEAD：`1dfb24cd33da5a25129cf132365e7f297a7d617e`（其后仅 1 个 docs-only addendum）。文档提交 SHA 见集成完成报告。
+- **base**：`fd1d3a6d101f17e6a86d7c43f06c630326e3e3af`；**最终集成 HEAD（代码+合并，含 #8.2）**：`4d7c2821e7907be7fa846855e7df25e3616c9fa1`；Host 回归运行 HEAD `1dfb24c`；OCI 有效 run 执行树 `c687738`（随后 #8.2 scripts/tests/docs 修正；OCI 未在最终 HEAD 复跑）。
 - **分支/工作树**：`work/a-next` / `/root/Autonomous Teacher/worktrees/a-next`
 - **范围**：本机、无真实 Key/Provider/外部 HTTP/Live；`G4-H=NOT_AUTHORIZED`、`G5=BLOCKED`、`G6=NOT_RUN`、`LiveGate=BLOCKED`、`M0=DECISION_PENDING`。
 
@@ -57,7 +57,7 @@
 
 ## 5. 已知限制（主动披露）
 
-- OCI filtered 联合回归 **NOT_RUN**；A4-01..03 / A2-01..03 保持 NOT_RUN；B03/E5-P04 UNVERIFIED。
+- OCI filtered 联合回归已完成但 151 failure/error 全为 ENVIRONMENT_ONLY（新测试 OCI 不可移植 → A-NEXT OCI 覆盖 NOT_VERIFIED）；A4-01..03 已按 Reviewer 独立 L2 结论 **PASS（限 L2-REAL-DSH-FAKE/no-key）**、A2-01..03 保持 **NOT_RUN**；B03/E5-P04 UNVERIFIED。P2-ENV-1/失效尝试见 report §6.2。
 - Host 7 failures 为环境/既有类；G3-D stage artifact 在本 worktree 缺失（不可重建）。
 - 本集成环境为 INCIDENT_20261121 恢复后环境；v1 Packet LOST、v2 historical；不声明全程 NO_DRIFT/完整性。
 - Packet v3 最终包尚未构建（等冻结 SHA/staging 清单）；D-14 等人类决策仍 UNSIGNED。

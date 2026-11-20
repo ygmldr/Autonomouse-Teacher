@@ -298,3 +298,13 @@ TLS 证书链/主机名校验且不可关闭；DNS 固定解析/受控 resolver�
 
 - 本 Runbook 仍未执行；人类信任根/Key Broker/Egress/Watchdog/E5-Full/G5 均未部署、未授权；`LiveGate=BLOCKED`、`G4-H=NOT_AUTHORIZED`、`G5=BLOCKED`、`G6=NOT_RUN`、`M0=DECISION_PENDING` 不变。
 - 集成阶段 Host/Node 证据、A1/A2 代码合并**不构成**部署批准或人类签核。
+
+### 16.4 P2-ENV-1 追加：禁止经 symlink 间接把 frozen rootfs 用作 --rootfs
+
+- **事件**：集成交付工作树中 `artifacts/security` 曾为 symlink → 冻结 artifacts；Stage builder 内部以 `artifacts/security/rootfs` 拼 `--rootfs`，实际 resolve 到冻结 rootfs（Lead 20:57Z 检测；frozen hash 未变 `25491e45…`，但流程违规）。已删除 symlink 并用真实可写副本替换 `artifacts/security`/`artifacts/foundation`；Stage 在副本上重建（`stage-20261120T210101Z`）。
+- **P0 检查（每次容器/Stage 运行前）**：
+  1. `readlink -f <rootfs-path>` 必须**不**落在 `/root/Autonomous Teacher/artifacts/`；`realpath` 后仍须是本次运行专用的 work copy。
+  2. 禁止 artifacts 目录存在指向冻结树的 symlink 后再交给 builder/runner；构建工具内部路径也要审计（不能只看外层 argv）。
+  3. 冻结 rootfs 只读 hash T0/T1 每批记录；工作副本起跑前 hash 应等于 canonical（`25491e45…`），跑后删除；`podman ps -a` 收尾空。
+  4. 任何 `--rootfs` 参数须由显式构造 argv 给出（不要用旧模板替换）；记录 argv/UTC/exit/deselect。
+- **披露要求**：失效尝试（frozen-symlink、旧 stage 模板等）必须标 INVALID 且证据不计；不得写“全程只用副本/无事件”。

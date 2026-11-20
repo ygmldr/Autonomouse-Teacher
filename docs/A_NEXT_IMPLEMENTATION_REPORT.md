@@ -3,7 +3,7 @@
 - **文档 ID**：`A-NEXT-IMPLEMENTATION-REPORT-v1`
 - **Integrator**：a-impl-core（Integrator；非 Owner 实现者、非 Reviewer）
 - **目标分支/工作树**：`work/a-next` / `/root/Autonomous Teacher/worktrees/a-next`
-- **base**：`fd1d3a6d101f17e6a86d7c43f06c630326e3e3af`；**集成 HEAD（合并完成）**：`d553bba4e0cee61410f5e08a462c4ead8e7862b9`；Host 回归运行 HEAD：`1dfb24cd33da5a25129cf132365e7f297a7d617e`（其后仅 1 个 docs-only 合并 addendum）
+- **base**：`fd1d3a6d101f17e6a86d7c43f06c630326e3e3af`；**最终集成 HEAD（含 #8.2 rrev6 addendum V2）**：`4d7c2821e7907be7fa846855e7df25e3616c9fa1`；Host 回归运行 HEAD：`1dfb24cd33da5a25129cf132365e7f297a7d617e`（其后为 docs-only addendum 与 #8.2 scripts/tests/docs 修正，见 §6）
 - **内容**：A1/A2/A0/hygiene/A6/registry/packet-v3/rrev6 按 Lead green 清单合并；联合回归（Host/Node/ruff/scanner/LiveGate/SQLite）；OCI filtered 未运行（等 Lead 批准）。
 
 ## 0. 摘要
@@ -66,7 +66,7 @@
 | Secret scanner | self-test PASS；`--no-history` 0 findings；history 2（EXISTING，见上）；positive control 检出伪造 `sk-`（exit1，masked） | `scanner-*.log` |
 | LiveGate / 四入口 | inspect **BLOCKED**（首 reason `EXTERNAL_HUMAN_AUTHORIZATION_BOUNDARY_NOT_DEPLOYED`）；require_live **SECURITY_BLOCKED**；run_live.sh **exit 3**；CLI smoke --live **exit 3**（4 reasons）；Adapter 四入口 **4/4 SECURITY_BLOCKED**；strace run_live/CLI **0** 网络行 | `livegate.json`、`adapter-livegate.json` |
 | SQLite 只读/immutable | rrev6 L2 evidence 4 DB：`mode=ro&immutable=1` 打开、integrity ok、写被拒（`attempt to write a readonly data`）、副本与原件 sha256 不变 | `sqlite-probe.json` |
-| OCI filtered | **NOT_RUN**（窗口约束）；待批准执行，登记 legacy 43 + explicit g4r_auth 26，不静默扩大 | — |
+| OCI filtered（**有效 run 2026-11-20T21:10:04Z**，窗口延长至 21:45Z，单写者） | **tests 1287 / failures 97 / errors 54 / skipped 31 / deselected 69 cases（44 deselect 条目：43 legacy + 26 tests/integration/g4r_auth 目录）/ exit 1 / 112.4s**；151 个 failure+error 全部 **ENVIRONMENT_ONLY**：64 因 OCI rootfs 无 host 工具 `tar`/`git`（A-NEXT 新增测试为主机工具假设）、61 因 uid 65534 授权目录 owner 校验（`EXTERNAL_AUTHORIZATION_INVALID`）、26 为其断言衍生的 env（uid/tool/mode）；**未发现产品代码失败**；但 A-NEXT 新增测试套件**不具备 OCI 可移植性** → A-NEXT 的真实 OCI 覆盖 = **NOT_VERIFIED**（host 覆盖见 §2） | `artifacts/a_next/integration/oci2/junit-oci-filtered.xml`、`oci-meta-20261120T211004Z.json`、`oci-stdout-20261120T211004Z.log` |
 
 ## 3. Reviewer batch-3 结论登记（引用，不改判）
 
@@ -83,11 +83,35 @@
 
 ## 5. 未验证 / 待办 / 限制
 
-- **OCI filtered 联合回归 NOT_RUN**（等 21:10Z 后 Lead 批准；deselect 清单须显式登记）。
+- **OCI filtered 联合回归已完成**（有效 run 21:10:04Z；151 failure/error 全 ENVIRONMENT_ONLY，无产品代码失败；A-NEXT 测试 OCI 可移植性 NOT_VERIFIED；详见 §6）。
 - **A4-01..03、A2-01..03 = NOT_RUN**；`B03/E5-P04 = UNVERIFIED`（registry decision 为 UNVERIFIED + 补偿控制）。
 - **Packet v3 最终包未构建**：等集成冻结 SHA + staging payload 清单；builder/verifier 已就绪（`scripts/a_next/build_packet_v3.py`、`scripts/a_next/verify_packet_v3.py`，37 tests）。
 - Host 7 failures 为环境/既有类（已逐项演示/解释）；OCI deselect/失败待 OCI run 登记。
 - A6 人类决策 D-14..D-22、G4-H-01..06、G5 仍 **UNSIGNED / NOT AUTHORIZED**；状态常量不变。
 - 证据根（gitignored）：`artifacts/a_next/integration/`（host-full.log/junit、node/、scanner-*.log、livegate.json、adapter-livegate.json、sqlite-probe.json、provenance.txt、protected-diff.txt、summary.json、merge-log*.log、target-profile-env-demo.log）。
+
+
+## 6. OCI filtered 联合回归（有效 run 与失效尝试如实披露）
+
+### 6.1 有效 run（21:10:04Z，窗口延长至 21:45Z，单写者）
+
+- **命令**：直接构造 argv（非模板替换）：podman run — `--network none --read-only --cap-drop ALL --security-opt no-new-privileges --user 65534:65534`；mount `oci-stage(integration HEAD c687738 真副本):/project:ro`、`foundation/deps:/deps:ro`、`oci2:/evidence:rw`；`--rootfs /tmp/a-next-integration-rootfs-copy-<T>`（新 `cp -a` 工作副本，起跑前 hash=`25491e45…`，跑后删除）；`/opt/python/bin/python3.11 -B -m pytest tests/ -q -p no:cacheprovider --tb=no --ignore=tests/integration/g4_a --ignore=tests/unit/security/test_authorization.py --junitxml=/evidence/junit-oci-filtered.xml` + 43 legacy deselects + `--deselect=tests/integration/g4r_auth`（目录级，26 tests）。
+- **计数**：**tests 1287 / failures 97 / errors 54 / skipped 31 / deselected 69 cases（44 deselect 条目）/ exit 1 / 112.4s**（evidence `artifacts/a_next/integration/oci2/junit-oci-filtered.xml`）。
+- **deselect 固定**：legacy 43（G4-R 冻结清单，逐条保留）+ explicit `tests/integration/g4r_auth`（26 tests，uid-owner 环境类，需 host 覆盖说明）；**未静默新增其它 deselect**。
+- **失败分类**：151 = 64 ENVIRONMENT_ONLY（OCI rootfs 无 host `tar`/`git`，A-NEXT 新增测试以主机工具为前提）+ 61 ENVIRONMENT_ONLY（uid 65534 与授权目录 owner 校验 `EXTERNAL_AUTHORIZATION_INVALID`，与既有 g4r_auth 同类）+ 26 ENVIRONMENT_ONLY（上述 env 的断言衍生：uid/tool/mode）；**0 产品代码失败**。但 A-NEXT 新增测试套件在 OCI 中不可移植 → **A-NEXT 真实 OCI 覆盖 NOT_VERIFIED**。
+- **Stage 身份**：`artifacts/g4/c/stages/stage-20261120T210101Z`，base/head=`c687738`，manifest `b3fd4cbcb9383b0434fc4f426b4c8976c217fe6d9c18939314c7a67219b61e62`，trusted tree `5c9b3958ab30447e54f5f39572f210e95e7aa56f7db573117a58f3bf35836c02`（集成树重新构建；非旧 Stage）。
+- **环境**：frozen rootfs T0/T1 = `25491e45…`、deps T0/T1 = `e07729d7…`（未漂移）；rootfs 副本已删除；`podman ps -a` 收尾空。
+
+### 6.2 失效尝试与 P2-ENV-1（必须披露，证据不计入）
+
+- **P2-ENV-1（Lead 20:57Z 检测）**：`worktrees/a-next/artifacts/security` 曾是 symlink → `/root/Autonomous Teacher/artifacts/security`；早期 Stage build 命令经该 symlink 使 `podman --rootfs` resolve 到**冻结 rootfs**。冻结 hash 未变（`25491e45…`），但违反 A5/HANDOFF 规则。**纠正**：删除 symlink（不删目标），将 `artifacts/security` 与 `artifacts/foundation` 替换为真实可写副本（canonical 校验仍 `25491e45…`/`e07729d7…`）；Stage 在真实副本上重建（§6.1）；`g3a-provider-bridge`/`g3c` 仅指向 rrev6 构建产物的只读 symlink（非 rootfs），已记录。
+- **INVALID_ATTEMPT_OLD_G4R_STAGE**：20:56:45/21:00/21:03 的旧脚本模板替换仍挂 g4r-phase2 旧 oci-stage/evidence → 其 1052/28/69 计数**不能作为集成 tree 证据**（证据文件保留但标 INVALID）。
+- **INVALID_ATTEMPT_FROZEN_ROOTFS_SYMLINK**：21:01 尝试经上述 symlink 使用冻结 rootfs → 证据不计；对应无效 Stage 目录已删除。
+- 本轮未写“全程只用副本/无事件”；上述尝试与纠正均留在证据与报告。
+
+### 6.3 限制
+
+- OCI 有效 run 的执行树为 `c687738`；其后 #8.2（fc935bd，仅 scripts/tests/docs）合并到 `4d7c282`，**OCI 未在最终 HEAD 复跑**（窗口/时间）→ 最终 HEAD 的 OCI = NOT_RUN（限制记录）。
+- A-NEXT 测试 OCI 可移植性未解决（需后续把 host 工具假设改为纯 Python 或容器内工具；不得静默扩大 deselect）。
 
 > 本报告不是 PASS、不是授权；最终裁定由 Independent Reviewer 从冻结 SHA 独立复现后给出。**未 push。**
