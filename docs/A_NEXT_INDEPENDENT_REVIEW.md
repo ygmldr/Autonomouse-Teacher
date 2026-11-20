@@ -1404,3 +1404,120 @@ reviewer audit: prepared=11/payload=9，0 mismatch；R6-05/09/10/11/12 终态如
 evidence manifest: 1691 files，sha256 88def328…
 attempt1（无效）: 20:44:43Z 起，缺 artifacts/g4/c/runs → 13 case INTERNAL/PARTIAL，runner 仍 EXIT=0（P2-A4-2）
 ```
+
+
+---
+
+## 16. 终审 batch-4（前段）：集成树独立复核 `work/a-next@bbbcb37` — 2026-11-20T21:16Z–21:35Z
+
+> 本节基于 Lead 给定冻结 SHA `bbbcb37c7468ed3f8c1d5f9ac83402fd68996c74`；**最终裁定以 Lead 后续给的新冻结 SHA
+> 与新 Packet 为准**。旧 Packet v3（bbbcb37 候选）因可复现性缺陷已被 Lead 判定重建，标记
+> `SUPERSEDED_BY_NEW_FREEZE`（见 §16.6），不作为最终 PASS 依据。
+
+### 16.1 集成树身份与结构（Reviewer 实测）
+
+| 项 | 结果 |
+|---|---|
+| 树/分支 | `/root/Autonomous Teacher/worktrees/a-next` @ **`bbbcb37`**（branch `work/a-next`，status clean）；代码 HEAD = `4d7c282`（bbbcb37 为其 docs-only child，仅 `A_NEXT_IMPLEMENTATION_REPORT.md` +2 行） |
+| 变更规模 | `git diff fd1d3a6..bbbcb37` = **69 files / +17298 / −22**（与 Lead 声明一致） |
+| 冻结件 | 冻结 CSV `741d7d55…`、`REVIEW_G4R_INDEPENDENT.md`、`M0_G4R_REVIEW_ERRATA.md`、`g4r_review_evidence/**`、`gates.py`、`run_live.sh`、`dsh_adapter.py`、`cli.py`、`live_controller.py`、`config/`：**零 diff** |
+| 受保护文件 | 仅 3 个：`M src/autoteacher_m0/security/authorization.py`（A1 +69/−18）、`M src/autoteacher_m0/bridge/controller.py`（A2 +82/−4）、`A src/autoteacher_m0/bridge/run_admission.py`（A2 新入口）——与 Lead 声明一致 |
+| 合并结构 | `git rev-list --count --merges fd1d3a6..HEAD` = **10**；覆盖 **8 个唯一分支 tip**（A1 e6f3aa6、A2 c7eb74e、baseline bf312c8、hygiene 7d7c0a5、handoff 13e39a4、registry 748fd0a、packet ce914c1、rrev6 95a020b；rrev6 另以 addendum 0735d7b 与 fc935bd 各合并一次）；10 个 merge 均为 **2-parent**、所有 tip `merge-base --is-ancestor HEAD` = true；工作区/索引 clean、0 冲突标记 |
+
+> Lead 表述“无冲突合并 9 分支”与实测“10 merges / 8 unique branch tips（rrev6 三次合并）”在计数口径上略有差异，
+> 实质一致（未发现未审 merge）；建议 Packet 文档按“8 分支 + rrev6 两次 addendum（共 10 merges）”精确表述（P3）。
+
+### 16.2 A-PR0 v3 / A6 append-only / 矩阵状态（P2-A0-1 落实）
+
+- **A-PR0 v3 `bf312c8` 已合入**（merge `6fcb87a`），`A_NEXT_BASELINE_ADDENDUM_V3.md` 存在且 **P2-A0-1 已落实**：
+  Reviewer 独立复算 `git show e1fa0b9:docs/A_NEXT_BASELINE.md` sha **5ebbe39c…**、`94c81a1:` **597811ff…**
+  （= 当前字节）、blob `265a2663…`/`3cc3d6b0…`；`A_NEXT_BASELINE_ADDENDUM_V2.md` sha **540f216b…** 未改；
+  `A_NEXT_REVIEW_STATUS_RECONCILIATION.md` sha **81ecae3c…**（v1 字节未改）；v3 唯一载体 sha **a9607137…**；
+  `94c81a1` 的就地修改（2 文件/+17/−9）已在 v3 §2 披露，v1/v2 冻结字节未改——**正确**。
+- **A6 append-only 更新已合入**：`13e39a4..bbbcb37` 对 Handoff `+27` 行、Runbook `+33` 行，含 §9 集成身份/
+  D-14/BLK 状态/incident/EXISTING finding、§10 Reviewer 终态（A4-01..03=PASS、A2 NOT_RUN、A1/A3/A5/A0 PARTIAL、
+  A6 BLOCKED）、Runbook §16 INCIDENT/P2-ENV-1 防再发检查。**状态常量未改写**。
+- **矩阵（A_NEXT_EVIDENCE_RECONCILIATION）**：冻结 65 行未预填（Reviewer 列 `TBD`）；A-NEXT 19 行 §5 初始
+  `NOT_RUN`/`BLOCKED` 保留，**§10 append-only 追加终态**：A4-01/02/03=**PASS**（限 Reviewer 独立 L2）、
+  R-REV6=PASS、A2-01..03=**NOT_RUN**、A1/A3/A5/A0=PARTIAL、A6=BLOCKED。Reviewer 确认 §10 与 §15 结论一致。
+- **P3（文档一致性）**：`§5` 行级 `final_status` 仍 `NOT_RUN`/`TBD` 而 `§10` 已 PASS；`A5-02` 行仍写
+  “OCI 待登记”；`IMPLEMENTATION_REPORT.md` 顶部摘要仍写 “OCI filtered=NOT_RUN/65 files” 而正文/§6 已有
+  有效 OCI run 与 69 files（且合并表未列 #8.2）——均属 append-only 历史/摘要未回改；建议 Packet v3 后续
+  addendum 明确“以 §10/§6 为准”，避免读者引用旧行（P3，不改变安全结论）。
+
+### 16.3 Host 独立复跑（Reviewer 在最终集成树执行）
+
+```text
+cwd=/root/Autonomous Teacher/worktrees/a-next  HEAD=bbbcb37
+PYTHONPATH=src pytest tests -q -p no:cacheprovider
+-> 7 failed, 1619 passed, 18 skipped in 700.99s；总计 1644（= bbbcb37 collect-only 1644）
+```
+
+- 7 failures 与 Integrator JUnit（`host-full-junit.xml`：1626/1601/7/18，运行于 1dfb24c）逐 nodeid **完全相同**；
+  差量 +18 = #8.2 新增 rrev6 runner fail-closed tests（1626→1644）——**Reviewer 在最终 HEAD 补跑了 Integrator
+  报告“final HEAD host full NOT_RUN”的限制**。
+- 逐项独立复现失败并分类：g3d stale-baseline（ENVIRONMENT_ONLY）、g4_b ×3 = 缺 gitignored
+  `artifacts/g3d/stage-20261117T221955Z`（全局不存在 ⇒ **INCIDENT/ENVIRONMENT**）、g4_d PermissionError
+  `/root/.../.venv/bin/python`（ENVIRONMENT_ONLY）、runtime target profile mode 0644（ENVIRONMENT_ONLY）、
+  scanner history m1_teacher sentinel（**EXISTING/ENVIRONMENT**）。**6 ENV + 1 EXISTING、0 REAL_REGRESSION** —
+  与 Integrator 分类一致，g4_b 因 G3-D Stage 丢失符合 INCIDENT 归因。
+- 其他：A-NEXT 6 套件组合 **223 passed / 1 skipped**；G4 组合（g4_a/g4_f5/g4_f2/g4r_packet）**276 passed / 1 skipped**；
+  两者均 exit 0。Ruff/Node/LiveGate/SQLite 结论引用 Integrator 证据（Reviewer 未重复 Node/LiveGate 容器执行）。
+
+### 16.4 OCI（Integrator 窗口）独立核验
+
+- JUnit `junit-oci-filtered.xml` 实测：**1287 tests / 97 failures / 54 errors / 31 skipped**（= 151 F/E）✓ 与
+  `oci-meta-20261120T211004Z.json` counts 一致；deselect **44 条目 = 69 cases（43 legacy + 26 g4r_auth）**；
+  exit 1；stage `stage-20261120T210101Z` base `c687738`、manifest `b3fd4cbc…`、trusted `5c9b3958…`；
+  T0/T1 rootfs `25491e45…`、deps `e07729d7…`；run 于 **c687738**，其后 #8.2/bbbcb37 未跑 OCI ⇒
+  **final HEAD OCI = NOT_RUN**（Integrator 已如实披露）。
+- Reviewer 对 151 F/E 独立分桶：66 缺 host `git`/`tar`、63 uid/owner（`EXTERNAL_AUTHORIZATION_INVALID` 等）、
+  21 env-assert 衍生、1 其它 no-such-file；**全部可归因环境**、无产品逻辑失败（docs 自称 64/61/26，分桶口径差异，
+  结论一致）⇒ **A-NEXT 测试 OCI 可移植性 NOT_VERIFIED 的披露诚实**；未静默扩大 deselect。
+- **P2-ENV-1**：Integrator 证据披露早期 Stage build 经 `artifacts/security` symlink 使 `--rootfs` resolve 到冻结
+  rootfs（Lead 20:57Z 检测；frozen hash 未变）；Reviewer 实测当前 `artifacts/security` 为真实目录、rootfs
+  重算 **25491e45…**，Runbook §16.4/meta invalidated attempts 均已记录——**披露诚实、纠正有效**；
+  但“早期 frozen-symlink 尝试”本身属 P2 流程缺陷（已修复+披露）。
+
+### 16.5 发现（前段，待新冻结复核后定稿）
+
+- P0/P1：**无**。
+- 待定 P2（Packet 重建后仍需满足）：①Packet 可复现性（见 §16.6，Lead 已确认缺陷）；②最终 Packet 内的
+  文档一致性（§16.2 P3 类应通过 addendum/README 明确“以 §10/§6 为准”）；③A-NEXT OCI 可移植性 NOT_VERIFIED
+  必须随 Packet 披露（不得被“OCI run 已执行”表述覆盖）。
+- P3：merge 计数口径、IMPLEMENTATION_REPORT 顶部摘要/65 files/合并表 #8.2 未回填、A5-02 行 stale 文本、
+  矩阵 §5 与 §10 并存需明示优先级。
+
+### 16.6 旧 Packet v3（bbbcb37 候选）= `SUPERSEDED_BY_NEW_FREEZE`
+
+- Reviewer 于 21:19Z 曾见到候选包 `artifacts/review-packet-a-next-v3-bbbcb37…`（manifest builder_sha `e4494382…`、
+  content `a227abea…`、tree `db32da87…`、373 files/0 symlink），但该目录随后被重建移除；
+  **未完成独立全树/逐文件/mutation 终审**。
+- Lead 审计已确认**可复现性缺陷**：冻结 builder 的 `packet_name` 使用临时目录名，首包曾用未提交本地 3 行修复
+  重建，`identity.builder_sha256` 与实际冻结源码不一致 ⇒ **Packet 不能从冻结 commit 复现**。
+  Reviewer 记录为 **P2-A5-1（Packet reproducibility）**：旧包 `SUPERSEDED_BY_NEW_FREEZE`、**不得作为最终 PASS 依据**；
+  新 Packet 终审将强制检查：
+  1. `identity.builder_sha256` == 冻结 commit 中 `scripts/a_next/build_packet_v3.py` 的 sha256；
+  2. `packet.name`/目录名 == 冻结 identity（非临时目录名）；
+  3. 用冻结 commit 的 builder 从 staging 可复现（至少 builder 自校验/重建同身份）；
+  4. manifest/hashes/README 的 builder/content/tree 自洽。
+- 旧 Integration/Host/OCI 事实（§16.1–16.4）仍作为**新冻结前**的独立证据保留；最终裁定以新冻结 SHA + 新 Packet 为准。
+
+> 本节不构成最终 PASS；门状态不变：`LiveGate=BLOCKED`、`G4-H=NOT_AUTHORIZED`、`G5=BLOCKED`、`G6=NOT_RUN`、
+> `M0=DECISION_PENDING`；`B03/E5-P04=UNVERIFIED`；人类决策仍 UNSIGNED。
+
+---
+
+## 附录 J：batch-4 前段命令/输出
+
+```text
+git -C worktrees/a-next rev-parse HEAD -> bbbcb37c7468ed3f8c1d5f9ac83402fd68996c74 (clean)
+git diff fd1d3a6..HEAD -> 69 files, +17298/-22；frozen/protected 例外如 §16.1
+git rev-list --count --merges fd1d3a6..HEAD -> 10；各 tip ancestor=true；merge parents 均 2
+PYTHONPATH=src pytest tests -q -> 7 failed, 1619 passed, 18 skipped (700.99s, 1644 total)
+7 failures reproduced individually: g3d stale / g4_b ×3 stage manifest missing / g4_d PermissionError /
+  runtime profile mode / scanner history EXISTING -> 6 ENV + 1 EXISTING, 0 REAL_REGRESSION
+A-NEXT suites: 223 passed, 1 skipped；G4 suites: 276 passed, 1 skipped
+OCI junit: 1287/97/54/31；meta deselect 44 entries/69 cases；151 F/E all environment-attributable
+P2-A0-1 hashes: e1fa0b9 5ebbe39c… / 94c81a1 597811ff… / v2 540f216b… / reconciliation-v1 81ecae3c… / v3 a9607137…
+```
