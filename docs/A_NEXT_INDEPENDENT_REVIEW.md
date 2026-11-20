@@ -925,3 +925,100 @@ $ reviewer /tmp/a-pr2_independent_attack_probe.py
 恢复 stage 哈希: bridge 2cb42461… / skill 521bc0f1… / dsh-tools 5d95d7f4… / dsh-llm 45f7d934… /
                 cordis 70be1056… / runtime 1cc41d5a…（均 == identity/policy）
 ```
+
+
+---
+
+## 11. 阶段 2 batch-3：A-PR2 条件修正复核（`748fd0a`）— 2026-11-20T20:18Z–20:30Z
+
+### 11.1 对象与范围
+
+| 项 | Reviewer 实测 |
+|---|---|
+| 分支/HEAD | `feat/a-next-registry` @ **`748fd0a529270a11b42ca4be23c096fb1b6f9e14`**（parent `e09ac7c`；`4cc3a26` fix(C1/C5) + `748fd0a` docs(C2/C3/C5)） |
+| 变更 | `git diff --name-status e09ac7c..748fd0a` = **3 M**：`scripts/a_next/registry/run_matrix.py`、`docs/A_NEXT_REGISTRY_DECISION.md`、`tests/a_next_registry/test_registry_attack_matrix.py`（+135/−24） |
+| 未改 | `git diff fd1d3a6..HEAD -- src/ config/` = **空**；policy `registry_status` 仍 `UNVERIFIED_NO_AUTHORITATIVE_MERGED_EXPORT` |
+
+### 11.2 C1（复现路径 + fail-closed SHA）——**通过**
+
+代码核对（`run_matrix.py`）：`DEFAULT_STAGE = /tmp/at-f4-clean/...` 已删除；新增
+`DEFAULT_STAGE_CANDIDATES = (<repo>/artifacts/g3c/stage, worktrees/a-next-rrev6/artifacts/g3c/stage)`、
+`EXPECTED_STAGE_SHA256`（bridge/skill/dsh-tools/dsh-llm/cordis 五值，与 identity/Reviewer 已核值一致）、
+`STAGE_RECOVERY_NOTE`；`locate_stage()` 启动前逐文件校验 SHA（`STAGE_SHA_MISMATCH` fail-closed），
+无候选则 `STAGE_MISSING`；run-summary 新增 `stage_verification`/`stage_recovery_note`/`exit_code`；
+argparse `--stage` 默认 `""`（不再硬编码已消失路径）。
+
+Reviewer 独立运行（**不带 `--stage`**）：
+
+```text
+$ run_matrix.py --mode baseline --out /tmp/a-next-registry-c1-review
+  -> run 20261120T201850Z-baseline, exit 0, verdict MEASURED_PASS
+     stage_dir=/root/Autonomous Teacher/worktrees/a-next-rrev6/artifacts/g3c/stage
+     stage_verification.verified=true（5 个 expected SHA 全部列出）
+     stage_recovery_note="stage recovered from hash-verified copy (a-next-rrev6 worktree, INCIDENT_20261121)…"
+$ run_matrix.py --mode baseline --stage /tmp/fake-stage-c1   -> exit 1, ValueError: STAGE_SHA_MISMATCH（fail-closed）
+$ run_matrix.py --mode baseline --stage /tmp/does-not-exist  -> exit 1, FileNotFoundError: STAGE_MISSING（fail-closed）
+```
+
+Owner 复跑 run `20261120T200752Z-baseline` / `20261120T200757Z-two-turn-bash`：`stage_verification.verified=true`、
+`exit_code=0`、`stage_recovery_note` 存在；`identity.txt` 已更正（base `fd1d3a6` vs final head 关系、Stage 恢复声明、
+新脚本 SHA `8067fcea…` 与当前文件一致）。`pytest tests/a_next_registry -q` = **8 passed, 1 skipped**（新增 2 个 C1
+fail-closed 单测）；runtime 集成 = **9 passed in 17.33s**（Owner 9/17.44s，一致）；ruff All checks passed。
+
+### 11.3 C2（矩阵行 / 无可核表述 / 引用独立复验）——**通过**
+
+- §2.2 新增 **7a 行**：`late-bash-before-dispatch`（genuine attack run 供 #14–16 使用），记录
+  face=`[bash, skill_lookup]`/unknown=[bash]/enforce deny/未到 adapter（无 bridge 请求）。
+- 文档头部删除无证据的“host 复验 19:56Z”表述，改为“更正轮复跑 20:07:52Z/20:07:57Z（默认 Stage 恢复副本）”。
+- 文档明确引用 **Reviewer 独立复验**（7 passed/17.46s + 11/11 modes），标注为 Reviewer 结论而非 Owner 自证。
+
+### 11.4 C3（裁决映射）——**通过**
+
+新增 §0.1 映射表：`A3-01 = UNVERIFIED（保留）`、`A3-02 = L1 分类 PASS / L2 NOT_RUN`、
+`B03/E5-P04 = UNVERIFIED（维持）`、B 补偿控制“条件式，依赖 A4 L2 OS sandbox 证明”、
+Registry **未关闭**（不得表述为 verified/closed）。
+
+### 11.5 C5（措辞/identity/隔离声明）——**通过**
+
+- #14–16 状态由 `MEASURED_PASS = attack succeeded` 改为 **`ATTACK_CONFIRMED（负面结论…）`**，并加注
+  “ATTACK_CONFIRMED 更不是 PASS”。
+- `key_and_provider_nonuse` 替代硬编码 `real_key_present/real_provider_calls`，明确“由隔离设计保证、非运行时实测”；
+  identity.txt 同步为设计声明并列出恢复 Stage 的 5 个 SHA。
+- `ATTACK_MATRIX_INDEX.json` 已重生成（generated_utc 20:10:00Z），含 corrections/historical_fields/stage_recovery
+  notes 与新增 2 个恢复 Stage run；`/work` 清理、worktree clean。
+
+### 11.6 残余 nit（P3，不阻塞）
+
+1. fail-closed 以裸 `ValueError`/`FileNotFoundError` 抛出（exit 1 + traceback）；行为 fail-closed 正确，
+   若接入 CI 建议改为稳定 enum/退出码（非本 PR 安全缺陷）。
+2. 行 7a 括注“另 `20261120T200757Z-two-turn-bash` 为默认 Stage 复跑”与 late-bash 行并列略易混（措辞 only）。
+3. `DEFAULT_STAGE_CANDIDATES` 中 `<repo>/artifacts/g3c/stage` 当前为失效自指 symlink（自动落到 rrev6 副本；不影响结果）。
+
+### 11.7 裁定
+
+| 项 | 结论 |
+|---|---|
+| A-PR2 条件修正（C1/C2/C3/C5） | **PASS（条件已满足）** |
+| 是否允许集成 | **是**（仅 docs/scripts/tests；`src/`/`config/` 零 diff；无 runtime 行为变更） |
+| A3-01 / A3-02 / B03 / E5-P04 / B | **UNVERIFIED / L1 PASS·L2 NOT_RUN / UNVERIFIED / UNVERIFIED / 条件式（依赖 A4 L2）** |
+| C4（A4 L2 OS sandbox） | 仍 **NOT_RUN**，由矩阵/Packet v3 记录；不因本 PR 放行 |
+
+> 本批 **未跑 OCI**（A4 独占窗口至 20:50Z 的约束保持）；未改变任何门状态；A2 等待 rebase 后 SHA 再复核（不审 `25b09ae` 旧树）。
+
+---
+
+## 附录 F：batch-3 命令与输出（§11）
+
+```text
+$ git -C worktrees/a-next-registry diff --name-status e09ac7c..748fd0a -> 3 M files (+135/−24)
+$ git -C worktrees/a-next-registry diff fd1d3a6..HEAD -- src/ config/ -> empty
+$ pytest tests/a_next_registry -q -> 8 passed, 1 skipped (0.02s)
+$ G4R_RUN_RUNTIME=1 G4R_STAGE=worktrees/a-next-rrev6/artifacts/g3c/stage pytest tests/a_next_registry -q
+  -> 9 passed in 17.33s
+$ ruff check scripts/a_next tests/a_next_registry -> All checks passed!
+$ run_matrix.py --mode baseline（不带 --stage）-> exit 0, stage verified=true, run 20261120T201850Z-baseline
+$ run_matrix.py --mode baseline --stage /tmp/fake-stage-c1 -> exit 1 STAGE_SHA_MISMATCH (fail closed)
+$ run_matrix.py --mode baseline --stage /tmp/does-not-exist -> exit 1 STAGE_MISSING (fail closed)
+Owner reruns: 20261120T200752Z-baseline / 20261120T200757Z-two-turn-bash -> verified=true, exit_code=0
+identity.txt: run_matrix sha 8067fcea… (== current), test sha 81f664b2… (== current)
+```
