@@ -511,3 +511,32 @@ def test_verifier_rejects_directory_name_not_identity(built_packet, tmp_path):
     wrong = copy_packet(built_packet["packet"], parent / "wrong-packet-name")
     normalize_modes(wrong)
     _assert_fail(_verify(wrong), 43, "PACKET_NAME_MISMATCH")
+
+
+def test_packet_manifest_is_byte_identical_across_rebuilds(tmp_path, staging, frozen_rootfs):
+    """Same staging/frozen/impl parameters must rebuild byte-identical packet layers."""
+    impl = "d" * 40
+    expected = canonical_sha(frozen_rootfs)
+    out_dirs = [tmp_path / "rebuild-a" / f"review-packet-a-next-v3-{impl}",
+                tmp_path / "rebuild-b" / f"review-packet-a-next-v3-{impl}"]
+    for out in out_dirs:
+        (out.parent).mkdir(parents=True, exist_ok=True)
+        proc = run_script(
+            "build_packet_v3.py",
+            "--staging-dir",
+            staging,
+            "--impl-sha",
+            impl,
+            "--no-git-check",
+            "--out-dir",
+            out,
+            "--frozen-rootfs",
+            frozen_rootfs,
+            "--expected-rootfs-sha",
+            expected,
+        )
+        assert proc.returncode == 0, proc.stdout + proc.stderr
+    first, second = out_dirs
+    assert (first / "manifest.json").read_bytes() == (second / "manifest.json").read_bytes()
+    assert (first / "hashes.sha256").read_bytes() == (second / "hashes.sha256").read_bytes()
+    assert (first / "README.md").read_bytes() == (second / "README.md").read_bytes()

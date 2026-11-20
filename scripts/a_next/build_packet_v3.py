@@ -131,7 +131,6 @@ def build_manifest(
             "format": "a-next-v3",
             "identity_root_prefix": common.IDENTITY_ROOT_PREFIX,
             "phase": phase,
-            "created_utc": common.utc_now(),
             "directory_policy": (
                 "new identity only; never reuse/overwrite review-packet-g4f (v1, LOST) "
                 "or review-packet-g4r (v2, historical)"
