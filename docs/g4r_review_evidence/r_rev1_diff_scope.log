@@ -1,0 +1,81 @@
+== R-REV1 diff scope (3e7afee..5bf9b8b; delta-before snapshot) ==
+ ...us_Teacher_M0_G4R_Test_Evidence_Matrix_v1.0.csv |  66 +++
+ docs/M0_G4R_00_BASELINE.md                         | 202 ++++++++
+ docs/M0_G4R_R1_AUTH_REPORT.md                      | 108 ++++
+ docs/M0_G4R_R2_RECOVERY_REPORT.md                  | 267 ++++++++++
+ docs/M0_G4R_R4_PACKET_REPORT.md                    | 134 +++++
+ docs/M0_G4R_REGISTRY_FEASIBILITY.md                | 222 ++++++++
+ docs/M0_G4R_SOURCE_ERRATA_APPEND.md                |  68 +++
+ scripts/g4r/build_packet_g4r.py                    | 559 +++++++++++++++++++++
+ scripts/g4r/r1_independent_probe.py                | 203 ++++++++
+ .../g4r/registry_probe/probe_plugin/lib/index.js   | 198 ++++++++
+ scripts/g4r/registry_probe/run_host_probe.py       | 395 +++++++++++++++
+ scripts/g4r/registry_probe/snapshot.schema.json    |  78 +++
+ scripts/g4r/run_r2_evidence.py                     | 246 +++++++++
+ scripts/g4r/verify_packet_g4r.py                   | 442 ++++++++++++++++
+ src/autoteacher_m0/bridge/controller.py            | 286 ++++++++++-
+ src/autoteacher_m0/bridge/recovery_diagnostics.py  | 191 +++++++
+ src/autoteacher_m0/bridge/request_lifecycle.py     | 261 ++++++++++
+ src/autoteacher_m0/security/authorization.py       | 271 ++++++++--
+ tests/g4r_packet/support.py                        | 213 ++++++++
+ tests/g4r_packet/test_packet_v2.py                 | 381 ++++++++++++++
+ tests/g4r_registry/test_registry_probe.py          | 134 +++++
+ tests/integration/g4r_auth/conftest.py             |  52 ++
+ .../g4r_auth/test_r1_atomic_use_record.py          | 492 ++++++++++++++++++
+ tests/integration/g4r_recovery/conftest.py         |  51 ++
+ tests/integration/g4r_recovery/g4r_support.py      | 178 +++++++
+ .../test_r2_01_pre_controller_deadline.py          | 149 ++++++
+ .../g4r_recovery/test_r2_02_post_reserve_hold.py   | 130 +++++
+ .../g4r_recovery/test_r2_03_request_rejection.py   | 110 ++++
+ .../g4r_recovery/test_r2_04_observability_gap.py   |  93 ++++
+ .../g4r_recovery/test_r2_recovery_semantics.py     | 209 ++++++++
+ tests/security/test_scan_git_secrets.py            |   1 -
+ 31 files changed, 6351 insertions(+), 39 deletions(-)
+
+A	docs/Autonomous_Teacher_M0_G4R_Test_Evidence_Matrix_v1.0.csv
+A	docs/M0_G4R_00_BASELINE.md
+A	docs/M0_G4R_R1_AUTH_REPORT.md
+A	docs/M0_G4R_R2_RECOVERY_REPORT.md
+A	docs/M0_G4R_R4_PACKET_REPORT.md
+A	docs/M0_G4R_REGISTRY_FEASIBILITY.md
+A	docs/M0_G4R_SOURCE_ERRATA_APPEND.md
+A	scripts/g4r/build_packet_g4r.py
+A	scripts/g4r/r1_independent_probe.py
+A	scripts/g4r/registry_probe/probe_plugin/lib/index.js
+A	scripts/g4r/registry_probe/run_host_probe.py
+A	scripts/g4r/registry_probe/snapshot.schema.json
+A	scripts/g4r/run_r2_evidence.py
+A	scripts/g4r/verify_packet_g4r.py
+M	src/autoteacher_m0/bridge/controller.py
+A	src/autoteacher_m0/bridge/recovery_diagnostics.py
+A	src/autoteacher_m0/bridge/request_lifecycle.py
+M	src/autoteacher_m0/security/authorization.py
+A	tests/g4r_packet/support.py
+A	tests/g4r_packet/test_packet_v2.py
+A	tests/g4r_registry/test_registry_probe.py
+A	tests/integration/g4r_auth/conftest.py
+A	tests/integration/g4r_auth/test_r1_atomic_use_record.py
+A	tests/integration/g4r_recovery/conftest.py
+A	tests/integration/g4r_recovery/g4r_support.py
+A	tests/integration/g4r_recovery/test_r2_01_pre_controller_deadline.py
+A	tests/integration/g4r_recovery/test_r2_02_post_reserve_hold.py
+A	tests/integration/g4r_recovery/test_r2_03_request_rejection.py
+A	tests/integration/g4r_recovery/test_r2_04_observability_gap.py
+A	tests/integration/g4r_recovery/test_r2_recovery_semantics.py
+M	tests/security/test_scan_git_secrets.py
+
+== deleted/renamed ==
+(end)
+
+== protected/frozen zero-diff check ==
+(end; empty=zero diff)
+
+== impl/base trees ==
+feccda00a78f10a8ee89b49b130838e464d98c46
+66edfac399c0af8e15f28f6064cb85be8e1dd11d
+40666eefbceaaa55ea28797e2cc74f80e3a92e05
+e10d7c7ce135b741833529d4734d1d307a13ee28
+
+== main worktree ==
+3e7afee077845a071cd364e93ab209cac20b2d5f
+0

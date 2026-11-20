@@ -1,0 +1,18 @@
+== delta audit 5bf9b8b..d33e0aa ==
+ scripts/g4r/build_packet_g4r.py                    | 72 +++++++++++++++++--
+ scripts/g4r/verify_packet_g4r.py                   | 33 ++++++++-
+ tests/g4r_packet/{support.py => packet_support.py} | 27 ++++---
+ tests/g4r_packet/test_packet_v2.py                 | 84 +++++++++++++++++++++-
+ 4 files changed, 197 insertions(+), 19 deletions(-)
+M	scripts/g4r/build_packet_g4r.py
+M	scripts/g4r/verify_packet_g4r.py
+R088	tests/g4r_packet/support.py	tests/g4r_packet/packet_support.py
+M	tests/g4r_packet/test_packet_v2.py
+
+-- src zero diff 5bf9b8b..d33e0aa --
+(end)
+-- protected/frozen zero diff 3e7afee..d33e0aa --
+(end)
+-- trees --
+ac93330112aa12e5eac9e2dc95a29ad4308562ac
+e10d7c7ce135b741833529d4734d1d307a13ee28

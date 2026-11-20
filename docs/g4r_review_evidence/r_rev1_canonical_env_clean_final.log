@@ -1,0 +1,10 @@
+== canonical env after cleanup (Reviewer recompute) ==
+Fri Nov 20 17:26:37 UTC 2026
+rootfs:
+25491e45aa3dc54c526db9b9d46d18b31c7840150473e2fdb4d8b882f02fe9c0  -
+deps:
+e07729d7997944417b1c25531749b3e6e5e34aa4248f01dc8f370282082ecb98  -
+runtime:
+1cc41d5a8745a5b9d47c8604e44f23eb8af2d8ca02b2afa0be101d5f71be6ea4  /root/Autonomous Teacher/artifacts/foundation/deps/deepseek_harness_runtime/runtime/deepseek-harness-sdk-runtime-linux-x64
+adapter:
+2cb424616b7380bff61f8ce760e229a0c1d2b32c4a5f2954cdf66c3937bf74ba  /root/Autonomous Teacher/artifacts/g4/c/stages/stage-20261119T142828Z/candidate/runtime/bridge/lib/index.js

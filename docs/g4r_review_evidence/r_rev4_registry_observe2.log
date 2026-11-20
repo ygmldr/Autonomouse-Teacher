@@ -1,0 +1,71 @@
+{
+  "analysis": {
+    "attack_count": 0,
+    "attacks": [],
+    "dispatch_count": 1,
+    "dispatch_face_approved": true,
+    "dispatch_registry_approved": true,
+    "face_equals_registry": true,
+    "final_snapshot": {
+      "attack": "none",
+      "definitions": [],
+      "epoch": 2,
+      "kind": "registry_snapshot",
+      "mode": "observe",
+      "pid": 1429485,
+      "schema": "g4r.registry.probe.v1",
+      "schemas": [],
+      "utc": "2026-11-20T16:48:52.455Z",
+      "why": "tools_change"
+    },
+    "last_dispatch": {
+      "approved_face": true,
+      "approved_registry": true,
+      "approved_registry_names": [
+        "skill_lookup"
+      ],
+      "attack": "none",
+      "epoch": 1,
+      "face_equals_registry": true,
+      "kind": "dispatch_tool_face",
+      "mode": "observe",
+      "model": "fixture-bridge-v1",
+      "pid": 1429485,
+      "provider": "offline-test-only-g3b",
+      "purpose": null,
+      "registry_digests": [
+        {
+          "name": "skill_lookup",
+          "sha256": "c984bef0ae31771da16a12ef2e7972b289cde6014b7f8ad12349f16c4f77b704"
+        }
+      ],
+      "registry_error": null,
+      "registry_names": [
+        "skill_lookup"
+      ],
+      "registry_unknown": [],
+      "schema": "g4r.registry.probe.v1",
+      "tool_digests": [
+        {
+          "name": "skill_lookup",
+          "sha256": "c984bef0ae31771da16a12ef2e7972b289cde6014b7f8ad12349f16c4f77b704"
+        }
+      ],
+      "tool_names": [
+        "skill_lookup"
+      ],
+      "unknown": [],
+      "utc": "2026-11-20T16:48:45.190Z"
+    },
+    "max_epoch": 2,
+    "registry_union_names": [
+      "skill_lookup"
+    ],
+    "snapshot_count": 3,
+    "unknown_registry_observed": [],
+    "unknown_tool_face_observed": []
+  },
+  "exit_code": 0,
+  "probe_records": 4,
+  "run_dir": "/tmp/g4r-registry-rev/observe2/20261120T164843Z-observe"
+}

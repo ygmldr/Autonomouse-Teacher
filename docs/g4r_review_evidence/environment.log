@@ -1,0 +1,12 @@
+== environment (G4-R review) ==
+Fri Nov 20 16:52:02 UTC 2026
+worktree=/root/Autonomous Teacher/worktrees/g4r-review
+head=d33e0aabd1714a486325b745c436cb59855d6539
+branch=docs/g4r-independent-review
+python=Python 3.11.15
+pytest=pytest 9.2.0
+ruff=ruff 0.17.5
+node=v22.23.2
+podman=podman version 4.9.3
+nproc=12
+module_path=/root/Autonomous Teacher/worktrees/g4r-review/src/autoteacher_m0/__init__.py

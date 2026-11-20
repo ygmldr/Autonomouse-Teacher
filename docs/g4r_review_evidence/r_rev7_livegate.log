@@ -1,0 +1,6 @@
+== R-REV7 LiveGate negatives ==
+inspect_status: BLOCKED
+inspect_reasons: ('EXTERNAL_HUMAN_AUTHORIZATION_BOUNDARY_NOT_DEPLOYED', 'LIVE_NOT_EXPLICITLY_REQUESTED', 'BASELINE_EVIDENCE_MISSING', 'ACTUAL_TOOL_REGISTRY_NOT_APPROVED', 'SESSION_LOG_UPLOAD_NOT_VERIFIED_DISABLED')
+external_boundary_deployed: False
+require_live_raised: SecurityBlocked SECURITY_BLOCKED
+approval_entrypoints: []
