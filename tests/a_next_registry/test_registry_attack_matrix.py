@@ -97,6 +97,28 @@ def test_frozen_patch_rewrite_preserves_disabled_entries(tmp_path: Path) -> None
         encoding="utf-8").count("disabled: true")
 
 
+def test_stage_sha_verification_fails_closed(tmp_path: Path) -> None:
+    """C1: a recovered Stage must be proven by SHA; wrong bytes are rejected."""
+    runner = _load(RUNNER_PATH, "a_next_run_matrix_stage_sha")
+    stage = tmp_path / "stage"
+    for relative in runner.EXPECTED_STAGE_SHA256:
+        target = stage / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("tampered\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="STAGE_SHA_MISMATCH"):
+        runner.locate_stage(str(stage))
+
+
+def test_missing_stage_fails_closed_and_original_tmp_path_is_gone() -> None:
+    """C1: no silently assumed Stage; the lost /tmp evidence path is not a candidate."""
+    runner = _load(RUNNER_PATH, "a_next_run_matrix_stage_missing")
+    assert all("/tmp/at-f4-clean" not in str(candidate)
+               for candidate in runner.DEFAULT_STAGE_CANDIDATES)
+    assert "INCIDENT_20261121" in runner.STAGE_RECOVERY_NOTE
+    with pytest.raises(FileNotFoundError, match="STAGE_MISSING"):
+        runner.locate_stage(str(Path("/nonexistent-a-next-stage")))
+
+
 def test_forgery_replay_suppression_are_accepted_by_naive_verifier(tmp_path: Path) -> None:
     attack = _load(FORGERY_PATH, "a_next_forgery")
     genuine = [

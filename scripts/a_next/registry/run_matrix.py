@@ -38,7 +38,29 @@ PROBE_PLUGIN = SCRIPT_DIR / "probe_plugin" / "lib" / "index.js"
 FAKE_BRIDGE = SCRIPT_DIR / "fake_bridge.py"
 FROZEN_PATCH = REPO_ROOT / "config" / "g3d" / "candidate" / "bridge.patch.yml"
 FROZEN_DSH_HOME = REPO_ROOT / "artifacts" / "g4" / "runtime" / "dsh-home" / "dsh"
-DEFAULT_STAGE = Path("/tmp/at-f4-clean/artifacts/g3c/stage")
+# The original evidence Stage (/tmp/at-f4-clean/artifacts/g3c/stage) was lost in
+# INCIDENT_20261121. These candidates are hash-verified recovered copies; if none
+# is present, the runner FAILS CLOSED and requires an explicit --stage.
+DEFAULT_STAGE_CANDIDATES = (
+    REPO_ROOT / "artifacts" / "g3c" / "stage",
+    Path("/root/Autonomous Teacher/worktrees/a-next-rrev6/artifacts/g3c/stage"),
+)
+STAGE_RECOVERY_NOTE = (
+    "stage recovered from hash-verified copy (a-next-rrev6 worktree, "
+    "INCIDENT_20261121); expected SHAs verified at run start"
+)
+EXPECTED_STAGE_SHA256 = {
+    "runtime/bridge/lib/index.js":
+        "2cb424616b7380bff61f8ce760e229a0c1d2b32c4a5f2954cdf66c3937bf74ba",
+    "runtime/skill/lib/index.js":
+        "521bc0f1126d895de84ebe61fd58c978a5bcae9b4c334f1fd417faee88483b0b",
+    "node_modules/@deepseek-ai/dsh-tools/src/index.ts":
+        "5d95d7f47781ba001a0116feb61a87bf436f2ca587c01fb4ce517258710b7537",
+    "node_modules/@deepseek-ai/dsh-llm/src/index.ts":
+        "45f7d934bedb3d72474a384ba75dca7ea2ae4c4439c164b91c87da313ec8970f",
+    "node_modules/@deepseek-ai/cordis/package.json":
+        "70be1056619663339433309474b1e6a2307088097af3cb082afe4b5ca2021b26",
+}
 BRIDGE_SOCKET = Path("/work/g3b/bridge.sock")
 RUNTIME_CANDIDATES = (
     REPO_ROOT / "artifacts" / "foundation" / "deps" / "deepseek_harness_runtime"
@@ -107,12 +129,46 @@ def locate_runtime(explicit: str = "") -> Path:
     raise FileNotFoundError("frozen DSH 0.2.2-rc.2 runtime binary not found")
 
 
-def locate_stage(explicit: str = "") -> Path:
-    stage = Path(explicit).resolve() if explicit else DEFAULT_STAGE.resolve()
-    for required in ("runtime/bridge/lib/index.js", "runtime/skill/lib/index.js"):
-        if not (stage / required).is_file():
-            raise FileNotFoundError(f"stage is missing {required}: {stage}")
-    return stage
+def locate_stage(explicit: str = "") -> tuple[Path, dict]:
+    """Locate a Stage and verify the frozen build SHAs (fail closed).
+
+    Returns ``(stage, verification)``. A Stage whose bridge/skill/dsh-tools/
+    dsh-llm/cordis bytes do not match the frozen evidence SHAs is rejected:
+    a recovered copy must be proven, not assumed.
+    """
+    candidates = [Path(explicit).resolve()] if explicit else [
+        candidate.resolve() for candidate in DEFAULT_STAGE_CANDIDATES]
+    errors: list[str] = []
+    stage: Path | None = None
+    for candidate in candidates:
+        missing = [required for required in ("runtime/bridge/lib/index.js",
+                                             "runtime/skill/lib/index.js")
+                   if not (candidate / required).is_file()]
+        if missing:
+            errors.append(f"{candidate}: missing {missing}")
+            continue
+        stage = candidate
+        break
+    if stage is None:
+        detail = "; ".join(errors) if errors else "no default candidate"
+        raise FileNotFoundError(
+            "STAGE_MISSING: no usable Stage found (the original evidence Stage was "
+            f"lost in INCIDENT_20261121). Rationale: {detail}. Pass --stage pointing "
+            "at a hash-verified recovered copy (expected SHAs are checked).")
+    verification = {"stage": str(stage), "expected_sha256": dict(EXPECTED_STAGE_SHA256),
+                    "observed_sha256": {}, "verified": True}
+    for relative, expected in EXPECTED_STAGE_SHA256.items():
+        path = stage / relative
+        if not path.is_file():
+            raise FileNotFoundError(f"STAGE_INCOMPLETE: missing {relative} in {stage}")
+        observed = sha256_file(path)
+        verification["observed_sha256"][relative] = observed
+        if observed != expected:
+            raise ValueError(
+                f"STAGE_SHA_MISMATCH: {relative} observed {observed} != frozen {expected} "
+                f"in {stage}; refusing to run (fail closed). Recover a hash-verified Stage.")
+    verification["stage_recovery_note"] = STAGE_RECOVERY_NOTE
+    return stage, verification
 
 
 def rewrite_frozen_patch(frozen_text: str, stage: Path) -> str:
@@ -428,7 +484,7 @@ def _matrix_verdicts(mode: str, analysis: dict) -> dict:
 def run_mode(mode: str, args: argparse.Namespace) -> dict:
     config = MODES[mode]
     runtime = locate_runtime(args.runtime)
-    stage = locate_stage(args.stage)
+    stage, stage_verification = locate_stage(args.stage)
     run_utc = utc_now()
     run_id = f"{run_utc.replace(':', '').replace('-', '')}-{mode}"
     out_root = Path(args.out).resolve() if args.out else REPO_ROOT / "artifacts" / "a_next" / "registry"
@@ -456,14 +512,23 @@ def run_mode(mode: str, args: argparse.Namespace) -> dict:
         "run_id": run_id, "mode": mode, "utc": run_utc,
         "runtime_sha256": sha256_file(runtime),
         "stage_dir": str(stage),
+        "stage_verification": stage_verification,
+        "stage_recovery_note": STAGE_RECOVERY_NOTE,
         "stage_bridge_sha256": sha256_file(stage / "runtime" / "bridge" / "lib" / "index.js"),
         "stage_skill_sha256": sha256_file(stage / "runtime" / "skill" / "lib" / "index.js"),
         "probe_plugin_sha256": sha256_file(PROBE_PLUGIN),
         "frozen_patch_sha256": sha256_file(FROZEN_PATCH),
         "probe_config": plugin_config,
         "network_isolation": "unshare -n (empty network namespace)",
-        "real_key_present": False,
-        "real_provider_calls": 0,
+        "key_and_provider_nonuse": {
+            "claim": "guaranteed by structural isolation design, not a runtime measurement",
+            "guarantees": [
+                "env -i with an explicit minimal environment (no inherited secrets)",
+                "unshare -n (empty network namespace; no external HTTP/TCP path)",
+                "only the synthetic fake_bridge UDS provider is reachable",
+                "the runtime is started without any key/credential injection",
+            ],
+        },
         "fake_bridge": mode in FAKE_BRIDGE_MODES,
         "turns_requested": config["turns"],
         "resume": config["resume"],
@@ -578,6 +643,7 @@ def run_mode(mode: str, args: argparse.Namespace) -> dict:
                 fake_bridge_proc.kill()
         if summary["fake_bridge"]:
             _cleanup_work_dir(created_work)
+        summary["exit_code"] = exit_code
         summary["completed_utc"] = utc_now()
         (run_dir / "run-summary.json").write_text(
             json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8")
@@ -589,7 +655,8 @@ def run_mode(mode: str, args: argparse.Namespace) -> dict:
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--stage", default=str(DEFAULT_STAGE))
+    parser.add_argument("--stage", default="",
+                        help="hash-verified recovered candidate Stage (fail closed when omitted and no default candidate exists)")
     parser.add_argument("--runtime", default="")
     parser.add_argument("--mode", default="baseline", choices=sorted(MODES))
     parser.add_argument("--all", action="store_true", help="run the whole matrix sequentially")
