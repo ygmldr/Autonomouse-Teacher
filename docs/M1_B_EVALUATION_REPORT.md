@@ -2,10 +2,11 @@
 
 | 字段 | 值 |
 |---|---|
-| 报告状态 | **FINAL（Owner 执行侧）；独立 Reviewer 验收待完成** |
+| 报告状态 | **TRANSITION_SNAPSHOT（过渡快照；Owner 执行侧）+ 最终树复跑 `PENDING_FINAL_TREE`** |
 | 报告版本 | `m1b.eval-report.v1`（2026-11-20 UTC） |
 | 工作区 / 分支 | `/root/m1b/pr5` / `b-next/pr5-e2e-eval` |
-| 集成实现 SHA | `e2b6e85d8939b2411b2b6c6cc26538014c6f57e3`（本报告所有命令在该 SHA 的 worktree 上执行；PR1 fix cascade / PR4 final 由 Lead 后续合入，届时本报告数字须重生成） |
+| 集成实现 SHA（过渡快照） | `e2b6e85d8939b2411b2b6c6cc26538014c6f57e3` + PR5 分支提交 `b36bf11`/`1cad799`（§3–§9 的所有数字/hash 均产生于该过渡树；**不是最终冻结 SHA**） |
+| 最终冻结 SHA / 最终树复跑 | **`PENDING_FINAL_TREE`**（由 Lead 在 PR4 final/集成合并后发布；届时按 §13 重新生成全部数字与 evidence hashes） |
 | 主基线 | `3e7afee077845a071cd364e93ab209cac20b2d5f` |
 | 环境 | Linux 6.17.13-2-pve；Python 3.11.15（`/root/Autonomous Teacher/.venv/bin/python`）；pytest 9.2.0；bubblewrap 0.9.0；TZ=UTC、PYTHONHASHSEED 由命令/收集器记录 |
 | 证据包 | `docs/m1b_evidence/audit-index.jsonl`（16 条 owner-executed 记录）+ `raw/**` + `docs/m1b_evidence/e2e_b5_*.jsonl` + `e2e_b5_summary.json` |
@@ -15,6 +16,10 @@
 ---
 
 ## 0. 裁定摘要（Owner 侧 + 引用的 Reviewer 状态）
+
+> **最终树声明**：本报告 §3–§9 是**过渡快照**（`e2b6e85` + PR5 分支）的 Owner 实测数字；
+> **最终冻结 SHA 的复跑/数字/证据包 hash 仍为 `PENDING_FINAL_TREE`**（见 §13）。冻结后的最终
+> 结论以最终树复跑为准，不得沿用本过渡快照数字冒充最终结果。
 
 | 项 | 状态 | 来源/证据 |
 |---|---|---|
@@ -28,7 +33,8 @@
 | B-PR5 独立评审 | **`NOT_RUN`**（本 PR） | 本报告 + `docs/M1_B_REVIEW_REQUEST.md` |
 | X-01 无范围漂移 | Owner 侧 `DETERMINISTIC` 检查通过（159 files diff；保护路径 0 命中） | `docs/m1b_evidence/audit-index.jsonl` entry `X-01-scope-diff`；Reviewer 需重跑 |
 | X-02 无 Key/网络/付费 | Owner 侧 `DETERMINISTIC` 检查通过（网络 import 0 命中；无 Key/Provider；LiveGate 仍 BLOCKED） | collector entry `X-02-network-scan`；Reviewer 需重跑 |
-| **Owner 侧默认结论** | **`PENDING_INDEPENDENT_REVIEW`**（所有本地门通过；默认结论仅在独立 Reviewer 关闭 B-PR4/B-PR5 后可用：`PASS_FOR_M1B_OFFLINE_INTEGRATION_SCOPE`） | 本报告 §10/§11 |
+| **Owner 侧默认结论（过渡）** | **`PENDING_INDEPENDENT_REVIEW`**（所有本地门通过；默认结论仅在独立 Reviewer 关闭 B-PR4/B-PR5 后可用：`PASS_FOR_M1B_OFFLINE_INTEGRATION_SCOPE`） | 本报告 §10/§11 |
+| **最终树复跑 / 最终裁定** | **`PENDING_FINAL_TREE`**（等待 Lead 发布合并后的冻结 SHA；按 §13 复跑并由 Reviewer 出具） | §13；`docs/M1_B_REVIEW_REQUEST.md`（m1a-contracts 维护） |
 
 ---
 
@@ -50,7 +56,9 @@
 | TZ / LANG / LC_ALL | `UTC` / `C.UTF-8` / `C.UTF-8` |
 | 网络 / Key / Provider | 无（AST 静态扫描 0 网络 import；collector 子进程 env 剥离凭据；未配置任何 provider） |
 
-## 3. 当前集成套件实测（884 tests）
+## 3. 过渡快照实测（e2b6e85 + PR5 分支提交；884 tests）
+
+> 以下为**过渡快照**数字（`e2b6e85` 基础树 + PR5 分支 `b36bf11`/`1cad799` 的 B5/证据提交）。最终冻结 SHA 的复跑数字见 §13（`PENDING_FINAL_TREE`），冻结后以最终树为准。
 
 ### 3.1 全量命令与输出
 
@@ -129,7 +137,7 @@ B5 专属 E2E：`pytest tests/m1_teacher/test_b5_e2e.py -q` → **11 passed in 1
 | X-01 | M1 提交不修改 `src/autoteacher_m0/`、`security/`、`bridge/`、`config/g*`、`scripts/g4*`、LiveGate；A 线不改 M1 | `git diff --name-only 3e7afee..HEAD` + 保护前缀 grep | 159 files changed；保护路径 **0 命中**（NO_PROTECTED_HITS） | `DETERMINISTIC` + `OWNER_REPORTED`；Reviewer 重跑 |
 | X-02 | 无真实 Key/外部网络/付费请求；LiveGate 仍 BLOCKED | AST 扫描 `m1_teacher/ tests/m1_teacher/ scripts/m1b/`；socket 阻断 demo/cli 测试 | 网络 import **0**；`autoteacher_m0` 仅出现在隔离断言/注释（13 文本提及，0 import）；无 Key/Provider；LiveGate 未变 | `DETERMINISTIC` + `OWNER_REPORTED`；Reviewer 重跑 |
 
-## 8. 证据包
+## 8. 证据包（过渡快照；最终树 hash = `PENDING_FINAL_TREE`）
 
 `docs/m1b_evidence/`（collector 生成；schema `m1b.audit-index.v0`）：
 
@@ -143,7 +151,7 @@ B5 专属 E2E：`pytest tests/m1_teacher/test_b5_e2e.py -q` → **11 passed in 1
 
 关键 collector entries（`status` 为执行状态，非产品 PASS）：`B5-01-full-suite` EXECUTED_PASS（884 passed）；`B1-05-os-sandbox-gate` 首次 EXECUTED_FAIL（并发 judge suite 的 `/tmp` 前缀冲突：`4 failed, 880 passed`；重跑 `884 passed in 91.96s` EXECUTED_PASS）；`B4-01-02-03-e2e` 9 passed；`B5-01-e2e` 11 passed；`B1-05-certification` 27 passed（112/112）；`B2-01-02-03-crash` 35 passed；`B5-01-demo-double-run` identical True；`B4-01-demo-double-run` identical True；`X-01-scope-diff` / `X-02-network-scan` EXECUTED_PASS；`B5-01-evidence-artifacts` 5 artifacts hashed。
 
-## 9. 证据类与关键哈希
+## 9. 证据类与关键哈希（过渡快照；最终树 hash = `PENDING_FINAL_TREE`）
 
 | Artifact | SHA-256 |
 |---|---|
@@ -203,3 +211,22 @@ PY
 ```
 
 > 若在最终冻结 SHA 上任何 hash/count 与 §8/§9 不一致：按 regression 处理，不得沿用本报告 PASS 值。
+
+## 13. 最终树复跑（PENDING_FINAL_TREE）
+
+> **状态：`PENDING_FINAL_TREE`。** 本节必须由 Owner/Reviewer 在 Lead 发布的**最终冻结 SHA** 的
+> clean archive 上执行后填写；在此之前不允许把任何最终数字/最终 evidence hash 写成 PASS。
+
+| 项 | 值（待填） |
+|---|---|
+| 最终冻结 SHA | `PENDING_FINAL_TREE` |
+| 最终树 `pytest tests/m1_teacher -q` | `PENDING_FINAL_TREE`（含 PR1 fix cascade/PR4 final 后的最终计数与 0 failed/0 skipped 状态） |
+| 最终树 `M1B_REQUIRE_OS_SANDBOX=1 ... -q -rs` | `PENDING_FINAL_TREE`（安全 CI 模式；必须 0 skipped 或明确记录 env 未接线） |
+| 最终树 B5/B4/certification/crash 定向 | `PENDING_FINAL_TREE` |
+| 最终树 demo/evidence 双跑 sha256 | `PENDING_FINAL_TREE` |
+| `docs/m1b_evidence/e2e_b5_*.jsonl` / `e2e_b5_summary.json` final hash | `PENDING_FINAL_TREE` |
+| `audit-index.jsonl` / `audit-index.json` final hash | `PENDING_FINAL_TREE` |
+| artifact_manifest（`implementation_commit` 常量） | 必须更新为最终 PR5 提交 SHA；`base_sha` 保持 main 基线 `3e7afee…` |
+| 最终独立 Reviewer 裁定 | `PENDING_FINAL_TREE`（只允许 §11 的结论类型） |
+
+复跑命令/环境/证据登记要求与 §12 相同；最终报告必须绑定最终 40-hex SHA，不得以分支名代指。

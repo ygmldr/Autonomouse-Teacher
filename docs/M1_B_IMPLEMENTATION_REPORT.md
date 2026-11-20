@@ -6,7 +6,7 @@
 | 文档版本 | `m1b.impl-report.v0`（2026-11-20 UTC） |
 | 工作区 / 分支 | `/root/m1b/pr5docs` / `b-next/pr5-docs`（当前快照 `e2b6e85`） |
 | 被汇总范围 | B-PR0 合同收敛 → B-PR1 可信判题 → B-PR2 事务/恢复 → B-PR3 scoped 幂等 → B-PR4 双域 ports → B-PR5 统一 E2E/证据 |
-| 最终数字归属 | **当前快照数字**，不是最终集成树数字。最终数字必须由独立 Reviewer 在冻结 SHA 上复跑后写入 `docs/M1_B_EVALUATION_REPORT.md`（模板 `docs/M1_B_EVALUATION_REPORT_TEMPLATE.md`；协议 `docs/M1_B_EVALUATION_PROTOCOL.md`，`b-next/pr5-eval-protocol@09e1dd9`）。PR1/PR3/PR4 的 review-fix 尚待合入，合入后计数会变化 |
+| 最终数字归属 | **当前快照数字**（pre-B5 873；PR5 B5 提交后过渡树 884），不是最终集成树数字。**所有最终数字/最终 SHA/证据 hash 以 `docs/M1_B_EVALUATION_REPORT.md` §13 的 `PENDING_FINAL_TREE` 复跑为准**（协议 `docs/M1_B_EVALUATION_PROTOCOL.md`）。PR1/PR3/PR4 的 review-fix 尚待合入，合入后计数会变化；本报告不写死最终数字 |
 | 证据词汇 | 按评估协议 §1 冻结词汇。本文件只使用 `OWNER_REPORTED`（本线实现/本轮文档作者实测，未经独立 Reviewer 复跑）、`HISTORICAL_FROZEN`（历史冻结参考）、`NOT_RUN`、`BLOCKED`、`NOT_VERIFIED`、`UNVERIFIED`；**不使用 `INDEPENDENTLY_REEXECUTED`**（该标签只能由独立 Reviewer 本轮真实复跑获得） |
 | 边界 | 仅离线、合成 fixtures、确定性/mock E2E；**不包含**真人学习收益、真实招聘/JD/简历、联网研究、真实 Provider/LLM、LiveGate、生产可用性；M0 保护路径零变更 |
 
@@ -22,7 +22,7 @@
 |---|---|---|
 | 当前分支/快照 | `b-next/pr5-docs` / `e2b6e85d8939b2411b2b6c6cc26538014c6f57e3` | — |
 | 测试收集数 | **873 collected** | `OWNER_REPORTED`（本轮 `--collect-only`） |
-| 新集成套件（相对 A 历史 536） | **337 新增** = PR1 138 + PR2 63 + PR3 37 + PR4 85 + PR5 14 | `OWNER_REPORTED`（本轮按文件归组） |
+| 新集成套件（相对 A 历史 536，pre-B5 快照） | **337 新增** = PR1 138 + PR2 63 + PR3 37 + PR4 85 + PR5 14（collector）；PR5 B5 提交 +11 后过渡树 884（最终树 `PENDING_FINAL_TREE`，见 `docs/M1_B_EVALUATION_REPORT.md` §13） | `OWNER_REPORTED`（按文件归组；非最终数字） |
 | 全量套件（干净 `TMPDIR`） | **`873 passed in 84.51s`，exit 0，0 skipped** | `OWNER_REPORTED`（本轮实测） |
 | 全量套件（共享 `/tmp` 默认环境） | `4 failed, 869 passed in 89.24s`，exit 1；失败均在 judge 临时目录清理断言，根因是共享 `/tmp` 中先前运行残留的 `m1b_judge_worker_*` 目录（非产品逻辑回归；同一测试文件单独跑 `11 passed`） | `OWNER_REPORTED`（本轮实测；PR3 Reviewer 也记录过同类 `734 passed/3 failed` 环境现象） |
 | A demo 双跑 | 逐字节相同；`sha256=b08ceee915fb0363864e303ded71de4d547eae6d14f7aa693ba1537a810d491b`；53 行 / 5,798 bytes | `OWNER_REPORTED`（本轮实测；与历史一致） |
@@ -87,7 +87,7 @@
 | B-PR3 新增 | **37** | scoped_idempotency 26 + scope_migration 11 |
 | B-PR4 新增 | **85** | interview_domain 14 + interview_fixtures 10 + interview_judge 14 + freshness 22 + vertical_policy 16 + b4_e2e 9 |
 | B-PR5 新增 | **14** | evidence_collector 14 |
-| **当前快照合计** | **873** | 536 + 337；不得与 B 线历史 365 相加 |
+| **当前快照合计（pre-B5）** | **873** | 536 + 337；PR5 B5 提交后过渡树 884；不得与 B 线历史 365 相加；最终树数字见评测报告 §13 `PENDING_FINAL_TREE` |
 
 历史/评审侧的全量数字（**不同树/不同 HEAD，不得横向相加或混用**，均按原报告标签引用）：
 
@@ -167,7 +167,7 @@
 | 关键文件 | `scripts/m1b/collect_evidence.py`、`docs/M1_B_EVIDENCE_PACKET.md`、`docs/M1_B_EVALUATION_REPORT_TEMPLATE.md`、`tests/m1_teacher/test_evidence_collector.py`；E2E 相关：`m1_teacher/demo_b4.py`、`tests/m1_teacher/test_b4_e2e.py` |
 | 新增测试 | **14**（evidence collector；当前快照新增）；B4 E2E 9 个在 PR4 范围内已计入 |
 | 证据命令/输出 | `pytest tests/m1_teacher -q` → 当前快照 `873 passed`（干净 TMPDIR）；collector 本轮 smoke：`--case-id SMOKE-CONTRACTS --command "... pytest test_contracts.py -q"` → `EXECUTED_PASS`，`sha256=37d63c107feaaccd9d3590cee720fd36cba3c1a9c912f0fd5f0577589c0befeb`（raw evidence），`audit-index.jsonl sha256=639dd18c7c9815911925edf269f20d83b81ea9836dcc274ae9d8e4cece9b42d2`；包结构 = `README.md + audit-index.jsonl + audit-index.json + raw/<run_id>/{evidence.json,stdout.log,stderr.log}` |
-| 评审文档/结论 | **最终独立评测尚未产出**：预期 `docs/M1_B_EVALUATION_REPORT.md`（按模板填充；默认结论仅当全部门通过时才允许 `PASS_FOR_M1B_OFFLINE_INTEGRATION_SCOPE`）；测评协议 `docs/M1_B_EVALUATION_PROTOCOL.md`（分支 `b-next/pr5-eval-protocol@09e1dd9`，DESIGN）。**B5-01 = `NOT_RUN`** |
+| 评审文档/结论 | **评测报告已产出过渡快照（`docs/M1_B_EVALUATION_REPORT.md`）；最终树数字/最终裁定 = `PENDING_FINAL_TREE`**（默认结论仅当全部门通过时才允许 `PASS_FOR_M1B_OFFLINE_INTEGRATION_SCOPE`）；测评协议 `docs/M1_B_EVALUATION_PROTOCOL.md`（分支 `b-next/pr5-eval-protocol@09e1dd9`，DESIGN）。**B5-01 = `NOT_RUN`** |
 | 关键限制 | 收集器只记录“命令执行事实”，`EXECUTED_PASS` ≠ 产品 PASS；未知 `evidence_class` 默认 `NOT_VERIFIED`；collector 不是沙箱；网络隔离需 Reviewer 环境负责；最终报告不能预填 PASS |
 
 ---
@@ -337,7 +337,7 @@
 | PR4 review/fix | `b-next/pr4-review` | `dfda203` | PASS_WITH_ACTIONS（P1=3）；**fix 未创建** | **否 → 待修复合入** |
 | PR5 | `b-next/pr5-e2e-eval` / `b-next/pr5-docs` | `e2b6e85` | 证据收集器 + 模板 + 统一 E2E + 合并栈 | 是（当前快照） |
 | PR5 eval protocol（未合入） | `b-next/pr5-eval-protocol` | `09e1dd9` | 测评协议 DESIGN | **否** |
-| 最终评测 | `TBD`（integration/freeze） | **TBD** | `docs/M1_B_EVALUATION_REPORT.md` + 冻结 SHA | **未产生** |
+| 最终评测 | `PENDING_FINAL_TREE`（integration/freeze） | **`PENDING_FINAL_TREE`** | `docs/M1_B_EVALUATION_REPORT.md` §13 + 冻结 SHA | **过渡快照已产出；最终未产生** |
 
 ### 8.2 合并顺序与冻结
 

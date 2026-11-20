@@ -50,7 +50,7 @@
 | B-PR2 | `b-next/pr2-session-txn` @ `7f9ce06`（含 `10fdaa9` 修复） | `docs/M1_B_PR2_REVIEW.md` @ `434f731`（在树） | `PASS_WITH_ACTIONS`（P0=0，P1=2 文档治理、P2=5）；B2-01/02/03 + B-Q2 **VERIFIED** | 修复 `10fdaa9` **已在当前树**（P1/P2 关闭） |
 | B-PR3 | 实现 `18b08fe`/`2f32f13`/`3103a06`；评审 `b-next/pr3-review` @ `db636ea`；修复 `b-next/pr3-scoped-idempotency` @ `a5373f1`（含 `3ad85c2`） | `docs/M1_B_PR3_REVIEW.md` @ `db636ea`（分支 `b-next/pr3-review`） | `PASS_WITH_ACTIONS`（P0=0，P1=2、P2=5）；B3-01/B3-02 核心成立 | **P1/P2 修复待合入 + 复评**（P1-1 legacy digest 投影、P1-2 `history.apply_assessment` 全局查找） |
 | B-PR4 | 实现 `b-next/pr4-interview-freshness` @ `e265b96`；评审 `b-next/pr4-domain-ports`/`b-next/pr4-review` @ `dfda203` | `docs/M1_B_PR4_REVIEW.md` @ `dfda203` | `PASS_WITH_ACTIONS`（P0=0，P1=3、P2=7）；B4-01/02/03 为 **VERIFIED（E2E-MOCK，带限制）**；B4-04 部分、B4-05 `NOT_RUN` | **修复尚未创建/合入**：P1-1 持久化 interview 阶段计划；P1-2 hidden reader/`reference_answers.json`；P1-3 session replay/版本拒绝（或降级声明） |
-| B-PR5 | `b-next/pr5-e2e-eval`（=`b-next/pr5-docs`）@ `e2b6e85`；测评协议 `b-next/pr5-eval-protocol` @ `09e1dd9` | 最终评测报告 **`docs/M1_B_EVALUATION_REPORT.md`（`TBD`，未产出）**；模板 `docs/M1_B_EVALUATION_REPORT_TEMPLATE.md`；协议 `docs/M1_B_EVALUATION_PROTOCOL.md`（分支 `09e1dd9`，DESIGN） | 最终独立评审 **`NOT_RUN`**；`B5-01` 未开始 | 证据收集器/模板已提交；最终报告待独立 Reviewer 填 |
+| B-PR5 | `b-next/pr5-e2e-eval` @ `b36bf11`/`1cad799`（合入 `b-next/pr5-docs`/`pr5-eval-protocol` 后） | **`docs/M1_B_EVALUATION_REPORT.md`（过渡快照已产出；最终树数字/SHA/hash = `PENDING_FINAL_TREE`）**；模板 `docs/M1_B_EVALUATION_REPORT_TEMPLATE.md`；协议 `docs/M1_B_EVALUATION_PROTOCOL.md`（DESIGN） | 最终独立评审 **`NOT_RUN`**；`B5-01` 待最终树复跑 | 测评报告 §13 明确最终以冻结 SHA 复跑为准；不在正文写死最终数字 |
 
 **最终独立评审文档路径**：本轮请求的最终评测报告为 `docs/M1_B_EVALUATION_REPORT.md`（模板 `docs/M1_B_EVALUATION_REPORT_TEMPLATE.md`，由独立 Reviewer 在冻结 SHA 上填充）；若 LeadB/维护者另指定独立评审文档（如 `docs/M1_B_INDEPENDENT_REVIEW.md`），以该指定路径为准，但最终裁定仍必须引用本评测报告与证据包。
 
@@ -74,11 +74,11 @@
 - `m1_teacher/idempotency.py`（PR3 scoped 幂等）。
 - `m1_teacher/session/vertical.py`、`m1_teacher/domains/interview.py`、`m1_teacher/knowledge/freshness.py`、`m1_teacher/assessment/interview_judge.py`、`m1_teacher/demo_b4.py`（PR4 双域闭环）。
 - `scripts/m1b/collect_evidence.py`、`docs/M1_B_EVIDENCE_PACKET.md`、`docs/M1_B_EVALUATION_REPORT_TEMPLATE.md`（PR5 证据/评测入口）。
-- `tests/m1_teacher/**`（当前 873 tests：历史 536 + PR1 138 + PR2 63 + PR3 37 + PR4 85 + PR5 14）。
+- `tests/m1_teacher/**`（pre-B5 快照 873 = 536 + PR1 138 + PR2 63 + PR3 37 + PR4 85 + PR5 14；PR5 B5 提交后过渡树 884；**最终树计数 = `PENDING_FINAL_TREE`**，以评测报告 §13 复跑为准）。
 
 ### 3.3 证据与评审
 
-- 本报告 `docs/M1_B_IMPLEMENTATION_REPORT.md`（Owner 汇总；最终数字 TBD）。
+- 本报告 `docs/M1_B_IMPLEMENTATION_REPORT.md`（Owner 汇总；最终数字以 `docs/M1_B_EVALUATION_REPORT.md` §13 `PENDING_FINAL_TREE` 为准）。
 - PR 评审文档（按 §2.2 路径；部分在分支）、PR0 响应、威胁模型、interview/freshness 映射、B-PR2 事务设计、B-PR3 幂等设计、B-PR4 vertical 实现记录。
 - 证据包：`scripts/m1b/collect_evidence.py` 生成的 `audit-index.jsonl` + `raw/`（建议最终位置 `/root/m1b_evidence/B5-01/`，以 Reviewer 报告为准）。
 - 冻结参考：`docs/M1_B_EVALUATION_REPORT_TEMPLATE.md` §4 历史冻结表；M1-A `536`、M1-Offline `365` 分别独立。
