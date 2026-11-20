@@ -61,6 +61,7 @@ from ..knowledge.freshness import FreshnessDecision, KnowledgeFreshnessService
 __all__ = [
     "ACCELERATED_MASTERY_THRESHOLD",
     "ACCELERATED_MIN_EVIDENCE",
+    "CALIBRATION_STATUS",
     "FULL_MIN_EVIDENCE",
     "INTERVIEW_HINT_LADDER",
     "INTERVIEW_HINT_REASON_CODES",
@@ -89,6 +90,10 @@ INTERVIEW_HINT_REASON_CODES: dict[str, str] = {
 }
 MAX_INTERVIEW_HINT_LEVEL = 3
 FULL_MIN_EVIDENCE = 5
+CALIBRATION_STATUS = "UNCALIBRATED_HEURISTIC"
+
+_JD_SNAPSHOT_KEYS = frozenset({"jd_id", "version", "content_digest"})
+_HEX64_RE = __import__("re").compile(r"^[0-9a-f]{64}$")
 
 #: Learner-state acceleration: with this much observed node mastery/evidence the
 #: concept probe is skipped (deterministic, frozen per session at session start).
@@ -181,10 +186,25 @@ class VerticalPolicy(Protocol):
     ) -> VerticalTransition | None:
         """Override the post-assessment session transition (multi-turn verticals)."""
 
-    def session_event_payload(self) -> dict[str, Any]:
+    def restore_session(
+        self,
+        *,
+        session_id: str,
+        events: tuple[HistoryEvent, ...],
+        objective: LearningObjective,
+        snapshot: LearnerSnapshot,
+    ) -> None:
+        """Rebuild/validate the persisted vertical plan from unified events.
+
+        Called by the engine when an existing session is loaded after a process
+        restart (or by a fresh engine/policy instance on the same database).  Must
+        not depend on any in-process policy state created by ``validate_session_start``.
+        """
+
+    def session_event_payload(self, session_id: str | None = None) -> dict[str, Any]:
         """Additive metadata merged into ``SESSION_STARTED``."""
 
-    def plan_event_payload(self) -> dict[str, Any]:
+    def plan_event_payload(self, session_id: str | None = None) -> dict[str, Any]:
         """Additive metadata merged into ``PLAN_CREATED``."""
 
     def action_event_payload(
@@ -192,7 +212,9 @@ class VerticalPolicy(Protocol):
     ) -> dict[str, Any]:
         """Additive metadata merged into ``ACTION_TAKEN``."""
 
-    def assessment_payload_extra(self, result: AssessmentResult) -> dict[str, Any] | None:
+    def assessment_payload_extra(
+        self, result: AssessmentResult, *, session_id: str | None = None
+    ) -> dict[str, Any] | None:
         """Additive metadata merged into ``ASSESSED``/``MASTERY_UPDATED``."""
 
 
@@ -253,6 +275,7 @@ class InterviewVerticalPolicy:
 
     domain_id = "interview_coach"
     policy_version = VERTICAL_POLICY_VERSION
+    calibration_status = CALIBRATION_STATUS
 
     def __init__(
         self,
@@ -314,7 +337,13 @@ class InterviewVerticalPolicy:
                 )
         self._knowledge_decisions = decisions
         self._jd_gate = freshness.active_jd(jd_id, now)
-        self._stages_by_session: dict[str, tuple[str, ...]] = {}
+        # P1-1: the selected stage plan and the JD content snapshot are persisted
+        # in SESSION_STARTED/PLAN_CREATED events; these dicts are only a cache of
+        # the *event-derived* data for the current process, never the source of
+        # truth.  ``restore_session`` rebuilds them from the event log.
+        self._plans_by_session: dict[str, dict[str, Any]] = {}
+        self._jd_snapshots_by_session: dict[str, dict[str, Any]] = {}
+        self._last_session_id = ""
         self._target_node_id = item.node_ids[0] if item.node_ids else ""
 
     # -- read-only properties ---------------------------------------------
@@ -328,6 +357,11 @@ class InterviewVerticalPolicy:
 
     @property
     def active_jd_version(self) -> str | None:
+        """JD version from the session snapshot (event-derived) or the new-plan gate."""
+
+        snapshot = self._jd_snapshots_by_session.get(self._last_session_id)
+        if snapshot is not None:
+            return snapshot["version"]
         return self._jd_gate.active_version
 
     @property
@@ -401,8 +435,210 @@ class InterviewVerticalPolicy:
                     "recheck_required": decision.recheck_required,
                 },
             )
+        active_version = next(
+            (
+                version
+                for version in self._freshness.jd_versions(self._jd_id)
+                if version.version == gate.active_version
+            ),
+            None,
+        )
+        if active_version is None:  # pragma: no cover - gate invariant
+            raise ValidationError(
+                "interview session start blocked: active JD content snapshot unavailable",
+                code="VERTICAL_JD_SNAPSHOT_UNAVAILABLE",
+                details={"jd_id": self._jd_id, "active_version": gate.active_version},
+            )
         stages = tuple(self._stages_for_snapshot(snapshot))
-        self._stages_by_session[session_id] = stages
+        plan = {
+            "policy_version": self.policy_version,
+            "question_id": self._question_id,
+            "objective_id": objective.objective_id,
+            "target_node_id": self._target_node_id,
+            "stages": list(stages),
+            "accelerated": "concept" not in stages,
+            "calibration_status": CALIBRATION_STATUS,
+            "thresholds": {
+                "accelerated_mastery": ACCELERATED_MASTERY_THRESHOLD,
+                "accelerated_min_evidence": ACCELERATED_MIN_EVIDENCE,
+                "max_hint_level": MAX_INTERVIEW_HINT_LEVEL,
+                "full_min_evidence": FULL_MIN_EVIDENCE,
+            },
+        }
+        jd_snapshot = {
+            "jd_id": self._jd_id,
+            "version": active_version.version,
+            "content_digest": active_version.content_digest,
+            "valid_from": active_version.valid_from,
+            "valid_until": active_version.valid_until,
+        }
+        self._plans_by_session[session_id] = plan
+        self._jd_snapshots_by_session[session_id] = jd_snapshot
+        self._last_session_id = session_id
+        self._jd_gate = gate
+
+    # -- event-derived plan restore (P1-1) ---------------------------------
+    def restore_session(
+        self,
+        *,
+        session_id: str,
+        events: Sequence[HistoryEvent],
+        objective: LearningObjective,
+        snapshot: LearnerSnapshot,
+    ) -> None:
+        """Rebuild the interview plan/JD snapshot from ``SESSION_STARTED`` events.
+
+        A fresh engine/policy instance on the same database must continue exactly
+        the persisted plan (accelerated or fixed five-stage) even if the JD has
+        expired in the meantime: recovery uses the session's own JD snapshot and
+        never re-resolves the default JD.  Missing/corrupt snapshots fail closed
+        with an explicit code instead of writing ``jd_ref=jd:rec@None``.
+        """
+
+        if type(session_id) is not str or not session_id.strip():
+            raise ValidationError("restore_session(): session_id must be a non-blank string")
+        if not isinstance(objective, LearningObjective):
+            raise ValidationError("restore_session(): expected a LearningObjective")
+        if not isinstance(snapshot, LearnerSnapshot):
+            raise ValidationError("restore_session(): expected a LearnerSnapshot")
+        started = next(
+            (
+                event
+                for event in events
+                if event.session_id == session_id and event.event_type == "SESSION_STARTED"
+            ),
+            None,
+        )
+        if started is None:
+            raise ValidationError(
+                "interview session replay: SESSION_STARTED event is missing",
+                code="VERTICAL_PLAN_SNAPSHOT_MISSING",
+                details={"session_id": session_id},
+            )
+        vertical = started.payload.get("vertical")
+        if not isinstance(vertical, Mapping):
+            raise ValidationError(
+                "interview session replay: vertical plan snapshot is missing",
+                code="VERTICAL_PLAN_SNAPSHOT_MISSING",
+                details={"session_id": session_id, "event_id": started.event_id},
+            )
+        if vertical.get("domain_id") != self.domain_id:
+            raise ValidationError(
+                "interview session replay: domain version mismatch",
+                code="MAP-E12_DOMAIN_VERSION_MISMATCH",
+                details={
+                    "session_id": session_id,
+                    "recorded_domain_id": vertical.get("domain_id"),
+                    "current_domain_id": self.domain_id,
+                },
+            )
+        if vertical.get("policy_version") != self.policy_version:
+            raise ValidationError(
+                "interview session replay: policy version incompatible",
+                code="MAP-E13_EVENT_VERSION_INCOMPATIBLE",
+                details={
+                    "session_id": session_id,
+                    "recorded_policy_version": vertical.get("policy_version"),
+                    "current_policy_version": self.policy_version,
+                },
+            )
+        plan = vertical.get("plan")
+        jd_snapshot = vertical.get("jd_snapshot")
+        self._validate_plan_snapshot(session_id, plan, objective)
+        self._validate_jd_snapshot(session_id, jd_snapshot)
+        self._plans_by_session[session_id] = dict(plan)  # type: ignore[arg-type]
+        self._jd_snapshots_by_session[session_id] = dict(jd_snapshot)  # type: ignore[arg-type]
+        self._last_session_id = session_id
+        self._jd_gate = self._freshness.active_jd(self._jd_id, self._now)
+
+    def _validate_plan_snapshot(
+        self,
+        session_id: str,
+        plan: Any,
+        objective: LearningObjective,
+    ) -> None:
+        if not isinstance(plan, Mapping):
+            raise ValidationError(
+                "interview session replay: stage plan snapshot is missing",
+                code="VERTICAL_PLAN_SNAPSHOT_MISSING",
+                details={"session_id": session_id},
+            )
+        stages = plan.get("stages")
+        accelerated = plan.get("accelerated")
+        if (
+            not isinstance(stages, list)
+            or not stages
+            or any(stage not in FOLLOW_UP_STAGES for stage in stages)
+            or len(set(stages)) != len(stages)
+            or list(stages) != [stage for stage in FOLLOW_UP_STAGES if stage in set(stages)]
+            or type(accelerated) is not bool
+            or accelerated != ("concept" not in stages)
+        ):
+            raise ValidationError(
+                "interview session replay: stage plan snapshot is corrupt",
+                code="VERTICAL_PLAN_SNAPSHOT_CORRUPT",
+                details={"session_id": session_id, "stages": stages},
+            )
+        if plan.get("policy_version") != self.policy_version:
+            raise ValidationError(
+                "interview session replay: persisted plan policy version incompatible",
+                code="MAP-E13_EVENT_VERSION_INCOMPATIBLE",
+                details={
+                    "session_id": session_id,
+                    "recorded_plan_policy_version": plan.get("policy_version"),
+                    "current_policy_version": self.policy_version,
+                },
+            )
+        if plan.get("question_id") != self._question_id:
+            raise ValidationError(
+                "interview session replay: persisted question does not match the engine policy",
+                code="VERTICAL_PLAN_MISMATCH",
+                details={
+                    "session_id": session_id,
+                    "recorded_question_id": plan.get("question_id"),
+                    "current_question_id": self._question_id,
+                },
+            )
+        if plan.get("objective_id") != objective.objective_id:
+            raise ValidationError(
+                "interview session replay: persisted objective does not match the session",
+                code="VERTICAL_OBJECTIVE_MISMATCH",
+                details={
+                    "session_id": session_id,
+                    "recorded_objective_id": plan.get("objective_id"),
+                    "current_objective_id": objective.objective_id,
+                },
+            )
+        if self._target_node_id not in objective.target_node_ids:
+            raise ValidationError(
+                "interview session replay: persisted question node is not covered by the objective",
+                code="VERTICAL_OBJECTIVE_MISMATCH",
+                details={"session_id": session_id, "target_node_id": self._target_node_id},
+            )
+
+    def _validate_jd_snapshot(self, session_id: str, jd_snapshot: Any) -> None:
+        if not isinstance(jd_snapshot, Mapping):
+            raise ValidationError(
+                "interview session replay: JD content snapshot is missing; refusing to "
+                "re-resolve the default JD while recovering a running session",
+                code="VERTICAL_JD_SNAPSHOT_UNAVAILABLE",
+                details={"session_id": session_id},
+            )
+        version = jd_snapshot.get("version")
+        digest = jd_snapshot.get("content_digest")
+        if (
+            jd_snapshot.get("jd_id") != self._jd_id
+            or type(version) is not str
+            or not version.strip()
+            or type(digest) is not str
+            or not _HEX64_RE.match(digest)
+        ):
+            raise ValidationError(
+                "interview session replay: JD content snapshot is corrupt; refusing to "
+                "re-derive a jd_ref",
+                code="VERTICAL_JD_SNAPSHOT_UNAVAILABLE",
+                details={"session_id": session_id, "jd_snapshot": dict(jd_snapshot)},
+            )
 
     # -- engine hooks ------------------------------------------------------
     def select_action(self, context: VerticalActionContext) -> VerticalSelection | None:
@@ -454,29 +690,74 @@ class InterviewVerticalPolicy:
         return VerticalTransition(phase=_PHASE_ASSESS, pending_item_id=self._question_id)
 
     # -- payload metadata --------------------------------------------------
-    def session_event_payload(self) -> dict[str, Any]:
+    def _session_or_last(self, session_id: str | None) -> str:
+        resolved = session_id or self._last_session_id
+        if not resolved:
+            raise ValidationError(
+                "interview vertical policy has no session context; call "
+                "validate_session_start()/restore_session() first",
+                code="VERTICAL_PLAN_NOT_RESTORED",
+            )
+        return resolved
+
+    def _plan(self, session_id: str) -> dict[str, Any]:
+        plan = self._plans_by_session.get(session_id)
+        if plan is None:
+            raise ValidationError(
+                "interview session plan snapshot is not restored from events",
+                code="VERTICAL_PLAN_NOT_RESTORED",
+                details={"session_id": session_id},
+            )
+        return plan
+
+    def _jd_snapshot(self, session_id: str) -> dict[str, Any]:
+        snapshot = self._jd_snapshots_by_session.get(session_id)
+        if snapshot is None:
+            raise ValidationError(
+                "interview session JD snapshot is not restored from events; refusing "
+                "to derive jd_ref from a re-resolved default JD",
+                code="VERTICAL_JD_SNAPSHOT_UNAVAILABLE",
+                details={"session_id": session_id},
+            )
+        return snapshot
+
+    def session_event_payload(self, session_id: str | None = None) -> dict[str, Any]:
+        resolved = self._session_or_last(session_id)
+        plan = self._plan(resolved)
+        jd_snapshot = self._jd_snapshot(resolved)
+        jd_ref = f"{jd_snapshot['jd_id']}@{jd_snapshot['version']}"
         return {
             "vertical": {
                 "domain_id": self.domain_id,
                 "policy_version": self.policy_version,
+                "calibration_status": CALIBRATION_STATUS,
                 "question_id": self._question_id,
                 "target_node_id": self._target_node_id,
                 "jd_id": self._jd_id,
-                "jd_version": self._jd_gate.active_version,
-                "jd_ref": f"{self._jd_id}@{self._jd_gate.active_version}",
+                "jd_version": jd_snapshot["version"],
+                "jd_ref": jd_ref,
+                "jd_snapshot": dict(jd_snapshot),
+                "plan": dict(plan),
                 "requires_project_facts": self._requires_project_facts(),
                 "knowledge_refs": self._knowledge_refs(),
                 "interview_hint_ladder": list(INTERVIEW_HINT_LADDER),
                 "full_solution_enabled": self._human_approved_full,
+                "thresholds": dict(plan["thresholds"]),
             }
         }
 
-    def plan_event_payload(self) -> dict[str, Any]:
+    def plan_event_payload(self, session_id: str | None = None) -> dict[str, Any]:
+        resolved = self._session_or_last(session_id)
+        plan = self._plan(resolved)
+        jd_snapshot = self._jd_snapshot(resolved)
         return {
             "vertical": {
                 "domain_id": self.domain_id,
                 "policy_version": self.policy_version,
-                "jd_ref": f"{self._jd_id}@{self._jd_gate.active_version}",
+                "calibration_status": CALIBRATION_STATUS,
+                "jd_ref": f"{jd_snapshot['jd_id']}@{jd_snapshot['version']}",
+                "jd_snapshot": dict(jd_snapshot),
+                "plan": dict(plan),
                 "knowledge_refs": self._knowledge_refs(),
                 "question_id": self._question_id,
             }
@@ -495,28 +776,41 @@ class InterviewVerticalPolicy:
                 hint_level = int(reason_code.rsplit("_", 1)[1])
             except (ValueError, IndexError):  # pragma: no cover - policy controlled
                 hint_level = None
+        jd_snapshot = self._jd_snapshot(state.session_id)
+        plan = self._plan(state.session_id)
         return {
             "vertical": {
                 "domain_id": self.domain_id,
                 "policy_version": self.policy_version,
+                "calibration_status": CALIBRATION_STATUS,
                 "question_id": self._question_id,
                 "reason_code": reason_code,
                 "probe_stage": probe_stage,
                 "hint_level": hint_level,
                 "interview_ladder": "SOCRATIC_PROBE",
                 "cf_hint_ladder_shared": False,
+                "jd_ref": f"{jd_snapshot['jd_id']}@{jd_snapshot['version']}",
+                "plan_stages": list(plan["stages"]),
+                "plan_accelerated": bool(plan["accelerated"]),
             }
         }
 
-    def assessment_payload_extra(self, result: AssessmentResult) -> dict[str, Any] | None:
+    def assessment_payload_extra(
+        self, result: AssessmentResult, *, session_id: str | None = None
+    ) -> dict[str, Any] | None:
         if not isinstance(result, AssessmentResult):
             raise ValidationError("assessment_payload_extra(): expected an AssessmentResult")
+        resolved = self._session_or_last(session_id)
+        jd_snapshot = self._jd_snapshot(resolved)
         detail = self._judge.detail(result.result_id)
         vertical = {
             "domain_id": self.domain_id,
             "policy_version": self.policy_version,
+            "calibration_status": CALIBRATION_STATUS,
             "question_id": self._question_id,
-            "jd_ref": f"{self._jd_id}@{self._jd_gate.active_version}",
+            "jd_ref": f"{jd_snapshot['jd_id']}@{jd_snapshot['version']}",
+            "jd_version": jd_snapshot["version"],
+            "jd_content_digest": jd_snapshot["content_digest"],
         }
         if detail is None:
             return {"vertical": vertical, "rubric_audit": None}
@@ -583,7 +877,7 @@ class InterviewVerticalPolicy:
         return stages
 
     def _stages(self, session_id: str) -> tuple[str, ...]:
-        return self._stages_by_session.get(session_id, tuple(FOLLOW_UP_STAGES))
+        return tuple(self._plan(session_id)["stages"])
 
     def _session_events(self, context: VerticalActionContext) -> list[HistoryEvent]:
         return self._session_events_from(context.state, context.events)
@@ -671,7 +965,7 @@ class InterviewVerticalPolicy:
         return Reason(
             code=code,
             node_ids=[self._target_node_id],
-            detail=detail,
+            detail=f"{detail}; calibration={CALIBRATION_STATUS}",
             policy_version=self.policy_version,
         )
 
@@ -796,6 +1090,6 @@ class InterviewVerticalPolicy:
     def __repr__(self) -> str:  # pragma: no cover - debugging aid
         return (
             f"InterviewVerticalPolicy(question_id={self._question_id!r}, "
-            f"jd={self._jd_id!r}@{self._jd_gate.active_version!r}, "
+            f"jd={self._jd_id!r}@{self.active_jd_version!r}, "
             f"policy_version={self.policy_version!r})"
         )

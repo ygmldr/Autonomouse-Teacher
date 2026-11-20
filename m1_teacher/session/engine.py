@@ -89,12 +89,14 @@ from ..idempotency import (
     CONFLICT_REASON_LEGACY_DIGEST_UNPROVEN,
     CONFLICT_REASON_LEGACY_SCOPE,
     CONFLICT_REASON_REQUEST_DIGEST,
+    CONFLICT_REASON_TURN,
     CONFLICT_REASON_TURN_ALREADY_ASSESSED,
     IDEMPOTENCY_POLICY_VERSION,
     ResultScope,
     canonical_response,
     default_result_id,
     legacy_default_result_id,
+    legacy_request_digest,
     request_digest,
     validate_result_id,
 )
@@ -142,6 +144,11 @@ _ITEM_ACTION_PHASES = {
     "ASSESS": PHASE_ASSESS,
     "DIAGNOSE_ITEM": PHASE_ASSESS,
 }
+#: Action kinds that leave an item pending for ``submit_response`` (used only by
+#: the event-sourced session replay; includes the additive B-PR4 vertical kinds).
+_REPLAY_ITEM_KINDS = frozenset(
+    {"DIAGNOSE", "PRACTICE", "REASSESS", "ASSESS", "DIAGNOSE_ITEM", "SOCRATIC_QUESTION", "ASK_CLARIFICATION"}
+)
 _EVAL_ERROR_EVENT_PREFIX = "evt.evalerror."
 _GOAL_COMPLETED_EVENT_PREFIX = "evt.goalcompleted."
 _ATTEMPT_EVENT_PREFIX = "evt.responsesubmitted."
@@ -410,6 +417,9 @@ class TeachingSessionEngine:
         self._scorer: AssessmentScorer = scorer if scorer is not None else DeterministicScorer()
         self._policy = policy if policy is not None else SessionPolicy()
         self._vertical: VerticalPolicy | None = vertical_policy
+        #: Sessions whose vertical plan was restored/validated from the event log
+        #: by this engine instance (the event log remains the source of truth).
+        self._vertical_restored: set[str] = set()
         self._supports_txn = callable(
             getattr(repository, "commit_teaching_turn", None)
         ) and callable(getattr(repository, "session_version", None))
@@ -440,15 +450,15 @@ class TeachingSessionEngine:
             self._practice_items_by_node[node_id] = list(parsed)
 
     # -- additive vertical metadata helpers ---------------------------------
-    def _vertical_session_event_payload(self) -> dict[str, Any]:
+    def _vertical_session_event_payload(self, session_id: str) -> dict[str, Any]:
         if self._vertical is None:
             return {}
-        return dict(self._vertical.session_event_payload())
+        return dict(self._vertical.session_event_payload(session_id))
 
-    def _vertical_plan_event_payload(self) -> dict[str, Any]:
+    def _vertical_plan_event_payload(self, session_id: str) -> dict[str, Any]:
         if self._vertical is None:
             return {}
-        return dict(self._vertical.plan_event_payload())
+        return dict(self._vertical.plan_event_payload(session_id))
 
     # -- properties --------------------------------------------------------
     @property
@@ -532,6 +542,8 @@ class TeachingSessionEngine:
                     f"start_session(): session {session_id!r} already exists for a different "
                     "learner/goal/objective"
                 )
+            self._validate_session_version_compatibility(existing)
+            self._ensure_vertical_plan(existing)
             return existing
 
         if self._vertical is not None:
@@ -566,10 +578,12 @@ class TeachingSessionEngine:
                 "learner_id": learner_id,
                 "goal_id": goal.goal_id,
                 "objective_id": objective.objective_id,
+                "domain_id": self._domain.domain_id,
+                "domain_version": getattr(self._domain, "domain_version", None),
                 "phase": phase,
                 "snapshot_revision": snapshot.revision,
                 "session_policy_version": self._policy.policy_version,
-                **self._vertical_session_event_payload(),
+                **self._vertical_session_event_payload(session_id),
             },
         )
         plan = self._planner.plan(goal, objective, snapshot, history=self._events(learner_id))
@@ -581,9 +595,11 @@ class TeachingSessionEngine:
                 "objective_id": plan.objective_id,
                 "step_count": len(plan.steps),
                 "policy_version": plan.policy_version,
-                **self._vertical_plan_event_payload(),
+                **self._vertical_plan_event_payload(session_id),
             },
         )
+        if self._vertical is not None:
+            self._vertical_restored.add(session_id)
         if complete:
             self._record_goal_completed(state, objective, completion_reason)
             return self._load_session(session_id)
@@ -594,6 +610,8 @@ class TeachingSessionEngine:
         """Return the action for the current turn (idempotent per turn)."""
 
         state = self._load_session(session_id)
+        self._validate_session_version_compatibility(state)
+        self._ensure_vertical_plan(state)
         if state.phase == PHASE_PAUSED:
             raise ConflictError(
                 f"current_action({session_id!r}): session is PAUSED; resume it first"
@@ -610,6 +628,8 @@ class TeachingSessionEngine:
         """Acknowledge a content action (TEACH/HINT/REVIEW) and advance one turn."""
 
         state = self._load_session(session_id)
+        self._validate_session_version_compatibility(state)
+        self._ensure_vertical_plan(state)
         if state.phase == PHASE_PAUSED:
             raise ConflictError(f"advance_session({session_id!r}): session is PAUSED")
         if state.phase == PHASE_COMPLETE:
@@ -619,6 +639,14 @@ class TeachingSessionEngine:
                 f"advance_session({session_id!r}): pending item "
                 f"{state.pending_item_id!r} must be answered with submit_response()"
             )
+        next_state = {
+            "phase": PHASE_REVIEW,
+            "turn_index": state.turn_index + 1,
+            "pending_item_id": None,
+        }
+        # Additive event: records the acknowledged content action so
+        # event-sourced session replay has no ambiguous turn transitions.
+        self._append_event(state, "TURN_ADVANCED", {"next_state": dict(next_state)})
         return self._save_state(
             state,
             phase=PHASE_REVIEW,
@@ -641,6 +669,11 @@ class TeachingSessionEngine:
                 "previous_phase": state.phase,
                 "pending_item_id": state.pending_item_id,
                 "turn_index": state.turn_index,
+                "next_state": {
+                    "phase": PHASE_PAUSED,
+                    "turn_index": state.turn_index,
+                    "pending_item_id": state.pending_item_id,
+                },
             },
         )
         return self._save_state(state, phase=PHASE_PAUSED)
@@ -649,6 +682,8 @@ class TeachingSessionEngine:
         """Resume a paused session, restoring its previous phase and pending item."""
 
         state = self._load_session(session_id)
+        self._validate_session_version_compatibility(state)
+        self._ensure_vertical_plan(state)
         if state.phase != PHASE_PAUSED:
             raise ConflictError(
                 f"resume_session({session_id!r}): session is not PAUSED "
@@ -660,7 +695,18 @@ class TeachingSessionEngine:
                 f"resume_session({session_id!r}): no SESSION_PAUSED event with a valid "
                 "previous phase was found"
             )
-        self._append_event(state, "SESSION_RESUMED", {"phase": previous_phase})
+        self._append_event(
+            state,
+            "SESSION_RESUMED",
+            {
+                "phase": previous_phase,
+                "next_state": {
+                    "phase": previous_phase,
+                    "turn_index": state.turn_index,
+                    "pending_item_id": state.pending_item_id,
+                },
+            },
+        )
         return self._save_state(state, phase=previous_phase)
 
     # -- response handling -------------------------------------------------
@@ -751,10 +797,27 @@ class TeachingSessionEngine:
         """
 
         state = self._load_session(session_id)
+        self._validate_session_version_compatibility(state)
+        self._ensure_vertical_plan(state)
         self._assert_caller_learner(state, caller_learner_id)
         item_id = _require_nonempty_str(
             item_id, "TeachingSessionEngine.submit_response(item_id)"
         )
+        digest = request_digest(response)
+        scope: ResultScope | None = None
+        # Idempotency first (review P2-2): an explicit result_id that was already
+        # applied returns the first result without re-validating the phase,
+        # advanced turn or pending item.  The lookup is scoped and
+        # learner/session/item/turn/digest bound; it never falls back to a global
+        # event_id read.
+        if result_id is not None:
+            result_id = validate_result_id(
+                result_id, "TeachingSessionEngine.submit_response(result_id)"
+            )
+            scope = self._make_scope(state, item_id, result_id, digest)
+            existing = self._lookup_result_for_scope(scope, response=response)
+            if existing is not None:
+                return existing
         if state.phase == PHASE_PAUSED:
             raise ConflictError(f"submit_response({session_id!r}): session is PAUSED")
         if state.phase == PHASE_COMPLETE:
@@ -762,21 +825,6 @@ class TeachingSessionEngine:
         item = self._items_by_id.get(item_id)
         if item is None:
             raise NotFoundError(f"submit_response(): unknown item_id {item_id!r}")
-        digest = request_digest(response)
-        scope: ResultScope | None = None
-        # Idempotency first: an explicit result_id that was already applied
-        # returns the first result without re-validating the (already advanced)
-        # turn/pending state or writing any event.  This lookup is scoped and
-        # learner/session/item/turn/digest bound; it never falls back to a
-        # global event_id read.
-        if result_id is not None:
-            result_id = validate_result_id(
-                result_id, "TeachingSessionEngine.submit_response(result_id)"
-            )
-            scope = self._make_scope(state, item_id, result_id, digest)
-            existing = self._lookup_result_for_scope(scope)
-            if existing is not None:
-                return existing
         if state.pending_item_id is None:
             raise ConflictError(
                 f"submit_response({session_id!r}): no item is pending; call "
@@ -791,14 +839,14 @@ class TeachingSessionEngine:
             result_id = self._default_attempt_result_id(state, item_id, response)
             scope = self._make_scope(state, item_id, result_id, digest)
             if self._supports_scoped:
-                existing = self._lookup_result_for_scope(scope)
+                existing = self._lookup_result_for_scope(scope, response=response)
                 if existing is not None:
                     return existing
         assert scope is not None
         snapshot = self._current_snapshot(state.learner_id)
         result = self._score_safely(item, state.learner_id, response, result_id)
         if self._supports_scoped:
-            existing = self._lookup_result_for_scope(scope)
+            existing = self._lookup_result_for_scope(scope, response=response)
             if existing is not None:
                 return existing
 
@@ -838,10 +886,33 @@ class TeachingSessionEngine:
         caller_learner_id: str | None = None,
     ) -> AssessmentResult:
         state = self._load_session(session_id)
+        self._validate_session_version_compatibility(state)
+        self._ensure_vertical_plan(state)
         self._assert_caller_learner(state, caller_learner_id)
         item_id = _require_nonempty_str(
             item_id, "TeachingSessionEngine.submit_response(item_id)"
         )
+        canonical = canonical_response(response)
+        digest = request_digest(response)
+        digest16 = digest[:16]
+        response_kind = _response_kind(response)
+
+        # 1) Scoped idempotency fast path (review P2-2: before PAUSED/COMPLETE
+        #    phase gates and before any pending/turn validation).  A client that
+        #    lost the response to a submission which then completed or paused the
+        #    session must still get the same stored result for the same scope;
+        #    the lookup is learner/session/item/turn/digest bound and never falls
+        #    back to a global result-id read.
+        requested_result_id: str | None = None
+        requested_scope: ResultScope | None = None
+        if result_id is not None:
+            requested_result_id = validate_result_id(
+                result_id, "TeachingSessionEngine.submit_response(result_id)"
+            )
+            requested_scope = self._make_scope(state, item_id, requested_result_id, digest)
+            existing = self._lookup_result_for_scope(requested_scope, response=response)
+            if existing is not None:
+                return existing
         if state.phase == PHASE_PAUSED:
             raise ConflictError(f"submit_response({session_id!r}): session is PAUSED")
         if state.phase == PHASE_COMPLETE:
@@ -850,25 +921,7 @@ class TeachingSessionEngine:
         if item is None:
             raise NotFoundError(f"submit_response(): unknown item_id {item_id!r}")
         learner_id = state.learner_id
-        canonical = canonical_response(response)
-        digest = request_digest(response)
-        digest16 = digest[:16]
-        response_kind = _response_kind(response)
 
-        # 1) Scoped idempotency fast path (before any pending/turn validation so
-        #    a same-scope retry works after the turn advanced).  The lookup is
-        #    learner/session/item/turn/digest bound; it never falls back to a
-        #    global result-id read.
-        requested_result_id: str | None = None
-        requested_scope: ResultScope | None = None
-        if result_id is not None:
-            requested_result_id = validate_result_id(
-                result_id, "TeachingSessionEngine.submit_response(result_id)"
-            )
-            requested_scope = self._make_scope(state, item_id, requested_result_id, digest)
-            existing = self._lookup_result_for_scope(requested_scope)
-            if existing is not None:
-                return existing
         if state.pending_item_id is None:
             self._raise_consumed_turn_if_applicable(state, item_id, requested_scope)
             raise ConflictError(
@@ -903,7 +956,9 @@ class TeachingSessionEngine:
             self._assert_attempt_matches_request(
                 prepared, state, item, digest, requested_result_id
             )
-            terminal = self._lookup_result_for_scope(prepared.scope)
+            terminal = self._lookup_result_for_scope(
+                prepared.scope, response=response
+            )
             if terminal is not None:
                 return terminal
             current_state = self._load_session(session_id)
@@ -945,7 +1000,7 @@ class TeachingSessionEngine:
                     raise
                 retry_payload = self._prepared_payload(state, attempt_id)
                 if retry_payload is None:
-                    terminal = self._lookup_result_for_scope(scope)
+                    terminal = self._lookup_result_for_scope(scope, response=response)
                     if terminal is not None:
                         return terminal
                     raise
@@ -961,7 +1016,9 @@ class TeachingSessionEngine:
                 self._assert_attempt_matches_request(
                     prepared, state, item, digest, requested_result_id
                 )
-                terminal = self._lookup_result_for_scope(prepared.scope)
+                terminal = self._lookup_result_for_scope(
+                    prepared.scope, response=response
+                )
                 if terminal is not None:
                     return terminal
             current_state = self._load_session(session_id)
@@ -1132,16 +1189,18 @@ class TeachingSessionEngine:
                 },
                 created_at=now_utc(),
             )
-            return _TurnTransition(
-                phase=PHASE_REVIEW if exhausted else state.phase,
-                turn_index=next_turn,
-                pending_item_id=None if exhausted else item.item_id,
-                snapshot=None,
-                drafts=(draft,),
-                goal=None,
+            return self._attach_next_state(
+                _TurnTransition(
+                    phase=PHASE_REVIEW if exhausted else state.phase,
+                    turn_index=next_turn,
+                    pending_item_id=None if exhausted else item.item_id,
+                    snapshot=None,
+                    drafts=(draft,),
+                    goal=None,
+                )
             )
         vertical_payload_extra = (
-            self._vertical.assessment_payload_extra(result)
+            self._vertical.assessment_payload_extra(result, session_id=state.session_id)
             if self._vertical is not None
             else None
         )
@@ -1167,13 +1226,15 @@ class TeachingSessionEngine:
                 )
             )
             if override is not None:
-                return _TurnTransition(
-                    phase=override.phase,
-                    turn_index=next_turn,
-                    pending_item_id=override.pending_item_id,
-                    snapshot=updated if mutated else None,
-                    drafts=tuple(drafts),
-                    goal=None,
+                return self._attach_next_state(
+                    _TurnTransition(
+                        phase=override.phase,
+                        turn_index=next_turn,
+                        pending_item_id=override.pending_item_id,
+                        snapshot=updated if mutated else None,
+                        drafts=tuple(drafts),
+                        goal=None,
+                    )
                 )
         phase = PHASE_REVIEW
         goal_update: LearnerGoal | None = None
@@ -1200,14 +1261,40 @@ class TeachingSessionEngine:
                         )
                     )
                 goal_update = replace(self._goal(state), status="COMPLETED")
-        return _TurnTransition(
-            phase=phase,
-            turn_index=next_turn,
-            pending_item_id=None,
-            snapshot=updated if mutated else None,
-            drafts=tuple(drafts),
-            goal=goal_update,
+        return self._attach_next_state(
+            _TurnTransition(
+                phase=phase,
+                turn_index=next_turn,
+                pending_item_id=None,
+                snapshot=updated if mutated else None,
+                drafts=tuple(drafts),
+                goal=goal_update,
+            )
         )
+
+    @staticmethod
+    def _attach_next_state(transition: _TurnTransition) -> _TurnTransition:
+        """Attach the persisted next session state to terminal turn events.
+
+        This is an additive payload extension (event types/payload semantics are
+        unchanged for existing readers) that makes ``replay_session_state``
+        exact: phase/turn/pending after a committed turn are recorded in the
+        same unified event log that produced them.
+        """
+
+        next_state = {
+            "phase": transition.phase,
+            "turn_index": transition.turn_index,
+            "pending_item_id": transition.pending_item_id,
+        }
+        drafts = tuple(
+            replace(draft, payload={**dict(draft.payload), "next_state": dict(next_state)})
+            if draft.event_type
+            in {"ASSESSED", "MASTERY_UPDATED", "ERROR", "GOAL_COMPLETED"}
+            else draft
+            for draft in transition.drafts
+        )
+        return replace(transition, drafts=drafts)
 
     @staticmethod
     def _next_state_from_transition(
@@ -1342,9 +1429,22 @@ class TeachingSessionEngine:
     def _prepared_scope(prepared: _PreparedAttempt) -> ResultScope:
         if prepared.scope is not None:
             return prepared.scope
-        digest = prepared.request_digest or hashlib.sha256(
-            prepared.canonical_response.encode("utf-8")
-        ).hexdigest()
+        digest = prepared.request_digest
+        if not digest:
+            # Pre-B-PR3 prepared events stored only the canonical response (in the
+            # old JSON projection).  Re-derive the *new* projection digest so the
+            # scope row written by recovery matches later scoped lookups.
+            if prepared.response_kind == "structured":
+                try:
+                    parsed = json.loads(prepared.canonical_response)
+                except json.JSONDecodeError:
+                    raise ValidationError(
+                        "stored ASSESSMENT_PREPARED event has a non-JSON structured "
+                        "canonical response"
+                    ) from None
+                digest = request_digest(parsed)
+            else:
+                digest = request_digest(prepared.canonical_response)
         return ResultScope(
             learner_id=prepared.learner_id,
             session_id=prepared.session_id,
@@ -1354,13 +1454,23 @@ class TeachingSessionEngine:
             request_digest=digest,
         )
 
-    def _lookup_result_for_scope(self, scope: ResultScope) -> AssessmentResult | None:
+    def _lookup_result_for_scope(
+        self, scope: ResultScope, *, response: str | dict | None = None
+    ) -> AssessmentResult | None:
         """Return the stored result for an **exactly matching** scope (or ``None``).
 
         Never performs a global ``result_id`` / ``event_id`` lookup.  With the
         scoped repository extension the v1 row is authoritative; legacy
         (pre-scope) rows/events are only adopted by the explicit legacy adapter
-        below, which requires learner/session/item match and digest proof.
+        below, which requires learner/session/item/turn match and digest proof.
+
+        ``response`` is the *current request payload* and is **required** to
+        verify structured (dict/list) legacy evidence: pre-B-PR3 digests were
+        computed with the default-separator JSON projection, so the comparison
+        uses :func:`legacy_request_digest`.  When it is omitted (e.g. a
+        duplicate-commit catch that only has a v1 scope) a legacy marker can
+        only be proven for string responses; structured evidence fails closed.
+
         Without the extension the engine fails closed
         (``IDEMPOTENCY_UNSUPPORTED``) instead of falling back to global reads.
         """
@@ -1383,8 +1493,8 @@ class TeachingSessionEngine:
             return found
         owner = self._repository.find_scope_owner(scope.result_id)
         if owner is not None and owner.origin == "legacy":
-            return self._legacy_result_from_owner(owner, scope)
-        return self._legacy_event_lookup(scope)
+            return self._legacy_result_from_owner(owner, scope, response=response)
+        return self._legacy_event_lookup(scope, response=response)
 
     def _lookup_scope_turn_tolerant(
         self, scope: ResultScope, conflict: ConflictError
@@ -1449,10 +1559,10 @@ class TeachingSessionEngine:
             )
         except ValidationError:
             return None
-        return self._lookup_result_for_scope(scope)
+        return self._lookup_result_for_scope(scope, response=response)
 
     def _legacy_result_from_owner(
-        self, owner: Any, scope: ResultScope
+        self, owner: Any, scope: ResultScope, *, response: str | dict | None = None
     ) -> AssessmentResult | None:
         """Adopt a migrated legacy scope row after proving it is the same request."""
 
@@ -1479,7 +1589,9 @@ class TeachingSessionEngine:
                 scope,
                 message="result_id is bound to a legacy record of a different turn",
             )
-        self._assert_legacy_digest_matches(owner.request_digest, scope)
+        self._assert_legacy_digest_matches(
+            owner.request_digest, scope, response=response
+        )
         if owner.result_event_id is None:  # pragma: no cover - migration invariant
             raise ValidationError(
                 f"legacy scope row for result_id {scope.result_id!r} has no terminal event"
@@ -1495,12 +1607,17 @@ class TeachingSessionEngine:
             self._idempotency_conflict(CONFLICT_REASON_LEGACY_SCOPE, scope)
         return self._result_from_terminal_event(event, scope)
 
-    def _legacy_event_lookup(self, scope: ResultScope) -> AssessmentResult | None:
+    def _legacy_event_lookup(
+        self, scope: ResultScope, *, response: str | dict | None = None
+    ) -> AssessmentResult | None:
         """Event-log legacy adapter for rows never backfilled into ``result_scopes``.
 
         Only events of the **same learner** are read (``list_events(learner_id)``
-        is learner-scoped); the session/item/result id and the stored response
-        digest prefix must all match, otherwise the call fails closed.
+        is learner-scoped); the session/item/result id, the stored response
+        digest prefix **and** the attempt turn must all match, otherwise the call
+        fails closed.  This fallback is reachable only when the additive index
+        row is missing (e.g. manual recovery); it is deliberately as strict as
+        the ``origin='legacy'`` row adapter (review P2-4).
         """
 
         terminal: HistoryEvent | None = None
@@ -1525,8 +1642,7 @@ class TeachingSessionEngine:
                     "refusing to return it"
                 ),
             )
-        result = self._result_from_terminal_event(terminal, scope)
-        digest_marker = self._legacy_response_digest(scope)
+        digest_marker, attempt_turn = self._legacy_attempt_metadata(scope)
         if digest_marker is None:
             self._idempotency_conflict(
                 CONFLICT_REASON_LEGACY_DIGEST_UNPROVEN,
@@ -1536,11 +1652,34 @@ class TeachingSessionEngine:
                     "(no comparable response digest); refusing to return it"
                 ),
             )
-        self._assert_legacy_digest_matches(digest_marker, scope)
-        return result
+        if attempt_turn is None:
+            self._idempotency_conflict(
+                CONFLICT_REASON_LEGACY_SCOPE,
+                scope,
+                message=(
+                    "cannot prove the turn of the stored legacy result; refusing to "
+                    "return it"
+                ),
+            )
+        if attempt_turn not in (scope.turn_index, scope.turn_index - 1):
+            self._idempotency_conflict(
+                CONFLICT_REASON_TURN,
+                scope,
+                message=(
+                    "result_id is bound to a legacy result of a different turn; "
+                    "refusing to return it"
+                ),
+            )
+        self._assert_legacy_digest_matches(digest_marker, scope, response=response)
+        return self._result_from_terminal_event(terminal, scope)
 
-    def _legacy_response_digest(self, scope: ResultScope) -> str | None:
+    def _legacy_attempt_metadata(
+        self, scope: ResultScope
+    ) -> tuple[str | None, int | None]:
+        """Return ``(digest marker, attempt turn)`` of the matching legacy attempt."""
+
         marker: str | None = None
+        turn: int | None = None
         for event in self._events(scope.learner_id):
             if event.event_type not in ("ASSESSMENT_PREPARED", "RESPONSE_SUBMITTED"):
                 continue
@@ -1551,16 +1690,33 @@ class TeachingSessionEngine:
                 continue
             if event.session_id != scope.session_id:
                 continue
+            raw_turn = payload.get("turn_index", payload.get("attempt"))
+            if type(raw_turn) is int and raw_turn >= 0:
+                turn = raw_turn
             raw_digest = payload.get("response_digest")
             if type(raw_digest) is str and len(raw_digest) == 16:
                 marker = f"legacy:{raw_digest}"
-        return marker
+        return marker, turn
 
-    def _assert_legacy_digest_matches(self, stored: str, scope: ResultScope) -> None:
+    def _assert_legacy_digest_matches(
+        self,
+        stored: str,
+        scope: ResultScope,
+        *,
+        response: str | dict | None = None,
+    ) -> None:
         if type(stored) is str and stored.startswith("legacy:"):
             marker = stored[len("legacy:") :]
             if len(marker) == 16:
-                if marker != scope.request_digest[:16]:
+                # Legacy evidence was produced with the pre-B-PR3 JSON projection
+                # (default separators), so compare against legacy_request_digest
+                # when the current request payload is available.
+                expected = (
+                    legacy_request_digest(response)
+                    if response is not None
+                    else scope.request_digest
+                )[:16]
+                if marker != expected:
                     self._idempotency_conflict(
                         CONFLICT_REASON_REQUEST_DIGEST,
                         scope,
@@ -1702,10 +1858,23 @@ class TeachingSessionEngine:
         canonical = payload["canonical_response"]
         prepared_digest = payload.get("request_digest")
         if type(prepared_digest) is not str or len(prepared_digest) != 64:
-            # Pre-B-PR3 prepared events only carried the 16-hex response_digest;
-            # the full digest is a deterministic function of the canonical
-            # response, so it can be recomputed without guessing.
-            prepared_digest = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+            # Pre-B-PR3 prepared events only carried the 16-hex response_digest
+            # produced with the *old* JSON projection.  Re-derive the new
+            # projection digest from the canonical response and prove it against
+            # the stored legacy prefix; otherwise the attempt is corrupted.
+            response = self._response_from_canonical(
+                canonical, payload["response_kind"], where
+            )
+            prepared_digest = request_digest(response)
+            stored_prefix = payload["response_digest"]
+            if (
+                len(stored_prefix) != 16
+                or legacy_request_digest(response)[:16] != stored_prefix
+            ):
+                raise ValidationError(
+                    f"{where}: stored response_digest does not match the persisted "
+                    "canonical response"
+                )
         raw_scope = payload.get("scope")
         if raw_scope is not None:
             scope = ResultScope.from_dict(raw_scope)
@@ -1741,6 +1910,27 @@ class TeachingSessionEngine:
             request_digest=prepared_digest,
             scope=scope,
         )
+
+    @staticmethod
+    def _response_from_canonical(
+        canonical: str, response_kind: str, where: str
+    ) -> str | dict:
+        """Decode a persisted canonical response back into its request form."""
+
+        if response_kind == "structured":
+            try:
+                parsed = json.loads(canonical)
+            except json.JSONDecodeError:
+                raise ValidationError(
+                    f"{where}: persisted structured canonical response is not JSON"
+                ) from None
+            if not isinstance(parsed, (dict, list)):
+                raise ValidationError(
+                    f"{where}: persisted structured canonical response is not an "
+                    "object/array"
+                )
+            return parsed
+        return canonical
 
     def _assert_attempt_matches_request(
         self,
@@ -1846,7 +2036,13 @@ class TeachingSessionEngine:
         for prepared in unresolved:
             fresh = self._load_session(session_id)
             prepared_scope = self._prepared_scope(prepared)
-            if self._lookup_result_for_scope(prepared_scope) is not None:
+            prepared_response = self._prepared_response_or_none(prepared)
+            if (
+                self._lookup_result_for_scope(
+                    prepared_scope, response=prepared_response
+                )
+                is not None
+            ):
                 recovered += 1
                 continue
             if (
@@ -1883,7 +2079,12 @@ class TeachingSessionEngine:
             try:
                 self._commit_result_turn(fresh, item, result, prepared_scope)
             except ConflictError as exc:
-                if self._lookup_result_for_scope(prepared_scope) is not None:
+                if (
+                    self._lookup_result_for_scope(
+                        prepared_scope, response=prepared_response
+                    )
+                    is not None
+                ):
                     recovered += 1
                     continue
                 code = f"RECOVERY_{getattr(exc, 'code', 'CONFLICT')}"
@@ -1966,7 +2167,13 @@ class TeachingSessionEngine:
                 continue
             seen.add(attempt_id)
             prepared = self._decode_prepared(attempt_id, payload)
-            if self._lookup_result_for_scope(self._prepared_scope(prepared)) is None:
+            if (
+                self._lookup_result_for_scope(
+                    self._prepared_scope(prepared),
+                    response=self._prepared_response_or_none(prepared),
+                )
+                is None
+            ):
                 attempts.append(prepared)
         return attempts
 
@@ -1984,6 +2191,14 @@ class TeachingSessionEngine:
                     "persisted structured response is not valid JSON",
                 ) from None
         return canonical
+
+    def _prepared_response_or_none(self, prepared: _PreparedAttempt):
+        """Decoded persisted response, or ``None`` when it cannot be decoded yet."""
+
+        try:
+            return self._decode_prepared_response(prepared)
+        except _RecoveryFailure:
+            return None
 
     def _rescore_for_recovery(
         self,
@@ -2163,6 +2378,325 @@ class TeachingSessionEngine:
         if state is None:
             raise NotFoundError(f"unknown session_id {session_id!r}")
         return state
+
+    # ------------------------------------------------------------------
+    # Version compatibility + event-sourced session replay (B-PR4 P1-3)
+    # ------------------------------------------------------------------
+    def _validate_session_version_compatibility(
+        self,
+        state: SessionState,
+        events: Sequence[HistoryEvent] | None = None,
+    ) -> None:
+        """Fail closed (zero writes) if the recorded session versions are incompatible.
+
+        MAP-E12: the recorded domain_id/domain_version no longer matches this
+        engine's domain (mid-session domain upgrade requires pause + new session).
+        MAP-E13: the recorded event/plan/session/vertical policy version is not
+        replayable by the current code (no migration is implemented in M1-B).
+        """
+
+        session_events = (
+            list(events)
+            if events is not None
+            else self._session_events(state)
+        )
+        started = next(
+            (event for event in session_events if event.event_type == "SESSION_STARTED"),
+            None,
+        )
+        if started is None:
+            raise ValidationError(
+                f"session {state.session_id!r}: SESSION_STARTED event is missing; "
+                "refusing to continue an unreplayable session",
+                code="MAP-E13_EVENT_VERSION_INCOMPATIBLE",
+                details={"session_id": state.session_id},
+            )
+        payload = started.payload
+        current_domain_version = getattr(self._domain, "domain_version", None)
+        recorded_domain_id = payload.get("domain_id")
+        recorded_domain_version = payload.get("domain_version")
+        # Legacy (pre-B-PR4) sessions were written by the frozen M1-A engine,
+        # whose SESSION_STARTED payload had no domain_id/domain_version.  Treat a
+        # session with *both* fields absent as v0-legacy and remain replayable: a
+        # first-class compatibility check must not turn an old, valid event stream
+        # into a spurious MAP-E12 failure.  Only *recorded* values are compared;
+        # explicitly persisted mismatches still fail closed below.
+        legacy_v0_session = recorded_domain_id is None and recorded_domain_version is None
+        if not legacy_v0_session:
+            if (
+                recorded_domain_id is not None
+                and recorded_domain_id != self._domain.domain_id
+            ):
+                raise ValidationError(
+                    "session domain version mismatch (MAP-E12): pause and start a new session",
+                    code="MAP-E12_DOMAIN_VERSION_MISMATCH",
+                    details={
+                        "session_id": state.session_id,
+                        "recorded_domain_id": recorded_domain_id,
+                        "current_domain_id": self._domain.domain_id,
+                    },
+                )
+            if (
+                recorded_domain_version is not None
+                and recorded_domain_version != current_domain_version
+            ):
+                raise ValidationError(
+                    "session domain version mismatch (MAP-E12): pause and start a new session",
+                    code="MAP-E12_DOMAIN_VERSION_MISMATCH",
+                    details={
+                        "session_id": state.session_id,
+                        "recorded_domain_version": recorded_domain_version,
+                        "current_domain_version": current_domain_version,
+                    },
+                )
+        recorded_objective = payload.get("objective_id")
+        if recorded_objective is not None and recorded_objective != state.objective_id:
+            raise ValidationError(
+                "session objective binding mismatch (MAP-E12)",
+                code="MAP-E12_DOMAIN_VERSION_MISMATCH",
+                details={
+                    "session_id": state.session_id,
+                    "recorded_objective_id": recorded_objective,
+                    "state_objective_id": state.objective_id,
+                },
+            )
+        recorded_policy_version = payload.get("session_policy_version")
+        if (
+            recorded_policy_version is not None
+            and recorded_policy_version != self._policy.policy_version
+        ):
+            raise ValidationError(
+                "session policy version incompatible (MAP-E13); no migration is implemented",
+                code="MAP-E13_EVENT_VERSION_INCOMPATIBLE",
+                details={
+                    "session_id": state.session_id,
+                    "recorded_session_policy_version": recorded_policy_version,
+                    "current_session_policy_version": self._policy.policy_version,
+                },
+            )
+        if self._vertical is not None:
+            vertical = payload.get("vertical")
+            if not isinstance(vertical, Mapping):
+                raise ValidationError(
+                    "session vertical metadata is missing (MAP-E13); cannot replay the "
+                    "domain plan from the event log",
+                    code="MAP-E13_EVENT_VERSION_INCOMPATIBLE",
+                    details={"session_id": state.session_id},
+                )
+            if vertical.get("domain_id") != self._vertical.domain_id:
+                raise ValidationError(
+                    "session vertical domain mismatch (MAP-E12)",
+                    code="MAP-E12_DOMAIN_VERSION_MISMATCH",
+                    details={
+                        "session_id": state.session_id,
+                        "recorded_domain_id": vertical.get("domain_id"),
+                        "current_domain_id": self._vertical.domain_id,
+                    },
+                )
+            if vertical.get("policy_version") != self._vertical.policy_version:
+                raise ValidationError(
+                    "session vertical policy version incompatible (MAP-E13); no migration "
+                    "is implemented",
+                    code="MAP-E13_EVENT_VERSION_INCOMPATIBLE",
+                    details={
+                        "session_id": state.session_id,
+                        "recorded_vertical_policy_version": vertical.get("policy_version"),
+                        "current_vertical_policy_version": self._vertical.policy_version,
+                    },
+                )
+
+    def _ensure_vertical_plan(self, state: SessionState) -> None:
+        """Restore the vertical plan from events before any continuation."""
+
+        if self._vertical is None:
+            return
+        if state.session_id in self._vertical_restored:
+            return
+        events = tuple(self._session_events(state))
+        self._validate_session_version_compatibility(state, events)
+        self._vertical.restore_session(
+            session_id=state.session_id,
+            events=events,
+            objective=self._objective(state),
+            snapshot=self._current_snapshot(state.learner_id),
+        )
+        self._vertical_restored.add(state.session_id)
+
+    def replay_session_state(self, session_id: str) -> dict[str, Any]:
+        """Rebuild the session state from the unified event log (no writes).
+
+        Returns ``phase``, ``turn_index``, ``pending_item_id``, ``last_action``,
+        ``plan`` (including the persisted vertical stage plan / next stage),
+        ``completed``/``goal_completed`` and the consumed event count.  Version
+        incompatibility raises MAP-E12/MAP-E13 instead of partially replaying.
+        """
+
+        state = self._load_session(session_id)
+        events = tuple(self._session_events(state))
+        self._validate_session_version_compatibility(state, events)
+        return self._replay_session_events(state, events)
+
+    def verify_session_replay(self, session_id: str) -> dict[str, Any]:
+        """Compare ``replay_session_state`` with the persisted session state.
+
+        Returns ``{"match": bool, "differences": {...}, ...}``; a difference is a
+        real persistence/replay bug (or an unreplayable legacy event stream).
+        """
+
+        state = self._load_session(session_id)
+        events = tuple(self._session_events(state))
+        replay = self.replay_session_state(session_id)
+        persisted = {
+            "phase": state.phase,
+            "turn_index": state.turn_index,
+            "pending_item_id": state.pending_item_id,
+        }
+        replayed = {
+            "phase": replay["phase"],
+            "turn_index": replay["turn_index"],
+            "pending_item_id": replay["pending_item_id"],
+        }
+        differences = {
+            key: {"persisted": persisted[key], "replay": replayed[key]}
+            for key in persisted
+            if persisted[key] != replayed[key]
+        }
+        return {
+            "session_id": session_id,
+            "match": not differences,
+            "differences": differences,
+            "persisted": persisted,
+            "replay": replayed,
+            "last_action": replay["last_action"],
+            "plan": replay["plan"],
+            "completed": replay["completed"],
+            "goal_completed": replay["goal_completed"],
+            "events_consumed": len(events),
+        }
+
+    def _replay_session_events(
+        self, state: SessionState, events: Sequence[HistoryEvent]
+    ) -> dict[str, Any]:
+        ordered = sorted(events, key=lambda event: event.seq)
+        started = next(
+            (event for event in ordered if event.event_type == "SESSION_STARTED"), None
+        )
+        if started is None:  # pragma: no cover - validated by caller
+            raise ValidationError(
+                f"session {state.session_id!r}: SESSION_STARTED event is missing",
+                code="MAP-E13_EVENT_VERSION_INCOMPATIBLE",
+            )
+        replay: dict[str, Any] = {
+            "session_id": state.session_id,
+            "learner_id": state.learner_id,
+            "goal_id": state.goal_id,
+            "objective_id": state.objective_id,
+            "domain_id": started.payload.get("domain_id"),
+            "domain_version": started.payload.get("domain_version"),
+            "session_policy_version": started.payload.get("session_policy_version"),
+            # Diagnostic only, never persisted: pre-B-PR4 v0 sessions had no
+            # domain_id/domain_version in SESSION_STARTED and are replayed as-is.
+            "legacy_v0_session": (
+                started.payload.get("domain_id") is None
+                and started.payload.get("domain_version") is None
+            ),
+            "phase": started.payload.get("phase", PHASE_DIAGNOSE),
+            "turn_index": 0,
+            "pending_item_id": None,
+            "last_action": None,
+            "plan": None,
+            "completed": False,
+            "goal_completed": False,
+            "events_consumed": len(ordered),
+        }
+        vertical_plan: Mapping[str, Any] | None = None
+        vertical = started.payload.get("vertical")
+        if isinstance(vertical, Mapping) and isinstance(vertical.get("plan"), Mapping):
+            vertical_plan = vertical["plan"]
+        for event in ordered:
+            etype = event.event_type
+            payload = event.payload
+            if etype == "PLAN_CREATED":
+                replay["plan"] = {
+                    "plan_id": payload.get("plan_id"),
+                    "objective_id": payload.get("objective_id"),
+                    "step_count": payload.get("step_count"),
+                    "policy_version": payload.get("policy_version"),
+                    "vertical_plan": dict(vertical_plan) if vertical_plan is not None else None,
+                }
+            elif etype == "ACTION_TAKEN":
+                replay["phase"] = payload.get("phase", replay["phase"])
+                replay["turn_index"] = int(payload.get("turn_index", replay["turn_index"]))
+                replay["last_action"] = payload.get("action")
+                item_id = payload.get("item_id")
+                kind = payload.get("action_kind")
+                replay["pending_item_id"] = (
+                    item_id if item_id is not None and kind in _REPLAY_ITEM_KINDS else None
+                )
+            elif etype in {"ASSESSED", "ERROR"}:
+                next_state = payload.get("next_state")
+                if isinstance(next_state, Mapping):
+                    replay["phase"] = next_state.get("phase", replay["phase"])
+                    replay["turn_index"] = int(
+                        next_state.get("turn_index", replay["turn_index"])
+                    )
+                    replay["pending_item_id"] = next_state.get("pending_item_id")
+                else:  # pragma: no cover - legacy sessions without next_state metadata
+                    replay["phase"] = PHASE_REVIEW
+                    replay["pending_item_id"] = None
+            elif etype == "TURN_ADVANCED":
+                next_state = payload.get("next_state") or {}
+                replay["phase"] = next_state.get("phase", PHASE_REVIEW)
+                replay["turn_index"] = int(
+                    next_state.get("turn_index", replay["turn_index"])
+                )
+                replay["pending_item_id"] = next_state.get("pending_item_id")
+            elif etype == "SESSION_PAUSED":
+                next_state = payload.get("next_state") or {}
+                replay["phase"] = next_state.get("phase", PHASE_PAUSED)
+                replay["turn_index"] = int(
+                    next_state.get("turn_index", payload.get("turn_index", replay["turn_index"]))
+                )
+                replay["pending_item_id"] = next_state.get(
+                    "pending_item_id", payload.get("pending_item_id")
+                )
+            elif etype == "SESSION_RESUMED":
+                next_state = payload.get("next_state") or {}
+                replay["phase"] = next_state.get("phase", payload.get("phase", replay["phase"]))
+                replay["turn_index"] = int(
+                    next_state.get("turn_index", replay["turn_index"])
+                )
+                replay["pending_item_id"] = next_state.get(
+                    "pending_item_id", replay["pending_item_id"]
+                )
+            elif etype == "GOAL_COMPLETED":
+                replay["goal_completed"] = True
+        replay["completed"] = bool(
+            replay["goal_completed"] or replay["phase"] == PHASE_COMPLETE
+        )
+        if isinstance(vertical_plan, Mapping):
+            stages = list(vertical_plan.get("stages") or [])
+            advancing = sum(
+                1
+                for event in ordered
+                if event.event_type == "ASSESSED"
+                and event.payload.get("status") in _MUTATING_STATUSES
+            )
+            ladder_completed = bool(stages) and advancing >= 1 + len(stages)
+            next_stage = (
+                stages[advancing - 1]
+                if stages and 1 <= advancing <= len(stages)
+                else None
+            )
+            derived_plan = dict(vertical_plan)
+            derived_plan["advanced_answers"] = advancing
+            derived_plan["ladder_completed"] = ladder_completed
+            derived_plan["next_stage"] = next_stage
+            if replay["plan"] is not None:
+                replay["plan"]["vertical_plan"] = derived_plan
+            else:  # pragma: no cover - SESSION_STARTED precedes PLAN_CREATED
+                replay["plan"] = {"vertical_plan": derived_plan}
+        return replay
 
     def _current_snapshot(self, learner_id: str) -> LearnerSnapshot:
         snapshot = self._repository.get_snapshot(learner_id)
@@ -2386,7 +2920,7 @@ class TeachingSessionEngine:
         snapshot: LearnerSnapshot,
     ) -> SessionState:
         payload_extra = (
-            self._vertical.assessment_payload_extra(result)
+            self._vertical.assessment_payload_extra(result, session_id=state.session_id)
             if self._vertical is not None
             else None
         )
@@ -2453,7 +2987,7 @@ class TeachingSessionEngine:
         snapshot: LearnerSnapshot,
     ) -> SessionState:
         vertical_payload_extra = (
-            self._vertical.assessment_payload_extra(result)
+            self._vertical.assessment_payload_extra(result, session_id=state.session_id)
             if self._vertical is not None
             else None
         )
@@ -2552,6 +3086,11 @@ class TeachingSessionEngine:
             "turn_index": state.turn_index,
             "snapshot_revision": snapshot.revision,
             "session_policy_version": self._policy.policy_version,
+            "next_state": {
+                "phase": phase,
+                "turn_index": state.turn_index,
+                "pending_item_id": pending_item_id,
+            },
         }
         if self._vertical is not None:
             action_payload.update(self._vertical.action_event_payload(action, state))

@@ -329,6 +329,8 @@ def _expected_enums() -> dict[str, tuple[str, ...]]:
             "ERROR",
             # B-NEXT B-PR2 additive event type (durable assessment attempt).
             "ASSESSMENT_PREPARED",
+            # B-NEXT B-PR4 P1-3 additive event type (content-action turn advance).
+            "TURN_ADVANCED",
         ),
         "DIAGNOSIS_STATUS": ("READY", "INSUFFICIENT_EVIDENCE"),
         "GOAL_STATUS": ("ACTIVE", "COMPLETED", "PAUSED"),

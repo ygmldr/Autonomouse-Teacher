@@ -135,7 +135,7 @@ docs/M1_ADR_001_DOMAIN_CONTRACTS.md
 | `ITEM_TYPE` | `MCQ`, `CODE`, `SHORT_ANSWER` |
 | `TEACHING_ACTION_KIND` | `DIAGNOSE`, `EXPLAIN`, `HINT`, `PRACTICE`, `REVIEW`, `RETEACH`, `REASSESS`, `GOAL_COMPLETE`, `SESSION_PAUSE`, `SESSION_RESUME` |
 | `SESSION_PHASE` | `DIAGNOSE`, `TEACH`, `PRACTICE`, `ASSESS`, `UPDATE`, `REVIEW`, `COMPLETE`, `PAUSED` |
-| `HISTORY_EVENT_TYPE` | `SESSION_STARTED`, `PLAN_CREATED`, `DIAGNOSIS_COMPLETED`, `ITEM_PRESENTED`, `RESPONSE_SUBMITTED`, `ASSESSED`, `MASTERY_UPDATED`, `ACTION_TAKEN`, `SESSION_PAUSED`, `SESSION_RESUMED`, `GOAL_COMPLETED`, `ERROR` |
+| `HISTORY_EVENT_TYPE` | `SESSION_STARTED`, `PLAN_CREATED`, `DIAGNOSIS_COMPLETED`, `ITEM_PRESENTED`, `RESPONSE_SUBMITTED`, `ASSESSED`, `MASTERY_UPDATED`, `ACTION_TAKEN`, `SESSION_PAUSED`, `SESSION_RESUMED`, `GOAL_COMPLETED`, `ERROR`, `ASSESSMENT_PREPARED` (B-PR2 additive), `TURN_ADVANCED` (B-PR4 additive) |
 | `DIAGNOSIS_STATUS` | `READY`, `INSUFFICIENT_EVIDENCE` |
 | `GOAL_STATUS` | `ACTIVE`, `COMPLETED`, `PAUSED` |
 
@@ -370,6 +370,7 @@ with defaults, new protocols/helpers), must be recorded in
 | 2026-11-20 | B-PR4 | Teaching-session state machine + independent assessment scorer (75 tests) |
 | 2026-11-20 | B-PR5 final | Student A/B E2E paths, deterministic demo/CLI, reproducible evidence JSONL, implementation/evaluation/review/next-phase docs, next-phase interface stubs (43 tests, 536 total) |
 | 2026-11-20 | B-NEXT B-PR2 | Additive `HISTORY_EVENT_TYPE` value `ASSESSMENT_PREPARED` for the durable prepared assessment attempt of the B-PR2 transactional teaching turn (ADR-M1-001 §6 item 9, rule D12). No value renamed/removed and no record/field changed; the enum-freeze test gained exactly this one value. Storage is forward-only for this value: older builds reject it (see `docs/M1_B_TXN_RECOVERY.md` §10). |
+| 2026-11-20 | B-NEXT B-PR4 P1-1/P1-3 | Additive `HISTORY_EVENT_TYPE` value `TURN_ADVANCED` (content-action acknowledgement with `next_state` payload) so `TeachingSessionEngine.replay_session_state`/`verify_session_replay` are exact from the unified event log. Event-sourced session replay now rebuilds phase/turn/pending/last action/plan/completion for CF + Interview + cross-domain sessions; continue/resume validates recorded domain_id/domain_version/objective/session-policy/vertical-policy versions and rejects MAP-E12/MAP-E13 before any write. The vertical stage plan and JD content snapshot are persisted in `SESSION_STARTED`/`PLAN_CREATED` payloads and restored from events (no policy-memory dependency). |
 
 ---
 

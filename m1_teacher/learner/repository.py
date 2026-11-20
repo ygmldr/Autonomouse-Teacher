@@ -288,7 +288,8 @@ _RESULT_SCOPES_SQL: tuple[str, ...] = (
            result_event_id TEXT,
            origin TEXT NOT NULL DEFAULT 'v1' CHECK (origin IN ('v1', 'legacy')),
            created_at TEXT NOT NULL,
-           updated_at TEXT NOT NULL
+           updated_at TEXT NOT NULL,
+           CHECK (origin = 'legacy' OR turn_index >= 0)
        )""",
     "CREATE INDEX IF NOT EXISTS idx_result_scopes_scope "
     "ON result_scopes(learner_id, session_id, item_id, turn_index)",
@@ -1531,6 +1532,13 @@ class SqliteRepository:
 
     @staticmethod
     def _scope_metadata(row: sqlite3.Row) -> ScopeMetadata:
+        # Defense in depth for databases created before the table-level CHECK
+        # was tightened (review P2-5): v1 rows must never carry turn_index=-1.
+        if str(row["origin"]) != "legacy" and int(row["turn_index"]) < 0:
+            raise ValidationError(
+                f"stored result_scopes row {row['result_id']!r} is v1 but has "
+                "turn_index=-1"
+            )
         return ScopeMetadata(
             learner_id=str(row["learner_id"]),
             session_id=str(row["session_id"]),

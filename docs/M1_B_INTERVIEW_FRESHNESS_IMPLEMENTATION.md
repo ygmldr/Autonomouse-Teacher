@@ -45,7 +45,7 @@ fixtures 全树 JSON sha256（排序后整体）：`060e621ae81ca5bada2c8a09e0f6
 边界（test-enforced）：
 
 - Teacher 侧模块（domains/interview.py、knowledge/freshness.py）源码不引用隐藏评分路径；`m1_teacher/domains` + `knowledge` + `contracts` 现有静态扫描仍通过。
-- 仅 `scorer.py` 与新 `interview_judge.py` 在显式封闭 allow-list 内可引用隐藏评分路径（见 §7 适配说明）。
+- 仅 `scorer.py` 与新 `interview_judge.py` 在显式封闭 allow-list 内可引用隐藏评分路径；B-PR4 P1-2 起守卫改为 **AST/路径组件**检测（不再只匹配字面 `scoring/`），demo/E2E 的 learner 输入来自 teacher-visible `learner_scripts/answers.json`，不读隐藏材料（见 §7 适配说明）。
 - 所有模块无网络/无 M0 import、无 wall-clock 判定（评测使用固定 fixture 时钟/显式 `now`）、无 runtime/provider 调用。
 - 未修改 `m1_teacher/__init__.py` / `domains/__init__.py`：避免与 PR2/PR3 并行改动冲突；调用方以显式模块路径 import，如需默认 registry 注册由后续 PR 统一加（additive）导出。
 
@@ -144,12 +144,12 @@ cd /root/m1b/pr4 && "/root/Autonomous Teacher/.venv/bin/python" -m pytest tests/
 5. **人工复核队列只实现门禁语义**：`require_curriculum_eligible` 阻断 + decisions 审计；持久化 review queue/审批 UI 未实现。
 6. **JD 只覆盖 synthetic 窗口**：窗口边界按日期包含式判断；真实 JD/招聘站点不接入。
 7. **engine 未接入**：多轮五阶段、LearnerState 影响的追问策略、`ASK_CLARIFICATION` 会话动作、统一事件/Replay 均待 PR3 合并后实现。
-8. **hidden 题集（B 线 hidden/）本轮未转换**：只转换公开 22 题与隐藏评分规格；隐藏题集访问控制/评测留待 E2E 阶段。
+8. **hidden 题集（B 线 hidden/）本轮未转换**：只转换公开 22 题与隐藏评分规格；隐藏题集访问控制/评测留待 E2E 阶段。 Teacher-visible E2E/demo 的 learner 答案使用 `vertical/interview/learner_scripts/answers.json`（独立 synthetic MOCK，非隐藏 reference answers）；隐藏 reference answers 只由 scorer-side judge/tests 使用。
 9. 未修改包 `__init__` 导出；`build_interview_registry()` 可构造单域 registry，默认 `build_default_registry()` 的多域注册留给后续 additive PR。
 
 ## 7. 对现有测试的显式适配（需 Reviewer 知悉）
 
-PR4 新增了第二个独立 **scorer-side** 模块（`assessment/interview_judge.py`），而 B-PR1 的两条静态隔离守卫测试硬编码“只有 `scorer.py` 可以引用隐藏评分路径”。为避免弱化审计，本轮**没有隐藏路径字符串**，而是把守卫改为**显式封闭 allow-list**：
+PR4 新增了第二个独立 **scorer-side** 模块（`assessment/interview_judge.py`），而 B-PR1 的两条静态隔离守卫测试硬编码“只有 `scorer.py` 可以引用隐藏评分路径”。为避免弱化审计，本轮把守卫改为**显式封闭 allow-list + AST/路径组件检测**（B-PR4 P1-2 进一步收紧了原来的字面串匹配）：
 
 - `tests/m1_teacher/test_assessment_scorer.py::test_only_scorer_module_references_hidden_scoring_path`
 - `tests/m1_teacher/test_e2e_resume_idempotency.py::test_teacher_code_references_hidden_scoring_only_in_scorer`

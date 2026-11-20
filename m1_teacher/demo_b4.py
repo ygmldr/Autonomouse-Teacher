@@ -27,6 +27,7 @@ Run as::
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import sys
 import tempfile
@@ -82,17 +83,27 @@ def _strip_volatile(value: Any) -> Any:
     return value
 
 
-def _load_reference_answers(fixtures_root: Path) -> dict[str, dict]:
+def _load_learner_script(fixtures_root: Path) -> tuple[dict[str, dict], str]:
+    """Load the teacher-visible synthetic MOCK learner script.
+
+    P1-2: the demo is a teacher-visible consumer and must never read hidden
+    rubric/reference-answer material.  This file lives outside the hidden
+    scoring tree and contains only synthetic learner responses.
+    """
+
     path = (
         fixtures_root
         / "vertical"
         / "interview"
-        / "rubrics"
-        / "scoring"
-        / "reference_answers.json"
+        / "learner_scripts"
+        / "answers.json"
     )
-    payload = json.loads(path.read_text(encoding="utf-8"))
-    return {answer["answer_id"]: answer["response"] for answer in payload["answers"]}
+    raw = path.read_bytes()
+    payload = json.loads(raw.decode("utf-8"))
+    if payload.get("synthetic") is not True or payload.get("license") != "CC0-1.0":
+        raise ValueError("learner script must be synthetic CC0-1.0 data")
+    answers = {answer["answer_id"]: answer["response"] for answer in payload["answers"]}
+    return answers, hashlib.sha256(raw).hexdigest()
 
 
 def _run_cf_learners(db_path: Path, fixtures_root: Path) -> dict[str, Any]:
@@ -291,13 +302,7 @@ def _run_interview_learners(db_path: Path, fixtures_root: Path) -> dict[str, Any
     freshness = KnowledgeFreshnessService(fixtures_root)
     judge = InterviewRubricJudge(fixtures_root)
     repository = SqliteRepository(db_path)
-    responses = _load_reference_answers(fixtures_root)
-
-    facts_answer = dict(responses["a-missingfacts-004"])
-    facts_answer["project_facts"] = [
-        "合成项目：负责推荐延迟优化，P99 从 800ms 降到 200ms（合成数据，仅演示）"
-    ]
-    vague_with_facts = {"text": "大概加一些缓存、优化一下特征，可能就快了。", "project_facts": facts_answer["project_facts"]}
+    learner_answers, script_digest = _load_learner_script(fixtures_root)
 
     learner_a = _run_interview_flow(
         repository=repository,
@@ -308,7 +313,7 @@ def _run_interview_learners(db_path: Path, fixtures_root: Path) -> dict[str, Any
         learner_id=INTERVIEW_LEARNER_A,
         question_id=INTERVIEW_QUESTION_A,
         now=INTERVIEW_JD_NOW_A,
-        responses=[responses["a-correct-001"]] * 8,
+        responses=[learner_answers["learner-ml-overfit-v1"]] * 8,
         seed_correct=3,
     )
     learner_b = _run_interview_flow(
@@ -321,14 +326,14 @@ def _run_interview_learners(db_path: Path, fixtures_root: Path) -> dict[str, Any
         question_id=INTERVIEW_QUESTION_B,
         now=INTERVIEW_JD_NOW_B,
         responses=[
-            responses["a-missingfacts-004"],  # no project facts yet -> ASK_CLARIFICATION
-            vague_with_facts,  # INCORRECT -> interview support ladder LIGHT
-            facts_answer,  # PARTIAL -> ladder progression
-            facts_answer,
-            facts_answer,
-            facts_answer,
-            facts_answer,
-            facts_answer,
+            learner_answers["learner-eng-missing-facts-v1"],  # NEEDS_REVIEW -> ASK_CLARIFICATION
+            learner_answers["learner-eng-vague-with-facts-v1"],  # INCORRECT -> support ladder LIGHT
+            learner_answers["learner-eng-facts-v1"],  # PARTIAL -> ladder progression
+            learner_answers["learner-eng-facts-v1"],
+            learner_answers["learner-eng-facts-v1"],
+            learner_answers["learner-eng-facts-v1"],
+            learner_answers["learner-eng-facts-v1"],
+            learner_answers["learner-eng-facts-v1"],
         ],
     )
     return {
@@ -336,6 +341,8 @@ def _run_interview_learners(db_path: Path, fixtures_root: Path) -> dict[str, Any
         "jd_versions": [learner_a["jd_version"], learner_b["jd_version"]],
         "paths_differ": learner_a["probe_sequence"] != learner_b["probe_sequence"],
         "shared_journal": "one canonical database; per-learner seq/event log",
+        "learner_input_source": "teacher-visible vertical/interview/learner_scripts/answers.json (synthetic MOCK; not hidden reference answers)",
+        "learner_script_sha256": script_digest,
         "full_solution_emitted": any(
             reason == "INTERVIEW_HINT_LEVEL_4"
             for learner in (learner_a, learner_b)

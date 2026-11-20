@@ -15,10 +15,11 @@ import ast
 import inspect
 import json
 import re
-import shutil
 from pathlib import Path
 
 import pytest
+
+import guard_support
 
 from m1_teacher.assessment.interview_judge import InterviewRubricJudge
 from m1_teacher.contracts.errors import ValidationError
@@ -30,6 +31,7 @@ from m1_teacher.contracts.types import (
 from m1_teacher.domains.interview import FOLLOW_UP_STAGES, InterviewDomainAdapter
 from m1_teacher.knowledge.freshness import KnowledgeFreshnessService
 from m1_teacher.knowledge.graph import KnowledgeGraph
+from m1_teacher.idempotency import canonical_response
 from m1_teacher.learner.history import LearningHistory
 from m1_teacher.learner.repository import SqliteRepository
 from m1_teacher.session import vertical as vertical_module
@@ -46,11 +48,13 @@ from txn_support import _strip_timestamps  # local test support helper
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 FIXTURES_ROOT = REPO_ROOT / "fixtures" / "m1_teacher"
-SCORING_DIR = FIXTURES_ROOT / "vertical" / "interview" / "rubrics" / "scoring"
-REFERENCE_ANSWERS = json.loads(
-    (SCORING_DIR / "reference_answers.json").read_text(encoding="utf-8")
-)["answers"]
-RESPONSES = {answer["answer_id"]: answer["response"] for answer in REFERENCE_ANSWERS}
+LEARNER_SCRIPT_PATH = (
+    FIXTURES_ROOT / "vertical" / "interview" / "learner_scripts" / "answers.json"
+)
+LEARNER_SCRIPT = json.loads(LEARNER_SCRIPT_PATH.read_text(encoding="utf-8"))
+LEARNER_ANSWERS = {
+    answer["answer_id"]: answer["response"] for answer in LEARNER_SCRIPT["answers"]
+}
 QUESTION_ML = "interview.item.q-ml-001"
 QUESTION_ENG = "interview.item.q-eng-001"
 
@@ -118,6 +122,23 @@ def _seed_correct(
         history.apply_assessment(learner_id, session_id, item, result)
 
 
+class _EvalErrorScorer:
+    """AssessmentPort stub returning EVAL_ERROR (no hidden material involved)."""
+
+    def score(self, item, learner_id, response, *, result_id=None):  # noqa: ANN001
+        return AssessmentResult(
+            result_id=result_id or f"result.evalerror.{item.item_id}",
+            item_id=item.item_id,
+            learner_id=learner_id,
+            status="EVAL_ERROR",
+            score=None,
+            max_score=item.max_score,
+            scorer_id="test.eval.error",
+            failure_reason="EVAL_ERROR:TEST_STUB",
+            created_at="2026-11-20T00:00:00Z",
+        )
+
+
 def _make_interview_engine(
     tmp_path: Path,
     adapter: InterviewDomainAdapter,
@@ -130,33 +151,8 @@ def _make_interview_engine(
     now: str = "2026-10-15T00:00:00Z",
     knowledge_decisions=(),
     seed_correct: int = 0,
-    corrupt_spec: bool = False,
+    eval_error_scorer: bool = False,
 ):
-    if corrupt_spec:
-        fixtures_root = tmp_path / "fixtures" / "m1_teacher"
-        fixtures_root.mkdir(parents=True)
-        shutil.copytree(FIXTURES_ROOT / "vertical", fixtures_root / "vertical")
-        spec = (
-            fixtures_root
-            / "vertical"
-            / "interview"
-            / "rubrics"
-            / "scoring"
-            / f"{question_id.split('interview.item.')[1]}.json"
-        )
-        spec.write_text("{corrupt", encoding="utf-8")
-        local_adapter = InterviewDomainAdapter(fixtures_root)
-        local_graph = KnowledgeGraph(
-            local_adapter.knowledge_nodes(), local_adapter.prerequisite_edges()
-        )
-        local_freshness = KnowledgeFreshnessService(fixtures_root)
-        local_judge = InterviewRubricJudge(fixtures_root)
-        adapter, graph, freshness, judge = (
-            local_adapter,
-            local_graph,
-            local_freshness,
-            local_judge,
-        )
     repository = SqliteRepository(tmp_path / "vertical.sqlite")
     history = LearningHistory(repository)
     if seed_correct:
@@ -174,12 +170,13 @@ def _make_interview_engine(
         now=now,
         knowledge_decisions=knowledge_decisions,
     )
+    scorer = _EvalErrorScorer() if eval_error_scorer else InterviewJudgeScorer(judge)
     engine = TeachingSessionEngine(
         adapter,
         graph,
         repository,
         history=history,
-        scorer=InterviewJudgeScorer(judge),
+        scorer=scorer,
         vertical_policy=policy,
     )
     return engine, repository, history, policy
@@ -222,26 +219,13 @@ def _run_flow(
     return observations, final_state.phase
 
 
-_LEARNER_DATA_KEYS = frozenset({"canonical_response", "response"})
+def _event_blob(repository: SqliteRepository, learner_id: str) -> str:
+    """Full event stream JSON (P1-2: canonical_response is never stripped away)."""
 
-
-def _strip_learner_responses(value):
-    """Drop learner-owned response text so leak scans target teacher-visible data only."""
-
-    if isinstance(value, dict):
-        return {
-            key: _strip_learner_responses(item)
-            for key, item in value.items()
-            if key not in _LEARNER_DATA_KEYS
-        }
-    if isinstance(value, list):
-        return [_strip_learner_responses(item) for item in value]
-    return value
-
-
-def _teacher_visible_event_blob(repository: SqliteRepository, learner_id: str) -> str:
-    events = [event.to_dict() for event in repository.list_events(learner_id)]
-    return json.dumps(_strip_learner_responses(events), ensure_ascii=False)
+    return json.dumps(
+        [event.to_dict() for event in repository.list_events(learner_id)],
+        ensure_ascii=False,
+    )
 
 
 def _public_teacher_corpus(adapter: InterviewDomainAdapter) -> str:
@@ -289,7 +273,7 @@ def test_judge_scorer_adapter_matches_direct_judge(
 ) -> None:
     item = next(i for i in adapter.assessment_items() if i.item_id == QUESTION_ML)
     scorer = InterviewJudgeScorer(judge)
-    response = RESPONSES["a-correct-001"]
+    response = LEARNER_ANSWERS["learner-ml-overfit-v1"]
     result = scorer.score(item, "learner:adapter", response)
     direct = judge.assess(item, "learner:adapter", response, result_id=result.result_id)
     assert result.to_dict() == direct.to_dict()
@@ -297,6 +281,46 @@ def test_judge_scorer_adapter_matches_direct_judge(
     assert scorer.detail(result.result_id) is not None
     with pytest.raises(ValidationError):
         InterviewJudgeScorer("not-a-judge")  # type: ignore[arg-type]
+
+
+def test_runtime_calibration_markers_and_thresholds(
+    tmp_path: Path,
+    adapter: InterviewDomainAdapter,
+    graph: KnowledgeGraph,
+    freshness: KnowledgeFreshnessService,
+    judge: InterviewRubricJudge,
+) -> None:
+    """P2-3: UNCALIBRATED_HEURISTIC is a runtime marker, not only docs."""
+
+    learner_id = "learner:iv:calibration"
+    engine, repository, _history, _policy = _make_interview_engine(
+        tmp_path, adapter, graph, freshness, judge,
+        learner_id=learner_id, question_id=QUESTION_ML, seed_correct=3,
+    )
+    objective = _objective(adapter, "ml_fundamentals")
+    observations, _phase = _run_flow(
+        engine, repository, learner_id=learner_id, objective=objective,
+        session_id="iv:calibration",
+        responses={0: LEARNER_ANSWERS["learner-ml-overfit-v1"], 1: LEARNER_ANSWERS["learner-ml-overfit-v1"]},
+    )
+    events = [event.to_dict() for event in repository.list_events(learner_id)]
+    started = next(event for event in events if event["event_type"] == "SESSION_STARTED")
+    vertical = started["payload"]["vertical"]
+    assert vertical["calibration_status"] == "UNCALIBRATED_HEURISTIC"
+    assert vertical["thresholds"]["accelerated_mastery"] == ACCELERATED_MASTERY_THRESHOLD
+    assert vertical["plan"]["accelerated"] is True
+    plan_event = next(event for event in events if event["event_type"] == "PLAN_CREATED")
+    assert plan_event["payload"]["vertical"]["calibration_status"] == "UNCALIBRATED_HEURISTIC"
+    action = next(
+        action
+        for action in (
+            event.payload.get("action") for event in repository.list_events(learner_id)
+            if event.event_type == "ACTION_TAKEN"
+        )
+        if action is not None
+    )
+    assert "UNCALIBRATED_HEURISTIC" in (action.get("reason") or {}).get("detail", "")
+    assert observations  # the flow ran
 
 
 def test_engine_without_vertical_policy_keeps_classic_cf_paths(tmp_path: Path) -> None:
@@ -374,7 +398,7 @@ def test_interview_five_stage_sequence_and_replay(
         learner_id=learner_id, question_id=QUESTION_ML,
     )
     objective = _objective(adapter, "ml_fundamentals")
-    responses = {step: RESPONSES["a-correct-001"] for step in range(10)}
+    responses = {step: LEARNER_ANSWERS["learner-ml-overfit-v1"] for step in range(10)}
     observations, phase = _run_flow(
         engine, repository,
         learner_id=learner_id, objective=objective,
@@ -420,12 +444,9 @@ def test_requires_project_facts_triggers_ask_clarification_without_fabrication(
         learner_id=learner_id, question_id=QUESTION_ENG,
     )
     objective = _objective(adapter, "engineering_metrics")
-    response_with_facts = dict(RESPONSES["a-missingfacts-004"])
-    response_with_facts["project_facts"] = [
-        "合成项目：负责推荐延迟优化，P99 从 800ms 降到 200ms（合成数据，仅演示）"
-    ]
+    response_with_facts = LEARNER_ANSWERS["learner-eng-facts-v1"]
     responses = {
-        0: RESPONSES["a-missingfacts-004"],
+        0: LEARNER_ANSWERS["learner-eng-missing-facts-v1"],
         1: response_with_facts,
         **{step: response_with_facts for step in range(2, 12)},
     }
@@ -479,7 +500,7 @@ def test_learner_state_acceleration_skips_concept_probe(
     judge: InterviewRubricJudge,
 ) -> None:
     item = next(i for i in adapter.assessment_items() if i.item_id == QUESTION_ML)
-    responses = {step: RESPONSES["a-correct-001"] for step in range(10)}
+    responses = {step: LEARNER_ANSWERS["learner-ml-overfit-v1"] for step in range(10)}
 
     accelerated_root = tmp_path / "accelerated"
     accelerated_root.mkdir()
@@ -557,8 +578,8 @@ def test_interview_support_ladder_escalates_but_never_full(
         learner_id=learner_id, question_id=QUESTION_ML,
     )
     objective = _objective(adapter, "ml_fundamentals")
-    vague = RESPONSES["a-vague-002"]
-    responses = {0: vague, 1: vague, 2: vague, **{step: RESPONSES["a-correct-001"] for step in range(3, 12)}}
+    vague = LEARNER_ANSWERS["learner-ml-vague-v1"]
+    responses = {0: vague, 1: vague, 2: vague, **{step: LEARNER_ANSWERS["learner-ml-overfit-v1"] for step in range(3, 12)}}
     observations, _phase = _run_flow(
         engine, repository,
         learner_id=learner_id, objective=objective,
@@ -621,7 +642,7 @@ def test_rubric_audit_in_assessment_events_without_hidden_leak(
     objective = _objective(adapter, "ml_fundamentals")
     _run_flow(
         engine, repository, learner_id=learner_id, objective=objective,
-        session_id="iv:audit", responses={0: RESPONSES["a-correct-001"]}, max_steps=1,
+        session_id="iv:audit", responses={0: LEARNER_ANSWERS["learner-ml-overfit-v1"]}, max_steps=1,
     )
     events = [event.to_dict() for event in repository.list_events(learner_id)]
     assessed = [event for event in events if event["event_type"] == "ASSESSED"]
@@ -639,24 +660,27 @@ def test_rubric_audit_in_assessment_events_without_hidden_leak(
     mastery_event = next(event for event in events if event["event_type"] == "MASTERY_UPDATED")
     assert mastery_event["payload"]["rubric_audit"]["spec_digest"] == audit["spec_digest"]
 
-    spec = json.loads((SCORING_DIR / "q-ml-001.json").read_text(encoding="utf-8"))
-    blob = _teacher_visible_event_blob(repository, learner_id).lower()
-    scrubbed = re.sub(r"[0-9a-f]{16,}", "", blob)
-    for dimension, groups in spec["expectations"].items():
-        for group in groups:
-            assert json.dumps(group, ensure_ascii=False).lower() not in scrubbed, (
-                f"hidden {dimension} expectation group leaked"
-            )
-    for hidden_key in ("clarity_connectors", "vague_words", "infeasible_markers",
-                       "unsourced_claim_patterns", "misconception_penalty"):
-        assert hidden_key not in blob, f"hidden spec field leaked: {hidden_key!r}"
-    for answer in REFERENCE_ANSWERS:
-        if answer["question_id"] == "q-ml-001":
-            assert answer["response"]["text"] not in _teacher_visible_event_blob(
-                repository, learner_id
-            )
-    assert "rubrics/" not in blob
+    blob = _event_blob(repository, learner_id).lower()
+    # P1-2: full event stream (canonical_response included) scanned for hidden
+    # paths/fields; the learner input source is asserted against the script.
+    assert guard_support.HIDDEN_PATH_MARKER not in blob
+    assert "/rubrics" not in blob
     assert "reference_answers" not in blob
+    for hidden_key in ("expectations", "misconception_penalty", "partial_min", "weights",
+                       "clarity_connectors", "vague_words", "infeasible_markers",
+                       "unsourced_claim_patterns"):
+        assert hidden_key not in blob, f"hidden spec field leaked: {hidden_key!r}"
+    expected_canonicals = {
+        canonical_response(answer) for answer in LEARNER_ANSWERS.values()
+    }
+    prepared = [
+        event
+        for event in repository.list_events(learner_id)
+        if event.event_type == "ASSESSMENT_PREPARED"
+    ]
+    assert prepared
+    for event in prepared:
+        assert event.payload["canonical_response"] in expected_canonicals
 
 
 # ---------------------------------------------------------------------------
@@ -680,7 +704,7 @@ def test_needs_review_keeps_mastery_unchanged(
     engine.start_session(learner_id, _goal(learner_id, objective), objective, session_id="iv:nr")
     engine.current_action("iv:nr")
     before = repository.get_snapshot(learner_id)
-    result = engine.submit_response("iv:nr", QUESTION_ENG, RESPONSES["a-missingfacts-004"])
+    result = engine.submit_response("iv:nr", QUESTION_ENG, LEARNER_ANSWERS["learner-eng-missing-facts-v1"])
     after = repository.get_snapshot(learner_id)
     assert result.status == "NEEDS_REVIEW"
     assert (before is None and after is None) or before.to_dict() == after.to_dict()
@@ -700,7 +724,7 @@ def test_eval_error_does_not_update_mastery(
     learner_id = "learner:iv:evalerror"
     engine, repository, _history, _policy = _make_interview_engine(
         tmp_path, adapter, graph, freshness, judge,
-        learner_id=learner_id, question_id=QUESTION_ML, corrupt_spec=True,
+        learner_id=learner_id, question_id=QUESTION_ML, eval_error_scorer=True,
     )
     objective = _objective(adapter, "ml_fundamentals")
     engine.start_session(learner_id, _goal(learner_id, objective), objective, session_id="iv:ee")
@@ -868,4 +892,3 @@ def test_vertical_module_is_offline_and_has_no_learner_writer(tmp_path: Path) ->
     assert imported.isdisjoint(forbidden)
     for forbidden_member in ("upsert_snapshot", "apply_assessment", "save_session", "append_event"):
         assert forbidden_member not in source
-    assert "rubrics/" not in source

@@ -22,7 +22,11 @@ Semantics
 * **Idempotent assessment application.**  ``apply_assessment`` derives
   deterministic event ids from ``result.result_id``
   (``evt.assessed.<result_id>`` / ``evt.mastery.<result_id>``).  Re-applying the
-  same result returns the current state without touching mastery again.
+  same result for the **same learner/session/item** returns the current state
+  without touching mastery again.  Duplicate detection is learner-scoped
+  (B-PR3 review P1-2): another learner/session reusing the same token raises
+  ``IDEMPOTENCY_CONFLICT`` instead of silently dropping the new assessment or
+  reading the other scope's evidence.
 * **Atomic state + history.**  When the assessment actually changes the
   snapshot, the history layer prefers the repository's additive
   ``append_events_and_upsert_snapshot(events, snapshot)`` extension, which
@@ -66,7 +70,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
-from ..contracts.errors import ConflictError, ValidationError
+from ..contracts.errors import IDEMPOTENCY_CONFLICT, ConflictError, ValidationError
 from ..contracts.repository import LearnerRepository
 from ..contracts.types import (
     HISTORY_EVENT_TYPE_VALUES,
@@ -76,7 +80,13 @@ from ..contracts.types import (
     LearnerSnapshot,
     now_utc,
 )
-from ..idempotency import ResultScope
+from ..idempotency import (
+    CONFLICT_REASON_ITEM,
+    CONFLICT_REASON_RESULT_ID_SCOPE,
+    CONFLICT_REASON_TURN_ALREADY_ASSESSED,
+    IDEMPOTENCY_POLICY_VERSION,
+    ResultScope,
+)
 from .model import MasteryModel, applied_result_ids
 
 __all__ = [
@@ -460,7 +470,9 @@ class LearningHistory:
             persisted = self._repository.get_snapshot(learner_id)
             base = persisted if persisted is not None else self._model.initial_snapshot(learner_id)
 
-        existing = self._repository.get_event(assessed_event_id(result.result_id))
+        existing = self._find_existing_assessment(
+            learner_id, session_id, item, result, assessed_event_id(result.result_id)
+        )
         if existing is not None:
             current = self._repository.get_snapshot(learner_id)
             if current is not None:
@@ -509,6 +521,142 @@ class LearningHistory:
             for event in events:
                 self._repository.append_event(event)
         return base
+
+    # -- scoped duplicate detection (B-PR3 review P1-2) ---------------------
+
+    def _scope_owner_conflict(
+        self,
+        learner_id: str,
+        session_id: str,
+        item: AssessmentItem,
+        result: AssessmentResult,
+        reason: str,
+        detail: str,
+    ) -> None:
+        # details carry only the *requesting* scope + reason/policy version; the
+        # event owner's learner/session is never echoed.
+        raise ConflictError(
+            f"LearningHistory.apply_assessment(): {detail}",
+            code=IDEMPOTENCY_CONFLICT,
+            details={
+                "reason": reason,
+                "requested_scope": {
+                    "learner_id": learner_id,
+                    "session_id": session_id,
+                    "item_id": item.item_id,
+                    "result_id": result.result_id,
+                },
+                "policy_version": IDEMPOTENCY_POLICY_VERSION,
+            },
+        )
+
+    def _find_existing_assessment(
+        self,
+        learner_id: str,
+        session_id: str,
+        item: AssessmentItem,
+        result: AssessmentResult,
+        event_id: str,
+    ) -> HistoryEvent | None:
+        """Learner/session-scoped duplicate lookup for one assessment token.
+
+        * same learner+session -> return the existing event (idempotent replay);
+        * learner-filtered event exists in another session -> stable conflict;
+        * the scoped index says the token belongs to another learner/session/item
+          -> stable conflict (never silently drop or return a foreign result);
+        * repository without the scoped extension -> documented legacy fallback
+          (global event existence, but a different owner still conflicts).
+        """
+
+        get_for_learner = getattr(self._repository, "get_event_for_learner", None)
+        owner_of = getattr(self._repository, "find_scope_owner", None)
+        if callable(get_for_learner):
+            existing = get_for_learner(learner_id, event_id)
+            if existing is not None:
+                if existing.session_id != session_id:
+                    self._scope_owner_conflict(
+                        learner_id,
+                        session_id,
+                        item,
+                        result,
+                        CONFLICT_REASON_RESULT_ID_SCOPE,
+                        "result_id is already recorded for this learner in another "
+                        "session; refusing to silently reuse or drop it",
+                    )
+                if existing.payload.get("item_id") != item.item_id:
+                    self._scope_owner_conflict(
+                        learner_id,
+                        session_id,
+                        item,
+                        result,
+                        CONFLICT_REASON_ITEM,
+                        "result_id is already recorded for another item",
+                    )
+                return existing
+            if callable(owner_of):
+                owner = owner_of(result.result_id)
+                if owner is not None:
+                    if (
+                        owner.learner_id != learner_id
+                        or owner.session_id != session_id
+                    ):
+                        self._scope_owner_conflict(
+                            learner_id,
+                            session_id,
+                            item,
+                            result,
+                            CONFLICT_REASON_RESULT_ID_SCOPE,
+                            "result_id is bound to another learner/session; refusing "
+                            "to silently reuse or drop this assessment",
+                        )
+                    if owner.item_id != item.item_id:
+                        self._scope_owner_conflict(
+                            learner_id,
+                            session_id,
+                            item,
+                            result,
+                            CONFLICT_REASON_ITEM,
+                            "result_id is bound to another item in this session",
+                        )
+                    if owner.status == "PREPARED":
+                        self._scope_owner_conflict(
+                            learner_id,
+                            session_id,
+                            item,
+                            result,
+                            CONFLICT_REASON_TURN_ALREADY_ASSESSED,
+                            "result_id belongs to an engine-managed PREPARED attempt; "
+                            "use TeachingSessionEngine.submit_response/recover_session",
+                        )
+                    if owner.result_event_id is not None:
+                        owner_event = get_for_learner(
+                            learner_id, owner.result_event_id
+                        )
+                        if owner_event is None:  # pragma: no cover - corrupted index
+                            raise ValidationError(
+                                f"stored scope row for result_id {result.result_id!r} "
+                                "references a missing event"
+                            )
+                        return owner_event
+                return None
+
+        # Protocol-only legacy repository: no scoped API available.  Keep the
+        # historical existence check but never return/drop silently when the
+        # event belongs to another learner.
+        existing = self._repository.get_event(event_id)
+        if existing is None:
+            return None
+        if existing.learner_id != learner_id:
+            self._scope_owner_conflict(
+                learner_id,
+                session_id,
+                item,
+                result,
+                CONFLICT_REASON_RESULT_ID_SCOPE,
+                "result_id is already recorded for another learner; refusing to "
+                "reuse it",
+            )
+        return existing
 
     # -- rebuild / verification ----------------------------------------------
 

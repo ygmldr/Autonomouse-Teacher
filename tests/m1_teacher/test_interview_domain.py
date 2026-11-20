@@ -122,8 +122,9 @@ def test_adapter_implements_frozen_domain_protocol(adapter: InterviewDomainAdapt
         assert item.node_ids and set(item.node_ids) <= node_ids
         assert 1 <= item.difficulty <= 5
         assert item.prompt.strip()
-        assert item.scoring_spec_ref.startswith("scoring/")
+        assert item.scoring_spec_ref.startswith("rubric/")
         assert item.scoring_spec_ref.endswith(".json")
+        assert "scoring/" not in item.scoring_spec_ref
         assert ".." not in item.scoring_spec_ref
 
 

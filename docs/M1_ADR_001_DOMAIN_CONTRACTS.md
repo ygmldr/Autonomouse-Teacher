@@ -279,6 +279,7 @@ payloads remain valid and no frozen member is renamed/removed.
 |---|---|---|---|
 | 2026-11-20 | B-PR2 | `HISTORY_EVENT_TYPE` += `ASSESSMENT_PREPARED` | Additive enum value; older payloads unaffected |
 | 2026-11-20 | B-PR4 | `TEACHING_ACTION_KIND` += `SOCRATIC_QUESTION`, `ASK_CLARIFICATION` | Additive enum values used only by the vertical interview policy; CF/A paths never emit them |
+| 2026-11-20 | B-PR4 P1-3 | `HISTORY_EVENT_TYPE` += `TURN_ADVANCED` | Additive value: content-action acknowledgement marker with a `next_state` payload, required only for exact event-sourced session replay; existing event streams remain readable/valid |
 
 B-PR4 note: the two new action kinds are teacher-visible but answer-free
 (no `answer`/`expected`/`correct`/`solution` fields) and remain subject to the

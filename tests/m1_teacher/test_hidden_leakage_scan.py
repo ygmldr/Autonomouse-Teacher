@@ -22,6 +22,7 @@ tests compare them by equality and never print them.
 from __future__ import annotations
 
 import dataclasses
+import hashlib
 import json
 import os
 import subprocess
@@ -33,6 +34,7 @@ from typing import Any
 import pytest
 
 from m1_teacher import demo
+
 from m1_teacher.assessment.scorer import DeterministicScorer
 from m1_teacher.assessment.judge.supervisor import (
     STATUS_PASS,
@@ -41,6 +43,8 @@ from m1_teacher.assessment.judge.supervisor import (
 from m1_teacher.contracts.types import AssessmentItem, LearnerGoal, LearningObjective
 from m1_teacher.learner.history import LearningHistory
 from m1_teacher.learner.repository import SqliteRepository
+
+from judge_os_gate import require_os_sandbox
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 FIXTURES = REPO_ROOT / "fixtures" / "m1_teacher"
@@ -357,17 +361,21 @@ def _real_worker():
 REAL_WORKER = _real_worker()
 
 
-@pytest.mark.skipif(
-    REAL_WORKER is None,
-    reason="OS sandbox (bwrap) unavailable; blocked-policy leakage is covered elsewhere",
-)
+@pytest.fixture(scope="module")
+def attack_worker():
+    require_os_sandbox(REAL_WORKER is not None)
+    return REAL_WORKER
+
+
 @pytest.mark.parametrize(
     "template", ATTACK_TEMPLATES, ids=[item["attack_id"] for item in ATTACK_TEMPLATES]
 )
-def test_attack_templates_never_pass_and_never_leak(template: dict[str, Any]) -> None:
+def test_attack_templates_never_pass_and_never_leak(
+    template: dict[str, Any], attack_worker
+) -> None:
     timeout = 0.5 if template["attack_family"] in {"infinite_loop", "fork_subprocess"} else 1.5
     supervisor = TrustedJudgeSupervisor(
-        REAL_WORKER, trusted_fixture_only=True, timeout_s=timeout
+        attack_worker, trusted_fixture_only=True, timeout_s=timeout
     )
     verdict = supervisor.evaluate(
         template["code"],
@@ -414,3 +422,37 @@ def test_cli_demo_json_export_contains_no_hidden_material(tmp_path: Path) -> Non
     )
     assert text_run.returncode == 0, text_run.stderr
     _assert_no_sentinels(text_run.stdout, surface="demo stdout")
+
+
+# ---------------------------------------------------------------------------
+# Review P2-12: fingerprint scan for *all* certification expected values
+# ---------------------------------------------------------------------------
+def _canonical_expected(value: Any) -> str:
+    return json.dumps(
+        value,
+        ensure_ascii=False,
+        sort_keys=True,
+        allow_nan=False,
+        separators=(",", ":"),
+    )
+
+
+def test_certification_expected_fingerprints_do_not_appear_in_teacher_exports() -> None:
+    completed = subprocess.run(
+        [sys.executable, "-m", "m1_teacher.cli", "--demo", "--json"],
+        cwd=str(REPO_ROOT),
+        capture_output=True,
+        text=True,
+        timeout=300,
+        env={**os.environ, "PYTHONHASHSEED": "0"},
+    )
+    assert completed.returncode == 0, completed.stderr
+    payload = completed.stdout
+    expected_fingerprints = {
+        hashlib.sha256(_canonical_expected(test["expected"]).encode("utf-8")).hexdigest()
+        for case in CASES
+        for test in case["tests"]
+    }
+    assert expected_fingerprints, "certification corpus has no expected values"
+    for fingerprint in expected_fingerprints:
+        assert fingerprint not in payload, "hidden expected fingerprint leaked into CLI export"

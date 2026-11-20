@@ -23,6 +23,8 @@ from pathlib import Path
 
 import pytest
 
+import guard_support
+
 from m1_teacher.assessment import AssessmentScorer, DeterministicScorer, SCORER_ID_DEFAULT
 from m1_teacher.contracts.errors import ValidationError
 from m1_teacher.contracts.types import AssessmentItem
@@ -494,16 +496,12 @@ _HIDDEN_SCORING_READERS = frozenset({"scorer.py", "interview_judge.py"})
 
 
 def test_only_scorer_module_references_hidden_scoring_path() -> None:
-    package = REPO_ROOT / "m1_teacher"
-    offenders: list[str] = []
-    for path in sorted(package.rglob("*.py")):
-        if "__pycache__" in path.parts:
-            continue
-        text = path.read_text(encoding="utf-8")
-        # B-PR4 adds a second independent scorer-side module (interview judge);
-        # the hidden-material reader allow-list stays explicit and closed.
-        if "scoring/" in text and path.name not in _HIDDEN_SCORING_READERS:
-            offenders.append(str(path.relative_to(REPO_ROOT)))
+    # B-PR4 P1-2: path-component/AST based, so fragmented path construction
+    # cannot evade the guard; the reader allow-list stays explicit and closed.
+    assert _HIDDEN_SCORING_READERS == guard_support.DEFAULT_HIDDEN_READERS
+    offenders = guard_support.scan_hidden_reader_allowlist(
+        REPO_ROOT / "m1_teacher", allowlist=_HIDDEN_SCORING_READERS
+    )
     assert not offenders, f"modules reference the hidden scoring path: {offenders}"
 
 

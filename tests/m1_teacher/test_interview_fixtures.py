@@ -125,7 +125,8 @@ def test_teacher_visible_questions_doc_shape(questions_doc: dict) -> None:
         assert 1 <= question["difficulty"] <= 5
         assert question["prompt"].strip()
         assert set(question["node_ids"]) <= node_ids
-        assert question["scoring_spec_ref"] == f"scoring/{question['question_id']}.json"
+        assert question["scoring_spec_ref"] == f"rubric/{question['question_id']}.json"
+        assert "scoring/" not in question["scoring_spec_ref"]
         assert isinstance(question["requires_project_facts"], bool)
         ladder = question["follow_up_ladder"]
         assert [probe["stage"] for probe in ladder] == list(STAGES)
