@@ -81,7 +81,7 @@ CROSS_DOMAIN_LEARNER = "b5.cross_domain.learner"
 INTERVIEW_LEARNER_A = "b5.interview.learner_a"
 INTERVIEW_LEARNER_B = "b5.interview.learner_b"
 
-QUESTION_REC = "interview.item.q-rec-001"
+QUESTION_ML = "interview.item.q-ml-001"
 QUESTION_ENG = "interview.item.q-eng-001"
 JD_ID = "jd:rec"
 JD_NOW_V1 = "2026-07-01T00:00:00Z"
@@ -369,11 +369,13 @@ def default_fixtures_root() -> Path:
     return Path(__file__).resolve().parents[1] / "fixtures" / "m1_teacher"
 
 
-def _reference_responses(fixtures_root: Path) -> dict[str, dict]:
-    path = (
-        fixtures_root / "vertical" / "interview" / "rubrics" / "scoring" / "reference_answers.json"
-    )
+def _learner_script_responses(fixtures_root: Path) -> dict[str, dict]:
+    """Load the teacher-visible synthetic learner script (never hidden scoring)."""
+
+    path = fixtures_root / "vertical" / "interview" / "learner_scripts" / "answers.json"
     payload = json.loads(path.read_text(encoding="utf-8"))
+    if payload.get("hidden") is not False or payload.get("synthetic") is not True:
+        raise ValueError("expected a teacher-visible synthetic learner script fixture")
     return {answer["answer_id"]: answer["response"] for answer in payload["answers"]}
 
 
@@ -683,15 +685,9 @@ def _run_cf_section(db_path: Path, fixtures_root: Path, max_turns: int, pause_af
 
 def _run_interview_section(repository, fixtures_root: Path):
     adapter, graph, freshness, judge = _interview_setup(fixtures_root)
-    responses = _reference_responses(fixtures_root)
-    facts_answer = dict(responses["a-missingfacts-004"])
-    facts_answer["project_facts"] = [
-        "合成项目：负责推荐延迟优化，P99 从 800ms 降到 200ms（合成数据，仅演示）"
-    ]
-    vague_with_facts = {
-        "text": "大概加一些缓存、优化一下特征，可能就快了。",
-        "project_facts": facts_answer["project_facts"],
-    }
+    responses = _learner_script_responses(fixtures_root)
+    facts_answer = dict(responses["learner-eng-facts-v1"])
+    vague_with_facts = dict(responses["learner-eng-vague-with-facts-v1"])
 
     learner_a_v1 = _run_interview_flow(
         repository=repository,
@@ -700,10 +696,10 @@ def _run_interview_section(repository, fixtures_root: Path):
         freshness=freshness,
         judge=judge,
         learner_id=INTERVIEW_LEARNER_A,
-        question_id=QUESTION_REC,
+        question_id=QUESTION_ML,
         session_id="b5.interview.a.jd_v1",
         now=JD_NOW_V1,
-        responses=[responses["a-unsourced-007"]] * 8,
+        responses=[responses["learner-ml-overfit-v1"]] * 8,
         seed_correct=3,
         goal_suffix=":jd_v1",
     )
@@ -716,10 +712,10 @@ def _run_interview_section(repository, fixtures_root: Path):
         freshness=freshness,
         judge=judge,
         learner_id=INTERVIEW_LEARNER_A,
-        question_id=QUESTION_REC,
+        question_id=QUESTION_ML,
         session_id="b5.interview.a.jd_v2",
         now=JD_NOW_V2,
-        responses=[responses["a-unsourced-007"]] * 2,
+        responses=[responses["learner-ml-vague-v1"]] * 2,
         goal_suffix=":jd_v2",
     )
     new_session = _session_fingerprint(repository, "b5.interview.a.jd_v2")
@@ -734,7 +730,7 @@ def _run_interview_section(repository, fixtures_root: Path):
         session_id="b5.interview.b.jd_v2",
         now=JD_NOW_V2,
         responses=[
-            responses["a-missingfacts-004"],
+            responses["learner-eng-missing-facts-v1"],
             vague_with_facts,
             facts_answer,
             facts_answer,
@@ -822,11 +818,9 @@ def _run_cross_domain_section(
     paused = engine.pause_session(cf_state.session_id)
 
     adapter, graph, freshness, judge = _interview_setup(fixtures_root)
-    responses = _reference_responses(fixtures_root)
-    facts_answer = dict(responses["a-missingfacts-004"])
-    facts_answer["project_facts"] = [
-        "合成项目：负责推荐延迟优化，P99 从 800ms 降到 200ms（合成数据，仅演示）"
-    ]
+    responses = _learner_script_responses(fixtures_root)
+    facts_answer = dict(responses["learner-eng-facts-v1"])
+    vague_with_facts = dict(responses["learner-eng-vague-with-facts-v1"])
     interview = _run_interview_flow(
         repository=repository,
         adapter=adapter,
@@ -838,8 +832,8 @@ def _run_cross_domain_section(
         session_id="b5.cross.interview.session",
         now=JD_NOW_V2,
         responses=[
-            responses["a-missingfacts-004"],
-            {**facts_answer, "text": "大概加一些缓存、优化一下特征，可能就快了。"},
+            responses["learner-eng-missing-facts-v1"],
+            vague_with_facts,
             facts_answer,
         ],
         stop_after=3,
