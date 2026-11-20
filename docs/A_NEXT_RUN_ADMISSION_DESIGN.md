@@ -832,3 +832,19 @@ grep -n "def consume(self, authorization" src/autoteacher_m0/security/egress.py
 ---
 
 **本文件结束。状态：`DESIGN_ONLY`；未实现、未运行新增测试、未改变任何安全状态常量；等待 Independent Reviewer 的“无安全降级”判定。**
+
+## 附录 C — Errata / 行号基准（A2 实现后追加）
+
+- **行号基准**：附录 A/B 中所有源码行号以**设计基线 `fd1d3a6`**（本 ADR 提交时的 worktree HEAD）为准。
+  实现提交 `1f25552` 在 `bridge/controller.py` 插入 run admission 代码块后，`_handle_payload_serial`
+  之后的行号（含原 `dispatch_gate.consume` 消费点、`controller.main`、`TrustedController(...)` 构造）
+  相应后移若干行的偏移是预期的、仅行号偏移、不是语义变化。以后引用请以**符号/函数名 + `git show
+  fd1d3a6:<path>`** 为准，或以当前实现文件重新 `grep -n`。
+- **历史字符串更正**：附录 A 中 `scripts/g4/build_packet.py:311` 的
+  `"authorization.py:816 consume_execution_authorization"` 是**冻结的历史 build_packet 字符串**
+  （旧行号），不是当前源码行号证据；当前定义仍在 `security/authorization.py:988`
+  （设计基线 `fd1d3a6` 与实现提交 `1f25552` 均未改该文件）。
+- **设计门后已核对/修正的引用**（本 ADR 的 `960724b` 版本）：`AuthorizationUse` 793→795、
+  `Admission` 46→47、`controller.main` 2237→2235；其余附录 B 行号已按 `fd1d3a6` 逐行核对。
+- **实现阶段新增引用**：`bridge/run_admission.py` 为实现新增文件（无基线行号）；Controller 最小接线
+  的语义证据见 `docs/A_NEXT_AUTH_RUN_ADMISSION.md` 的 C2–C8 映射章节。
