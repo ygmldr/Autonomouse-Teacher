@@ -360,16 +360,23 @@ def audit_run(root: Path, *, matrix: dict | None = None,
         results["R6-13"]["checks_failed"] = [check["id"] for check in failed]
         results["R6-13"]["status"] = "PASS" if not failed else "PARTIAL"
         results["R6-13"]["observed"] = {"audited_cases": len(others)}
+    counts = {
+        "pass": sum(1 for row in results.values() if row["status"] == "PASS"),
+        "partial": sum(1 for row in results.values() if row["status"] == "PARTIAL"),
+        "not_run": sum(1 for row in results.values() if row["status"] == "NOT_RUN"),
+        "total": len(results),
+    }
+    failed = {case_id: row["status"] for case_id, row in results.items()
+              if row["status"] != "PASS"}
     return {
         "schema": "m0.a_next.rrev6.audit.v1",
         "root": str(root),
+        "ok": bool(results) and not failed,
+        "failure_reasons": ([{"id": "audit_non_pass_cases", "cases": failed}]
+                            if failed else []) + (
+            [] if results else [{"id": "audit_empty"}]),
         "cases": results,
-        "counts": {
-            "pass": sum(1 for row in results.values() if row["status"] == "PASS"),
-            "partial": sum(1 for row in results.values() if row["status"] == "PARTIAL"),
-            "not_run": sum(1 for row in results.values() if row["status"] == "NOT_RUN"),
-            "total": len(results),
-        },
+        "counts": counts,
     }
 
 
@@ -386,9 +393,11 @@ def main(argv: list[str] | None = None) -> int:
                       matrix_spec=Path(__file__).resolve().parent / "case_matrix.json")
     target = Path(args.out) if args.out else root / "audit.json"
     target.write_text(json.dumps(audit, indent=2, sort_keys=True) + "\n")
-    print(json.dumps({"counts": audit["counts"], "out": str(target)},
-                     sort_keys=True))
-    return 0
+    print(json.dumps({"ok": audit.get("ok"),
+                      "counts": audit["counts"],
+                      "failure_reasons": audit.get("failure_reasons"),
+                      "out": str(target)}, sort_keys=True))
+    return 0 if audit.get("ok") else 1
 
 
 if __name__ == "__main__":
