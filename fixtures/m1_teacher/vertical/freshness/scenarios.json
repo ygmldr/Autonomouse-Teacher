@@ -1,0 +1,184 @@
+{
+  "schema_version": "m1a.v0",
+  "domain_id": "interview_coach",
+  "domain_version": "0.1.0",
+  "provenance": {
+    "source": "m1_offline fixtures/m1/interview/knowledge + jds (work/m1-offline-design=290c577)",
+    "license": "CC0-1.0",
+    "synthetic": true,
+    "converted_at": "2026-11-20T00:00:00Z",
+    "note": "static timestamped freshness scenarios; gate mechanics only, no live refresh"
+  },
+  "knowledge_scenarios": [
+    {
+      "scenario_id": "k-keep-001",
+      "old_version_id": "doc:pb-001::2026-06-01T09:00:00Z",
+      "new_version_id": "doc:pb-001::2026-11-01T09:00:00Z",
+      "expected_change_kind": "KEEP",
+      "expected_reason_code": "KEEP_CONTENT_UNCHANGED",
+      "expected_map_code": null,
+      "expected_curriculum_eligible": false,
+      "expected_recheck_required": false
+    },
+    {
+      "scenario_id": "k-keep-002",
+      "old_version_id": "doc:tower-001::2026-06-01T09:00:00Z",
+      "new_version_id": "mirror:tower-001::2026-11-03T09:00:00Z",
+      "expected_change_kind": "KEEP",
+      "expected_reason_code": "KEEP_CONTENT_UNCHANGED",
+      "expected_map_code": null,
+      "expected_curriculum_eligible": false,
+      "expected_recheck_required": false
+    },
+    {
+      "scenario_id": "k-recheck-community-001",
+      "old_version_id": "doc:cold-001::2026-07-05T09:00:00Z",
+      "new_version_id": "community:cold-007::2026-11-09T09:00:00Z",
+      "expected_change_kind": "RECHECK",
+      "expected_reason_code": "RECHECK_UNAUTHORITATIVE_SOURCE",
+      "expected_map_code": "MAP-E09_KNOWLEDGE_CONFLICT_BLOCKED",
+      "expected_curriculum_eligible": false,
+      "expected_recheck_required": true
+    },
+    {
+      "scenario_id": "k-recheck-conflict-001",
+      "old_version_id": "doc:auc-002::2026-06-10T09:00:00Z",
+      "new_version_id": "community:post-009::2026-11-08T09:00:00Z",
+      "expected_change_kind": "RECHECK",
+      "expected_reason_code": "RECHECK_CONFLICT",
+      "expected_map_code": "MAP-E09_KNOWLEDGE_CONFLICT_BLOCKED",
+      "expected_curriculum_eligible": false,
+      "expected_recheck_required": true
+    },
+    {
+      "scenario_id": "k-recheck-expired-001",
+      "old_version_id": "doc:cal-001::2025-09-10T09:00:00Z",
+      "new_version_id": "doc:cal-001::2026-11-10T09:00:00Z",
+      "expected_change_kind": "RECHECK",
+      "expected_reason_code": "RECHECK_EXPIRED",
+      "expected_map_code": "MAP-E08_KNOWLEDGE_RECHECK_BLOCKED",
+      "expected_curriculum_eligible": false,
+      "expected_recheck_required": true
+    },
+    {
+      "scenario_id": "k-recheck-futuredate-001",
+      "old_version_id": "doc:leak-001::2026-07-10T09:00:00Z",
+      "new_version_id": "doc:leak-001::2026-11-05T09:00:00Z",
+      "expected_change_kind": "RECHECK",
+      "expected_reason_code": "RECHECK_FUTURE_DATED",
+      "expected_map_code": "MAP-E08_KNOWLEDGE_RECHECK_BLOCKED",
+      "expected_curriculum_eligible": false,
+      "expected_recheck_required": true
+    },
+    {
+      "scenario_id": "k-recheck-older-001",
+      "old_version_id": "doc:mtl-001::2026-08-10T09:00:00Z",
+      "new_version_id": "mirror:mtl-001::2026-11-06T09:00:00Z",
+      "expected_change_kind": "RECHECK",
+      "expected_reason_code": "RECHECK_OLDER_SOURCE",
+      "expected_map_code": "MAP-E08_KNOWLEDGE_RECHECK_BLOCKED",
+      "expected_curriculum_eligible": false,
+      "expected_recheck_required": true
+    },
+    {
+      "scenario_id": "k-update-001",
+      "old_version_id": "doc:auc-001::2026-05-02T09:00:00Z",
+      "new_version_id": "doc:auc-001::2026-11-02T09:00:00Z",
+      "expected_change_kind": "UPDATE",
+      "expected_reason_code": "UPDATE_VERIFIED_AUTHORITATIVE",
+      "expected_map_code": null,
+      "expected_curriculum_eligible": true,
+      "expected_recheck_required": false
+    },
+    {
+      "scenario_id": "k-update-002",
+      "old_version_id": "paper:ns-001::2025-11-20T08:00:00Z",
+      "new_version_id": "paper:ns-001::2026-11-05T08:00:00Z",
+      "expected_change_kind": "UPDATE",
+      "expected_reason_code": "UPDATE_VERIFIED_AUTHORITATIVE",
+      "expected_map_code": null,
+      "expected_curriculum_eligible": true,
+      "expected_recheck_required": false
+    }
+  ],
+  "jd_scenarios": [
+    {
+      "scenario_id": "jd-rec-v1-active",
+      "jd_id": "jd:rec",
+      "now": "2026-07-01T00:00:00Z",
+      "expected_active_version": "v1",
+      "expected_allowed_for_new_plan": true,
+      "expected_reason_code": "JD_ACTIVE",
+      "expected_map_code": null
+    },
+    {
+      "scenario_id": "jd-rec-v2-transition",
+      "jd_id": "jd:rec",
+      "now": "2026-10-15T00:00:00Z",
+      "expected_active_version": "v2",
+      "expected_allowed_for_new_plan": true,
+      "expected_reason_code": "JD_ACTIVE",
+      "expected_map_code": null
+    },
+    {
+      "scenario_id": "jd-rec-expired",
+      "jd_id": "jd:rec",
+      "now": "2027-05-01T00:00:00Z",
+      "expected_active_version": null,
+      "expected_allowed_for_new_plan": false,
+      "expected_reason_code": "RECHECK_JD_EXPIRED",
+      "expected_map_code": "MAP-E10_JD_EXPIRED_OR_CONFLICT"
+    },
+    {
+      "scenario_id": "jd-rec-not-yet-active",
+      "jd_id": "jd:rec",
+      "now": "2026-05-01T00:00:00Z",
+      "expected_active_version": null,
+      "expected_allowed_for_new_plan": false,
+      "expected_reason_code": "RECHECK_JD_NOT_YET_ACTIVE",
+      "expected_map_code": "MAP-E10_JD_EXPIRED_OR_CONFLICT"
+    },
+    {
+      "scenario_id": "jd-ml-v1-active",
+      "jd_id": "jd:ml",
+      "now": "2026-07-01T00:00:00Z",
+      "expected_active_version": "v1",
+      "expected_allowed_for_new_plan": true,
+      "expected_reason_code": "JD_ACTIVE",
+      "expected_map_code": null
+    },
+    {
+      "scenario_id": "jd-sys-v2-active",
+      "jd_id": "jd:sys",
+      "now": "2026-11-01T00:00:00Z",
+      "expected_active_version": "v2",
+      "expected_allowed_for_new_plan": true,
+      "expected_reason_code": "JD_ACTIVE",
+      "expected_map_code": null
+    },
+    {
+      "scenario_id": "jd-overlap-conflict",
+      "jd_id": "jd:demo-overlap",
+      "now": "2026-10-01T00:00:00Z",
+      "expected_active_version": null,
+      "expected_allowed_for_new_plan": false,
+      "expected_reason_code": "RECHECK_JD_CONFLICT",
+      "expected_map_code": "MAP-E10_JD_EXPIRED_OR_CONFLICT"
+    }
+  ],
+  "jd_change_scenarios": [
+    {
+      "scenario_id": "jd-rec-v1-to-v2",
+      "jd_id": "jd:rec",
+      "old_version": "v1",
+      "new_version": "v2",
+      "expected_affects_running_sessions": false,
+      "expected_affects_new_plans": true,
+      "expected_reason_code": "JD_CHANGE_NEW_PLANS_ONLY",
+      "expected_delta_added_requirements": [
+        "具备 LLM 排序探索经验者优先",
+        "掌握向量召回与 ANN 检索"
+      ]
+    }
+  ]
+}

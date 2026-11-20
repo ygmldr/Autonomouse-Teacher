@@ -483,6 +483,9 @@ def test_default_result_id_is_deterministic_and_item_scoped(
 # ---------------------------------------------------------------------------
 # Static isolation: only the scorer module may reference the hidden path
 # ---------------------------------------------------------------------------
+_HIDDEN_SCORING_READERS = frozenset({"scorer.py", "interview_judge.py"})
+
+
 def test_only_scorer_module_references_hidden_scoring_path() -> None:
     package = REPO_ROOT / "m1_teacher"
     offenders: list[str] = []
@@ -490,7 +493,9 @@ def test_only_scorer_module_references_hidden_scoring_path() -> None:
         if "__pycache__" in path.parts:
             continue
         text = path.read_text(encoding="utf-8")
-        if "scoring/" in text and path.name != "scorer.py":
+        # B-PR4 adds a second independent scorer-side module (interview judge);
+        # the hidden-material reader allow-list stays explicit and closed.
+        if "scoring/" in text and path.name not in _HIDDEN_SCORING_READERS:
             offenders.append(str(path.relative_to(REPO_ROOT)))
     assert not offenders, f"modules reference the hidden scoring path: {offenders}"
 

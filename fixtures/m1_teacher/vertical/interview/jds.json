@@ -1,0 +1,296 @@
+{
+  "schema_version": "m1a.v0",
+  "domain_id": "interview_coach",
+  "domain_version": "0.1.0",
+  "provenance": {
+    "source": "m1_offline fixtures/m1/interview/jds (work/m1-offline-design=290c577)",
+    "license": "CC0-1.0",
+    "synthetic": true,
+    "converted_at": "2026-11-20T00:00:00Z",
+    "note": "JD versions are hiring-requirement context only; never topic popularity or mastery evidence"
+  },
+  "jds": [
+    {
+      "jd_id": "jd:ml",
+      "version": "v1",
+      "source_jd_id": "jd-ml-v1",
+      "role": "机器学习工程师（合成岗位）",
+      "company_synthetic": true,
+      "requirements": [
+        "扎实的机器学习基础",
+        "熟悉 GBDT/深度模型调优",
+        "能独立设计离线评估"
+      ],
+      "skills": [
+        "ml_fundamentals",
+        "gbdt",
+        "model_tuning"
+      ],
+      "valid_from": "2026-05-01",
+      "valid_until": "2026-08-31",
+      "supersedes": null,
+      "delta": {
+        "added_requirements": [
+          "扎实的机器学习基础",
+          "熟悉 GBDT/深度模型调优",
+          "能独立设计离线评估"
+        ],
+        "removed_requirements": [],
+        "added_skills": [
+          "ml_fundamentals",
+          "gbdt",
+          "model_tuning"
+        ],
+        "removed_skills": []
+      },
+      "content_digest": "10da832d607cbbd82ec596bfdee18221491e7e135aaf162ceced90548fd44058",
+      "synthetic": true,
+      "license": "CC0-1.0"
+    },
+    {
+      "jd_id": "jd:ml",
+      "version": "v2",
+      "source_jd_id": "jd-ml-v2",
+      "role": "机器学习工程师（合成岗位）",
+      "company_synthetic": true,
+      "requirements": [
+        "扎实的机器学习基础",
+        "熟悉 GBDT/深度模型调优",
+        "具备因果推断基础",
+        "能独立设计离线评估"
+      ],
+      "skills": [
+        "ml_fundamentals",
+        "gbdt",
+        "causal_inference",
+        "model_tuning"
+      ],
+      "valid_from": "2026-09-01",
+      "valid_until": "2027-02-28",
+      "supersedes": "v1",
+      "delta": {
+        "added_requirements": [
+          "具备因果推断基础"
+        ],
+        "removed_requirements": [],
+        "added_skills": [
+          "causal_inference"
+        ],
+        "removed_skills": []
+      },
+      "content_digest": "d70b6e006f8f5cfa23663abfbef5002a54581ca6a0071cea21507ae21e613c26",
+      "synthetic": true,
+      "license": "CC0-1.0"
+    },
+    {
+      "jd_id": "jd:rec",
+      "version": "v1",
+      "source_jd_id": "jd-rec-v1",
+      "role": "推荐算法工程师（合成岗位）",
+      "company_synthetic": true,
+      "requirements": [
+        "熟悉 CTR 预估与排序模型",
+        "掌握 AUC/GAUC 等离线评估",
+        "熟练使用 Python 与 SQL"
+      ],
+      "skills": [
+        "ctr_prediction",
+        "feature_engineering",
+        "python"
+      ],
+      "valid_from": "2026-06-01",
+      "valid_until": "2026-09-30",
+      "supersedes": null,
+      "delta": {
+        "added_requirements": [
+          "熟悉 CTR 预估与排序模型",
+          "掌握 AUC/GAUC 等离线评估",
+          "熟练使用 Python 与 SQL"
+        ],
+        "removed_requirements": [],
+        "added_skills": [
+          "ctr_prediction",
+          "feature_engineering",
+          "python"
+        ],
+        "removed_skills": []
+      },
+      "content_digest": "ed99843a834ec1d22328f078b09824cfe6e4d2d19f104a81a6a3a62f21ed9f7d",
+      "synthetic": true,
+      "license": "CC0-1.0"
+    },
+    {
+      "jd_id": "jd:rec",
+      "version": "v2",
+      "source_jd_id": "jd-rec-v2",
+      "role": "推荐算法工程师（合成岗位）",
+      "company_synthetic": true,
+      "requirements": [
+        "熟悉 CTR 预估与排序模型",
+        "掌握向量召回与 ANN 检索",
+        "具备 LLM 排序探索经验者优先",
+        "熟练使用 Python 与 SQL"
+      ],
+      "skills": [
+        "ctr_prediction",
+        "vector_recall",
+        "ann_retrieval",
+        "python"
+      ],
+      "valid_from": "2026-10-01",
+      "valid_until": "2027-03-31",
+      "supersedes": "v1",
+      "delta": {
+        "added_requirements": [
+          "具备 LLM 排序探索经验者优先",
+          "掌握向量召回与 ANN 检索"
+        ],
+        "removed_requirements": [
+          "掌握 AUC/GAUC 等离线评估"
+        ],
+        "added_skills": [
+          "ann_retrieval",
+          "vector_recall"
+        ],
+        "removed_skills": [
+          "feature_engineering"
+        ]
+      },
+      "content_digest": "e9d8dc52633c988c44366e595b318fd4ca8467c6f9d967cc82be557b7f6626ac",
+      "synthetic": true,
+      "license": "CC0-1.0"
+    },
+    {
+      "jd_id": "jd:sys",
+      "version": "v1",
+      "source_jd_id": "jd-sys-v1",
+      "role": "推荐系统工程师（合成岗位）",
+      "company_synthetic": true,
+      "requirements": [
+        "熟悉推荐系统召回/排序架构",
+        "具备分布式系统设计能力",
+        "了解特征存储"
+      ],
+      "skills": [
+        "system_design",
+        "feature_store",
+        "distributed_systems"
+      ],
+      "valid_from": "2026-06-15",
+      "valid_until": "2026-10-14",
+      "supersedes": null,
+      "delta": {
+        "added_requirements": [
+          "熟悉推荐系统召回/排序架构",
+          "具备分布式系统设计能力",
+          "了解特征存储"
+        ],
+        "removed_requirements": [],
+        "added_skills": [
+          "system_design",
+          "feature_store",
+          "distributed_systems"
+        ],
+        "removed_skills": []
+      },
+      "content_digest": "333956dbbfc624f615e0ecd59713344015a1d183fde91b912c44ea8fe4f20d4c",
+      "synthetic": true,
+      "license": "CC0-1.0"
+    },
+    {
+      "jd_id": "jd:sys",
+      "version": "v2",
+      "source_jd_id": "jd-sys-v2",
+      "role": "推荐系统工程师（合成岗位）",
+      "company_synthetic": true,
+      "requirements": [
+        "熟悉推荐系统召回/排序架构",
+        "具备分布式系统设计能力",
+        "有实时特征管道经验",
+        "了解特征存储"
+      ],
+      "skills": [
+        "system_design",
+        "realtime_features",
+        "feature_store",
+        "distributed_systems"
+      ],
+      "valid_from": "2026-10-15",
+      "valid_until": "2027-04-14",
+      "supersedes": "v1",
+      "delta": {
+        "added_requirements": [
+          "有实时特征管道经验"
+        ],
+        "removed_requirements": [],
+        "added_skills": [
+          "realtime_features"
+        ],
+        "removed_skills": []
+      },
+      "content_digest": "577b96d36e43916d9da81081e7cb6392f7aea521d326490c58d3582f663800fa",
+      "synthetic": true,
+      "license": "CC0-1.0"
+    },
+    {
+      "jd_id": "jd:demo-overlap",
+      "version": "v1",
+      "source_jd_id": "jd-demo-overlap-v1",
+      "role": "推荐系统设计（合成冲突演示）",
+      "company_synthetic": true,
+      "requirements": [
+        "熟悉推荐系统"
+      ],
+      "skills": [
+        "system_design"
+      ],
+      "valid_from": "2026-01-01",
+      "valid_until": "2026-12-31",
+      "supersedes": null,
+      "delta": {
+        "added_requirements": [
+          "熟悉推荐系统"
+        ],
+        "removed_requirements": [],
+        "added_skills": [
+          "system_design"
+        ],
+        "removed_skills": []
+      },
+      "content_digest": "b5f38472396d136dc6bd37211d58fb6b353d2aa1707079632b5f60738d882251",
+      "synthetic": true,
+      "license": "CC0-1.0"
+    },
+    {
+      "jd_id": "jd:demo-overlap",
+      "version": "v2",
+      "source_jd_id": "jd-demo-overlap-v2",
+      "role": "推荐系统设计（合成冲突演示）",
+      "company_synthetic": true,
+      "requirements": [
+        "熟悉推荐系统",
+        "具备实时特征经验"
+      ],
+      "skills": [
+        "system_design",
+        "realtime_features"
+      ],
+      "valid_from": "2026-06-01",
+      "valid_until": "2027-06-01",
+      "supersedes": "v1",
+      "delta": {
+        "added_requirements": [
+          "具备实时特征经验"
+        ],
+        "removed_requirements": [],
+        "added_skills": [
+          "realtime_features"
+        ],
+        "removed_skills": []
+      },
+      "content_digest": "e2f138cec4fb7b22c131c5f6f75b3b1ff3bc2a1419d0bffb96c5d0138938d373",
+      "synthetic": true,
+      "license": "CC0-1.0"
+    }
+  ]
+}

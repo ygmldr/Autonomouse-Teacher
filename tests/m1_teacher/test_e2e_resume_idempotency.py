@@ -503,11 +503,16 @@ def test_tampered_scoring_specs_do_not_change_teacher_behaviour(
     )
 
 
+_HIDDEN_SCORING_READERS = frozenset({"scorer.py", "interview_judge.py"})
+
+
 def test_teacher_code_references_hidden_scoring_only_in_scorer() -> None:
     offenders: list[str] = []
     for path in sorted((REPO_ROOT / "m1_teacher").rglob("*.py")):
         text = path.read_text(encoding="utf-8")
-        if "scoring/" in text and path.name != "scorer.py":
+        # B-PR4 adds a second independent scorer-side module (interview judge);
+        # the hidden-material reader allow-list stays explicit and closed.
+        if "scoring/" in text and path.name not in _HIDDEN_SCORING_READERS:
             offenders.append(str(path.relative_to(REPO_ROOT)))
     assert offenders == [], f"teacher modules reference hidden scoring paths: {offenders}"
 
