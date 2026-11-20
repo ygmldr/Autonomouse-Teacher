@@ -1,0 +1,14 @@
+{
+  "case_id": "X-01-scope-diff",
+  "collector": {
+    "name": "m1b.collect-evidence",
+    "sha256": "30c53af65afcb261156cbe8607f0710e67f6dce1436170dcd5f29f3c5b6fc939",
+    "version": "m1b.collect-evidence.v0"
+  },
+  "command": "git -C /root/m1b/pr5 diff --name-only 3e7afee077845a071cd364e93ab209cac20b2d5f..HEAD",
+  "cwd": "/root/m1b/pr5",
+  "reason": "command rejected by preflight: git commands are limited to safe read-only subcommands: cat-file, diff, grep, log, ls-files, rev-parse, show, status",
+  "run_id": "X-01-scope-diff-20261120T220406613729Z-23a96755",
+  "status": "NOT_RUN",
+  "uc": "2026-11-20T22:04:06Z"
+}

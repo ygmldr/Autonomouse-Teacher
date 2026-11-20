@@ -1,0 +1,1 @@
+command rejected by preflight: git commands are limited to safe read-only subcommands: cat-file, diff, grep, log, ls-files, rev-parse, show, status

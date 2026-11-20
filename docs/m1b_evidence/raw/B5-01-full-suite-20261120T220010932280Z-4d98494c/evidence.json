@@ -1,0 +1,52 @@
+{
+  "artifacts": [],
+  "branch": "b-next/pr5-e2e-eval",
+  "case_id": "B5-01-full-suite",
+  "collector": {
+    "name": "m1b.collect-evidence",
+    "sha256": "30c53af65afcb261156cbe8607f0710e67f6dce1436170dcd5f29f3c5b6fc939",
+    "version": "m1b.collect-evidence.v0"
+  },
+  "command": "'/root/Autonomous Teacher/.venv/bin/python' -m pytest tests/m1_teacher -q",
+  "command_argv": [
+    "/root/Autonomous Teacher/.venv/bin/python",
+    "-m",
+    "pytest",
+    "tests/m1_teacher",
+    "-q"
+  ],
+  "cwd": "/root/m1b/pr5",
+  "environment": {
+    "PYTHONHASHSEED": null,
+    "TZ": null,
+    "cwd": "/root/m1b/pr5",
+    "machine": "x86_64",
+    "platform": "Linux-6.17.13-2-pve-x86_64-with-glibc2.39",
+    "python_executable": "/root/Autonomous Teacher/.venv/bin/python",
+    "python_implementation": "CPython",
+    "python_version": "3.11.15",
+    "repo_root": "/root/m1b/pr5",
+    "system": "Linux"
+  },
+  "evidence_class": "DETERMINISTIC",
+  "exit_code": 0,
+  "expected_exit": 0,
+  "git_sha": "e2b6e85d8939b2411b2b6c6cc26538014c6f57e3",
+  "limitation": "full integrated suite: 884 tests (M1-A 536 frozen reference + B-PR1..B-PR5 additions)",
+  "run_id": "B5-01-full-suite-20261120T220010932280Z-4d98494c",
+  "status": "EXECUTED_PASS",
+  "stderr": {
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "tail": "",
+    "truncated": false
+  },
+  "stdout": {
+    "bytes": 1071,
+    "sha256": "a60a19c0a2edd58515aa63febdf47664eb1b97c76262f95fc44e59c2bcd23346",
+    "tail": "........................................................................ [  8%]\n........................................................................ [ 16%]\n........................................................................ [ 24%]\n........................................................................ [ 32%]\n........................................................................ [ 40%]\n........................................................................ [ 48%]\n........................................................................ [ 57%]\n........................................................................ [ 65%]\n........................................................................ [ 73%]\n........................................................................ [ 81%]\n........................................................................ [ 89%]\n........................................................................ [ 97%]\n....................                                                     [100%]\n884 passed in 93.34s (0:01:33)\n",
+    "truncated": false
+  },
+  "timed_out": false,
+  "utc": "2026-11-20T22:00:10Z"
+}

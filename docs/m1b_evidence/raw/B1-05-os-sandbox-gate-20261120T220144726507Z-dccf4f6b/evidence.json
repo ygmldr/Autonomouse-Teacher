@@ -1,0 +1,55 @@
+{
+  "artifacts": [],
+  "branch": "b-next/pr5-e2e-eval",
+  "case_id": "B1-05-os-sandbox-gate",
+  "collector": {
+    "name": "m1b.collect-evidence",
+    "sha256": "30c53af65afcb261156cbe8607f0710e67f6dce1436170dcd5f29f3c5b6fc939",
+    "version": "m1b.collect-evidence.v0"
+  },
+  "command": "env M1B_REQUIRE_OS_SANDBOX=1 '/root/Autonomous Teacher/.venv/bin/python' -m pytest tests/m1_teacher -q -rs",
+  "command_argv": [
+    "env",
+    "M1B_REQUIRE_OS_SANDBOX=1",
+    "/root/Autonomous Teacher/.venv/bin/python",
+    "-m",
+    "pytest",
+    "tests/m1_teacher",
+    "-q",
+    "-rs"
+  ],
+  "cwd": "/root/m1b/pr5",
+  "environment": {
+    "PYTHONHASHSEED": null,
+    "TZ": null,
+    "cwd": "/root/m1b/pr5",
+    "machine": "x86_64",
+    "platform": "Linux-6.17.13-2-pve-x86_64-with-glibc2.39",
+    "python_executable": "/root/Autonomous Teacher/.venv/bin/python",
+    "python_implementation": "CPython",
+    "python_version": "3.11.15",
+    "repo_root": "/root/m1b/pr5",
+    "system": "Linux"
+  },
+  "evidence_class": "DETERMINISTIC",
+  "exit_code": 1,
+  "expected_exit": 0,
+  "git_sha": "e2b6e85d8939b2411b2b6c6cc26538014c6f57e3",
+  "limitation": "M1B_REQUIRE_OS_SANDBOX=1 -rs; current integrated tree predates PR1 CI-gate commit; env var is recorded and the command ran; gate wiring = NOT_CONFIGURED in this tree; exit code 1 differs from --expected-exit 0",
+  "run_id": "B1-05-os-sandbox-gate-20261120T220144726507Z-dccf4f6b",
+  "status": "EXECUTED_FAIL",
+  "stderr": {
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "tail": "",
+    "truncated": false
+  },
+  "stdout": {
+    "bytes": 9326,
+    "sha256": "2180657e9156723fd7e51ec769614bf7357d01b174b1f85a4940cc5cb51c0012",
+    "tail": " assert host_after_content == host_sentinel_content + \"\\n\"\n        assert (REPO_ROOT / \"runner.py\").exists() is repo_runner_existed\n>       assert before_dirs == after_dirs, \"ephemeral attack left worker temp directories behind\"\nE       AssertionError: ephemeral attack left worker temp directories behind\nE       assert {'m1b_judge_w...534_wczjrum3'} == {'m1b_judge_w...534_myf7s2hd'}\nE         \nE         Extra items in the left set:\nE         'm1b_judge_worker_1696534_wczjrum3'\nE         Extra items in the right set:\nE         'm1b_judge_worker_1696534_myf7s2hd'\nE         Use -v to get more diff\n\ntests/m1_teacher/test_judge_negatives.py:384: AssertionError\n________________ test_worker_timeout_is_bounded_and_cleaned_up _________________\n\nreal_worker = <m1_teacher.assessment.judge.worker.UntrustedExecutionWorker object at 0x710f22339250>\n\n    def test_worker_timeout_is_bounded_and_cleaned_up(real_worker):\n        before = _temp_worker_dirs()\n        started = time.monotonic()\n        observation = real_worker.run_case(\n            \"def first_index(nums, target):\\n    while True:\\n        pass\\n\",\n            \"first_index\",\n            [[1], 1],\n            timeout_s=0.3,\n        )\n        elapsed = time.monotonic() - started\n        after = _temp_worker_dirs()\n        assert observation.status == WORKER_STATUS_TIMEOUT\n        assert elapsed < 5.0\n>       assert before == after, \"worker temp directories were not cleaned up\"\nE       AssertionError: worker temp directories were not cleaned up\nE       assert {'m1b_judge_w...093_rw2hcxhb'} == {'m1b_judge_w...093_wgnbxu1o'}\nE         \nE         Extra items in the left set:\nE         'm1b_judge_worker_1696534_s30fjqhh'\nE         'm1b_judge_worker_1697093_rw2hcxhb'\nE         Extra items in the right set:\nE         'm1b_judge_worker_1696534_6lp73nza'\nE         'm1b_judge_worker_1697093_wgnbxu1o'\nE         Use -v to get more diff\n\ntests/m1_teacher/test_judge_worker.py:440: AssertionError\n4 failed, 880 passed in 93.30s (0:01:33)\n",
+    "truncated": false
+  },
+  "timed_out": false,
+  "utc": "2026-11-20T22:01:44Z"
+}

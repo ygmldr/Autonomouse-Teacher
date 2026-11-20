@@ -1,0 +1,172 @@
+........................................................................ [  8%]
+........................................................................ [ 16%]
+........................................................................ [ 24%]
+........................................................................ [ 32%]
+........................................................................ [ 40%]
+........................................................................ [ 48%]
+........................................................................ [ 57%]
+..........................................................FF....F....... [ 65%]
+.........................................................F.............. [ 73%]
+........................................................................ [ 81%]
+........................................................................ [ 89%]
+........................................................................ [ 97%]
+....................                                                     [100%]
+=================================== FAILURES ===================================
+__________ test_attack_templates_never_pass_and_never_leak_sentinels ___________
+
+real_worker = <m1_teacher.assessment.judge.worker.UntrustedExecutionWorker object at 0x710f2218fbd0>
+
+    def test_attack_templates_never_pass_and_never_leak_sentinels(real_worker):
+        attacks = SENTINELS["attack_templates"]
+        assert attacks, "attack templates are missing"
+        before_dirs = _temp_worker_dirs()
+        for attack in attacks:
+            attack_id = attack["attack_id"]
+            family = attack["attack_family"]
+            timeout_s = 0.4 if family in {"fork_subprocess", "infinite_loop"} else 2.0
+            started = time.monotonic()
+            observation = real_worker.run_case(attack["code"], "target", [], timeout_s=timeout_s)
+            elapsed = time.monotonic() - started
+            assert elapsed < 8.0, f"{attack_id}: sandbox run exceeded the local bound"
+    
+            text = _observation_text(observation)
+            assert not _contains_any_sentinel(text), f"{attack_id}: observation leaked a sentinel value"
+            expected_classification = attack["expected_classification"]
+            assert observation.status in CLASSIFICATION_STATUSES[expected_classification], (
+                f"{attack_id}: attack was not observed with the declared fail-closed status"
+            )
+            if attack["expected_blocked"]:
+                assert observation.status != WORKER_STATUS_COMPLETED or (
+                    observation.actual_canonical != SENTINEL_EXPECTED_CANONICAL
+                )
+            else:
+                # Explicitly declared as *not blocked*: writing into the sandbox's
+                # ephemeral root tmpfs may succeed, but it must still be only a
+                # non-PASS observation and have no host effect (separate test).
+                assert observation.status == WORKER_STATUS_COMPLETED, (
+                    f"{attack_id}: declared unblocked attack expected a COMPLETED observation"
+                )
+            # A blocked attack can never produce the synthetic hidden expected value.
+            if observation.actual_canonical is not None:
+                assert observation.actual_canonical != SENTINEL_EXPECTED_CANONICAL, (
+                    f"{attack_id}: attack reproduced the hidden expected value"
+                )
+            # The worker observation surface never grows a verdict field.
+            field_names = {field.name for field in dataclasses.fields(observation)}
+            assert not field_names & {"passed", "verdict", "score", "expected", "tests"}
+        after_dirs = _temp_worker_dirs()
+>       assert before_dirs == after_dirs, "attack runs left worker temp directories behind"
+E       AssertionError: attack runs left worker temp directories behind
+E       assert {'m1b_judge_w...534_ok93mc68'} == set()
+E         
+E         Extra items in the left set:
+E         'm1b_judge_worker_1696534_ok93mc68'
+E         Use -v to get more diff
+
+tests/m1_teacher/test_judge_negatives.py:221: AssertionError
+________ test_attack_timeout_and_fork_are_killed_without_host_leftovers ________
+
+real_worker = <m1_teacher.assessment.judge.worker.UntrustedExecutionWorker object at 0x710f2218fbd0>
+
+    def test_attack_timeout_and_fork_are_killed_without_host_leftovers(real_worker):
+        marker = "M1B_PR1_FORK_LEFTOVER_7d41c9a2"
+        fork_payload = (
+            "def target(*_args, **_kwargs):\n"
+            "    import subprocess\n"
+            "    import sys\n"
+            "    subprocess.Popen(\n"
+            "        [sys.executable, '-c', 'import time; time.sleep(60)  # %s']\n"
+            "    )\n"
+            "    while True:\n"
+            "        pass\n"
+        ) % marker
+        before_dirs = _temp_worker_dirs()
+        observation = real_worker.run_case(fork_payload, "target", [], timeout_s=0.4)
+        after_dirs = _temp_worker_dirs()
+        assert observation.status in {WORKER_STATUS_TIMEOUT, WORKER_STATUS_INFRA_ERROR}
+        assert _classify(observation) in {"STUDENT_TLE", "JUDGE_INFRA_ERROR"}
+>       assert before_dirs == after_dirs
+E       AssertionError: assert set() == {'m1b_judge_w...534_26d38w6u'}
+E         
+E         Extra items in the right set:
+E         'm1b_judge_worker_1696534_26d38w6u'
+E         Use -v to get more diff
+
+tests/m1_teacher/test_judge_negatives.py:241: AssertionError
+________________ test_ephemeral_tmpfs_write_has_no_host_effect _________________
+
+real_worker = <m1_teacher.assessment.judge.worker.UntrustedExecutionWorker object at 0x710f2218fbd0>
+
+    def test_ephemeral_tmpfs_write_has_no_host_effect(real_worker):
+        host_dir = Path(tempfile.mkdtemp(prefix="m1b_neg_ephemeral_host_"))
+        host_sentinel = host_dir / "host_sentinel.txt"
+        host_sentinel_content = "SENTINEL_HOST_FILE_EPHEMERAL_TEST_DO_NOT_LEAK_8a1f"
+        host_sentinel.write_text(host_sentinel_content + "\n", encoding="utf-8")
+        host_before = sorted(entry.name for entry in host_dir.iterdir())
+        repo_runner_existed = (REPO_ROOT / "runner.py").exists()
+        before_dirs = _temp_worker_dirs()
+        try:
+            attack = next(
+                attack
+                for attack in SENTINELS["attack_templates"]
+                if attack["attack_family"] == "write_runner_source_ephemeral_tmpfs"
+            )
+            assert attack["expected_blocked"] is False
+            assert attack["expected_observation"] == "ephemeral_write_no_host_effect"
+            observation = real_worker.run_case(attack["code"], "target", [])
+        finally:
+            after_host = sorted(entry.name for entry in host_dir.iterdir())
+            host_after_content = host_sentinel.read_text(encoding="utf-8")
+            shutil.rmtree(host_dir, ignore_errors=True)
+        after_dirs = _temp_worker_dirs()
+    
+        # The write may succeed inside the sandbox tmpfs, but it is only an
+        # observation (never the hidden expected) and the host is untouched.
+        assert observation.status == WORKER_STATUS_COMPLETED
+        assert observation.actual_canonical == "0"
+        assert observation.actual_canonical != SENTINEL_EXPECTED_CANONICAL
+        assert host_before == after_host, "ephemeral sandbox write modified host files"
+        assert host_after_content == host_sentinel_content + "\n"
+        assert (REPO_ROOT / "runner.py").exists() is repo_runner_existed
+>       assert before_dirs == after_dirs, "ephemeral attack left worker temp directories behind"
+E       AssertionError: ephemeral attack left worker temp directories behind
+E       assert {'m1b_judge_w...534_wczjrum3'} == {'m1b_judge_w...534_myf7s2hd'}
+E         
+E         Extra items in the left set:
+E         'm1b_judge_worker_1696534_wczjrum3'
+E         Extra items in the right set:
+E         'm1b_judge_worker_1696534_myf7s2hd'
+E         Use -v to get more diff
+
+tests/m1_teacher/test_judge_negatives.py:384: AssertionError
+________________ test_worker_timeout_is_bounded_and_cleaned_up _________________
+
+real_worker = <m1_teacher.assessment.judge.worker.UntrustedExecutionWorker object at 0x710f22339250>
+
+    def test_worker_timeout_is_bounded_and_cleaned_up(real_worker):
+        before = _temp_worker_dirs()
+        started = time.monotonic()
+        observation = real_worker.run_case(
+            "def first_index(nums, target):\n    while True:\n        pass\n",
+            "first_index",
+            [[1], 1],
+            timeout_s=0.3,
+        )
+        elapsed = time.monotonic() - started
+        after = _temp_worker_dirs()
+        assert observation.status == WORKER_STATUS_TIMEOUT
+        assert elapsed < 5.0
+>       assert before == after, "worker temp directories were not cleaned up"
+E       AssertionError: worker temp directories were not cleaned up
+E       assert {'m1b_judge_w...093_rw2hcxhb'} == {'m1b_judge_w...093_wgnbxu1o'}
+E         
+E         Extra items in the left set:
+E         'm1b_judge_worker_1696534_s30fjqhh'
+E         'm1b_judge_worker_1697093_rw2hcxhb'
+E         Extra items in the right set:
+E         'm1b_judge_worker_1696534_6lp73nza'
+E         'm1b_judge_worker_1697093_wgnbxu1o'
+E         Use -v to get more diff
+
+tests/m1_teacher/test_judge_worker.py:440: AssertionError
+4 failed, 880 passed in 93.30s (0:01:33)

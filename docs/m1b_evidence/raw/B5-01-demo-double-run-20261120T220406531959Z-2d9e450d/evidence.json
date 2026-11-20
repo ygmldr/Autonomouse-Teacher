@@ -1,0 +1,14 @@
+{
+  "case_id": "B5-01-demo-double-run",
+  "collector": {
+    "name": "m1b.collect-evidence",
+    "sha256": "30c53af65afcb261156cbe8607f0710e67f6dce1436170dcd5f29f3c5b6fc939",
+    "version": "m1b.collect-evidence.v0"
+  },
+  "command": "'/root/Autonomous Teacher/.venv/bin/python' -c 'import hashlib, subprocess, sys, os\ndef once(args):\n    p = subprocess.run([sys.executable, *args], capture_output=True, text=True, cwd=os.getcwd())\n    assert p.returncode == 0, p.stderr[-2000:]\n    return hashlib.sha256(p.stdout.encode()).hexdigest()\na = once(['\"'\"'-m'\"'\"', '\"'\"'m1_teacher.e2e_b5'\"'\"'])\nb = once(['\"'\"'-m'\"'\"', '\"'\"'m1_teacher.e2e_b5'\"'\"'])\nprint('\"'\"'e2e_b5_stdout_sha256'\"'\"', a)\nprint('\"'\"'e2e_b5_stdout_sha256_2'\"'\"', b)\nprint('\"'\"'identical'\"'\"', a == b)\nassert a == b\n'",
+  "cwd": "/root/m1b/pr5",
+  "reason": "command rejected by preflight: command contains a newline; pass a single command",
+  "run_id": "B5-01-demo-double-run-20261120T220406531959Z-2d9e450d",
+  "status": "NOT_RUN",
+  "uc": "2026-11-20T22:04:06Z"
+}

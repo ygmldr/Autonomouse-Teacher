@@ -1,0 +1,14 @@
+{
+  "case_id": "X-02-network-scan",
+  "collector": {
+    "name": "m1b.collect-evidence",
+    "sha256": "30c53af65afcb261156cbe8607f0710e67f6dce1436170dcd5f29f3c5b6fc939",
+    "version": "m1b.collect-evidence.v0"
+  },
+  "command": "'/root/Autonomous Teacher/.venv/bin/python' -c 'import ast, pathlib, re\nroots = ['\"'\"'m1_teacher'\"'\"', '\"'\"'tests/m1_teacher'\"'\"', '\"'\"'scripts/m1b'\"'\"']\nbad = []\nfor root in roots:\n    for path in pathlib.Path(root).rglob('\"'\"'*.py'\"'\"'):\n        text = path.read_text(errors='\"'\"'replace'\"'\"')\n        try:\n            tree = ast.parse(text)\n        except SyntaxError:\n            bad.append((str(path), '\"'\"'syntax'\"'\"'))\n            continue\n        for node in ast.walk(tree):\n            names = []\n            if isinstance(node, ast.Import):\n                names = [alias.name.split('\"'\"'.'\"'\"')[0] for alias in node.names]\n            elif isinstance(node, ast.ImportFrom) and node.module:\n                names = [node.module.split('\"'\"'.'\"'\"')[0]]\n            for name in names:\n                if name in {'\"'\"'socket'\"'\"', '\"'\"'http'\"'\"', '\"'\"'urllib'\"'\"', '\"'\"'urllib2'\"'\"', '\"'\"'urllib3'\"'\"', '\"'\"'requests'\"'\"', '\"'\"'httpx'\"'\"', '\"'\"'aiohttp'\"'\"', '\"'\"'ftplib'\"'\"', '\"'\"'smtplib'\"'\"'}:\n                    bad.append((str(path), name))\nprint('\"'\"'network_import_hits'\"'\"', len(bad))\nprint('\"'\"'hits'\"'\"', bad[:10])\nprint('\"'\"'autoteacher_m0_mentions'\"'\"', sum(1 for root in roots for p in pathlib.Path(root).rglob('\"'\"'*.py'\"'\"') if '\"'\"'autoteacher_m0'\"'\"' in p.read_text(errors='\"'\"'replace'\"'\"')))\n'",
+  "cwd": "/root/m1b/pr5",
+  "reason": "command rejected by preflight: command contains a newline; pass a single command",
+  "run_id": "X-02-network-scan-20261120T220406654109Z-6a1c0951",
+  "status": "NOT_RUN",
+  "uc": "2026-11-20T22:04:06Z"
+}

@@ -1,0 +1,32 @@
+[evidence] e2e_b5_cf.jsonl sha256=8de98500bb69582bf932dceb25d4938a10ad991c72ccd2dbf18a94a2d5a20626
+[evidence] e2e_b5_cross_domain.jsonl sha256=7c8c5b14f26ae75aba465b94a24bcb5623c01498dd720f710efc60a57f452bef
+[evidence] e2e_b5_freshness.jsonl sha256=efa33f18516f55529df0086acb57e1b5ddae0414bf611516c55ddc5a11fd2608
+[evidence] e2e_b5_interview.jsonl sha256=44b1a07199936efcd6acd15707c89885645d82ce04f713cb12bdbf0f05604f36
+[evidence] e2e_b5_summary.json sha256=387dbfab36b6b6c335dda487becd840babc3808c304d3c5bbcd6b8dfcf3ec123
+B5 unified E2E demo (offline synthetic only, not real teaching effect)
+[schema] m1b.b5.e2e.v1 max_turns=10 pause_after_turns=4
+[cf] learners=2 paths_differ=True shared_journal=one canonical SQLite database: per-learner event/seq log + session table
+[cf:student_a] learner=m1a.learner.student_a first_action={"item_id": "item.bs.mcq.007", "kind": "DIAGNOSE", "reason_code": "DIAGNOSTIC_ITEM"} assessments={"CORRECT": 7, "INCORRECT": 1} mastery_after={"cf.array.basics": 0.3, "cf.complexity.log": 0.2, "cf.search.binary": 0.543571, "cf.search.boundary": 0.0, "cf.search.linear": 0.3, "cf.sort.sortedness": 0.3} verify_rebuild=True
+[cf:student_b] learner=m1a.learner.student_b first_action={"item_id": "item.bs.mcq.002", "kind": "DIAGNOSE", "reason_code": "DIAGNOSTIC_ITEM"} assessments={"INCORRECT": 3, "NEEDS_REVIEW": 4} mastery_after={"cf.array.basics": 0.3, "cf.search.binary": 0.0, "cf.search.linear": 0.3, "cf.sort.sortedness": 0.0} verify_rebuild=True
+[interview] learners=2 paths_differ=True jd_versions=["v1", "v2", "v2"]
+[interview:b5.interview.learner_a] state=seeded_evidence (3 CORRECT synthetic observations) sessions=2
+[interview:b5.interview.learner_a:b5.interview.a.jd_v1] jd=v1 probes=["INTERVIEW_PROBE_HYPOTHESIS", "INTERVIEW_PROBE_COMPLEXITY", "INTERVIEW_PROBE_EXPERIMENT_DESIGN", "INTERVIEW_PROBE_ONLINE_TRIAGE"] hints=[] clarifications=0 rubric_dimensions=["engineering_feasibility", "evidence_sufficiency", "explanation_clarity", "factual_correctness"] final_phase=REVIEW
+[interview:b5.interview.learner_a:b5.interview.a.jd_v2] jd=v2 probes=["INTERVIEW_PROBE_HYPOTHESIS"] hints=[] clarifications=0 rubric_dimensions=["engineering_feasibility", "evidence_sufficiency", "explanation_clarity", "factual_correctness"] final_phase=ASSESS
+[interview:b5.interview.learner_b] state=novice (no prior interview evidence) sessions=1
+[interview:b5.interview.learner_b:b5.interview.b.jd_v2] jd=v2 probes=["INTERVIEW_PROBE_CONCEPT", "INTERVIEW_PROBE_HYPOTHESIS", "INTERVIEW_PROBE_COMPLEXITY", "INTERVIEW_PROBE_EXPERIMENT_DESIGN", "INTERVIEW_PROBE_ONLINE_TRIAGE"] hints=[1] clarifications=1 rubric_dimensions=["engineering_feasibility", "evidence_sufficiency", "explanation_clarity", "factual_correctness"] final_phase=REVIEW
+[interview:jd_change] jd:rec v1->v2 affects_running_sessions=False affects_new_plans=True old_session_unchanged=True
+[cross-domain] learner=b5.cross_domain.learner cf_session=b5.cross.cf.session interview_session=b5.cross.interview.session paused_turn=4 resumed_phase=REVIEW final_cf_phase=REVIEW seq_contiguous=True domains=["cf_binary_search", "interview_coach"] session_count=2 verify_rebuild=True
+[freshness] decision_counts={"KEEP": 2, "RECHECK": 5, "UPDATE": 2} blocked_knowledge=5 blocked_jd=3 eligible_updates=2 silent_imports=0 gate_enforced=True
+[freshness:blocked] k-recheck-community-001 RECHECK reason=RECHECK_UNAUTHORITATIVE_SOURCE map=MAP-E09_KNOWLEDGE_CONFLICT_BLOCKED rejected=True events=0
+[freshness:blocked] k-recheck-conflict-001 RECHECK reason=RECHECK_CONFLICT map=MAP-E09_KNOWLEDGE_CONFLICT_BLOCKED rejected=True events=0
+[freshness:blocked] k-recheck-expired-001 RECHECK reason=RECHECK_EXPIRED map=MAP-E08_KNOWLEDGE_RECHECK_BLOCKED rejected=True events=0
+[freshness:blocked] k-recheck-futuredate-001 RECHECK reason=RECHECK_FUTURE_DATED map=MAP-E08_KNOWLEDGE_RECHECK_BLOCKED rejected=True events=0
+[freshness:blocked] k-recheck-older-001 RECHECK reason=RECHECK_OLDER_SOURCE map=MAP-E08_KNOWLEDGE_RECHECK_BLOCKED rejected=True events=0
+[freshness:jd_blocked] jd-rec-expired reason=RECHECK_JD_EXPIRED rejected=True events=0
+[freshness:jd_blocked] jd-rec-not-yet-active reason=RECHECK_JD_NOT_YET_ACTIVE rejected=True events=0
+[freshness:jd_blocked] jd-overlap-conflict reason=RECHECK_JD_CONFLICT rejected=True events=0
+[freshness:eligible] k-update-001 change=UPDATE events=4
+[freshness:eligible] k-update-002 change=UPDATE events=4
+[journal] learners=5 all_verify_rebuild=True one_sqlite_file=True
+[evidence-class] MOCK=synthetic students/interview/JD/knowledge; DETERMINISTIC=state machine/ids/replay/rubric; NOT_VERIFIED=real teaching effect
+[boundary] offline synthetic only, not real teaching effect; no network, no Key, no real resume/JD
