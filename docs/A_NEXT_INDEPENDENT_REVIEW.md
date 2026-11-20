@@ -293,7 +293,7 @@ Owner 文档出现后 Reviewer 将逐份审阅并给出：**每 PR PASS/PARTIAL/
 | 对象 | 位置/提交 | 状态 |
 |---|---|---|
 | A1 设计报告 | `worktrees/a-next-auth-record/docs/A_NEXT_AUTH_RECORD_REPORT.md`，branch `fix/a-next-auth-record` @ **`0df36de765b510feeadf52c54706d4559f651c1d`**（design commit，parent fd1d3a6；111 行） | **已提交（C1 已满足）**；Reviewer 审阅内容 = 该 commit blob |
-| A1 设计测试骨架 | 同 commit `0df36de`：`tests/integration/a_next_auth/{conftest,test_a1_use_record_integrity}.py`（共 553 行；Reviewer 基线运行 **24 passed / 15 xfailed / 93.70s**，`xfail(strict=True)` 符合“未实现契约”预期） | 已提交；**不是实现通过证据** |
+| A1 设计测试骨架 | 同 commit `0df36de`：`tests/integration/a_next_auth/{conftest,test_a1_use_record_integrity}.py`（553 行；Reviewer 解析该 commit：**20 个 test 函数 / 6 个 `@PENDING_A1` 标记**）。Reviewer 另在提交前草稿（untracked 版本）上实际运行：**24 passed / 15 xfailed / 93.70s**（`xfail(strict=True)` 符合“未实现契约”预期；**该数字绑定草稿而非 commit**，commit 版本的独立运行待 Stage-2 实现 commit 复跑） | 已提交；**不是实现通过证据** |
 | A1 实现（进行中） | 同 worktree `git diff --stat`：`src/…/authorization.py` M（+69/-?）、测试文件 M（-11 行，取消 xfail）；**未提交** | Stage-2 在实现 commit 上独立复跑验收（不得以未提交工作树判 PASS） |
 | A2 设计 ADR | `worktrees/a-next-run-admission/docs/A_NEXT_RUN_ADMISSION_DESIGN.md`，branch `feat/a-next-run-admission` @ **`960724b37bab31a017786cff28c0cbf85ee172e9`**（parent fd1d3a6，仅 docs 1 文件） | 已提交，DESIGN_ONLY |
 
