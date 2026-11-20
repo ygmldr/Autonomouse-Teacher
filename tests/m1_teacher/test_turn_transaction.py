@@ -1028,6 +1028,134 @@ def test_engine_falls_back_to_legacy_flow_without_transactional_api(
 
 
 # ---------------------------------------------------------------------------
+# Review P2-1/P2-2 regressions
+# ---------------------------------------------------------------------------
+
+
+def test_recovery_audit_error_does_not_satisfy_terminal_invariant(
+    components: demo.Components, tmp_path: Path
+) -> None:
+    """Review P2-1: RECOVERY audit ERROR events must not count as terminal.
+
+    Before the fix the repository treated any ``ERROR`` payload containing a
+    ``result_id`` as terminal, so after a failed recovery a direct repository
+    call could clear ``pending_item_id`` while the PREPARED attempt had no real
+    terminal event (bypassing INV-4).  The audit event must never satisfy the
+    invariant.
+    """
+
+    repository = SqliteRepository(tmp_path / "p2_1.db")
+    try:
+        engine, _history = build_engine(components, repository, ScriptedScorer())
+        state = start_and_drive_to_pending(engine, repository, components)
+        session_id = state.session_id
+        item_id = state.pending_item_id
+        interrupt_after_prepare(engine, session_id, item_id, "A")
+        # Tamper into the "inconsistent pending" state, then let recovery record
+        # its audit ERROR (which carries the prepared result_id).
+        repository.save_session(
+            replace(
+                repository.load_session(session_id),
+                turn_index=state.turn_index + 1,
+                pending_item_id=None,
+            )
+        )
+        report = engine.recover_session(session_id)
+        assert report.status == "FAILED"
+        assert "RECOVERY_STATE_INCONSISTENT" in report.error_codes
+        prepared_events = [
+            event
+            for event in repository.list_events(LEARNER)
+            if event.event_type == "ASSESSMENT_PREPARED"
+        ]
+        assert len(prepared_events) == 1
+        prepared_result_id = prepared_events[0].payload["result_id"]
+        audit_errors = [
+            event
+            for event in repository.list_events(LEARNER)
+            if event.event_type == "ERROR" and event.payload.get("stage") == "RECOVERY"
+        ]
+        assert len(audit_errors) == 1
+        assert audit_errors[0].event_id.startswith("evt.recoveryerror.")
+        assert audit_errors[0].payload.get("result_id") == prepared_result_id
+        assert report.pending_attempt_ids == (
+            prepared_events[0].payload["attempt_id"],
+        )
+        current = repository.load_session(session_id)
+        assert current is not None and current.pending_item_id is None
+        with pytest.raises(ValidationError) as excinfo:
+            repository.commit_teaching_turn(
+                learner_id=LEARNER,
+                session_id=session_id,
+                expected_session_version=session_version(current),
+                events=[],
+                snapshot=None,
+                next_session=replace(current, updated_at="2026-11-20T00:00:05Z"),
+                goal=None,
+            )
+        assert excinfo.value.code == "INCONSISTENT_PENDING"
+        assert repository.load_session(session_id).to_dict() == current.to_dict()
+    finally:
+        repository.close()
+
+
+def test_recovery_audit_event_seq_conflict_retry_branch(
+    components: demo.Components, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Review P2-2: the audit-event seq-conflict retry branch is reachable/covered.
+
+    The first audit ``ERROR`` append is forced to use an already used seq (as a
+    concurrent recovery would); the retry must allocate a fresh seq and return an
+    explainable ``RecoveryReport`` instead of leaking a ``ConflictError``.
+    """
+
+    repository = SqliteRepository(tmp_path / "p2_2.db")
+    try:
+        engine, _history = build_engine(components, repository, ScriptedScorer())
+        state = start_and_drive_to_pending(engine, repository, components)
+        session_id = state.session_id
+        item_id = state.pending_item_id
+        interrupt_after_prepare(engine, session_id, item_id, "A")
+        engine._scorer = MismatchedResultIdScorer()  # noqa: SLF001 - force audit path
+        original_next_seq = engine._next_event_seq
+        calls = {"count": 0}
+
+        def flaky_next_seq(_learner_id: str) -> int:
+            calls["count"] += 1
+            if calls["count"] == 1:
+                return 0  # already used by SESSION_STARTED: forces a native seq conflict
+            return original_next_seq(_learner_id)
+
+        monkeypatch.setattr(engine, "_next_event_seq", flaky_next_seq)
+        report = engine.recover_session(session_id)
+        monkeypatch.setattr(engine, "_next_event_seq", original_next_seq)
+        assert calls["count"] >= 2, "the seq-conflict retry branch must be exercised"
+        assert report.status == "FAILED"
+        assert "RECOVERY_SCORER_MISMATCH" in report.error_codes
+        audit_errors = [
+            event
+            for event in repository.list_events(LEARNER)
+            if event.event_type == "ERROR"
+            and event.payload.get("stage") == "RECOVERY"
+            and event.event_id.startswith("evt.recoveryerror.")
+        ]
+        assert len(audit_errors) == 1
+        # Once the scorer is deterministic again, recovery completes and a repeat
+        # audit append is a zero-event no-op.
+        engine._scorer = ScriptedScorer()  # noqa: SLF001
+        assert engine.recover_session(session_id).status == "RECOVERED"
+        assert len(
+            [
+                event
+                for event in repository.list_events(LEARNER)
+                if event.event_type == "ERROR" and event.payload.get("stage") == "RECOVERY"
+            ]
+        ) == 1
+    finally:
+        repository.close()
+
+
+# ---------------------------------------------------------------------------
 # Goal completion is committed in the same transaction as the mastery update
 # ---------------------------------------------------------------------------
 

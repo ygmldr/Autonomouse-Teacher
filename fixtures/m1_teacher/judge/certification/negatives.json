@@ -1,0 +1,71 @@
+{
+  "evidence_class": "MOCK",
+  "license": "CC0-1.0",
+  "negatives": [
+    {
+      "case_id": "cf_array_max_subarray",
+      "code": "def max_subarray_sum(nums):\n    best = current = nums[0]\n    for value in nums[1:]:\n        current = value if current < 0 else current + value\n        if current > best:\n            best = current\n    return best\n",
+      "description": "正确处理全负数边界的 Kadane 变体，必须通过全部隐藏用例并判为 PASS。",
+      "expected_classification": "PASS",
+      "failure_mode": "edge_correct",
+      "negative_id": "neg.pass.edge_correct",
+      "title": "边界正确解"
+    },
+    {
+      "case_id": "cf_sort_insertion",
+      "code": "def insertion_sort_impl(nums):\n    return list(nums)\n",
+      "description": "只定义了错误命名的函数，目标函数 insertion_sort 不存在，必须被判为 RE。",
+      "expected_classification": "RE",
+      "failure_mode": "missing_function",
+      "negative_id": "neg.re.missing_function",
+      "title": "缺少目标函数"
+    },
+    {
+      "case_id": "cf_tp_pair_sum_sorted",
+      "code": "def pair_sum_sorted(nums, target):\n    return nums[len(nums)]\n",
+      "description": "越界访问列表下标，稳定触发 IndexError，必须被判为 RE。",
+      "expected_classification": "RE",
+      "failure_mode": "runtime_exception",
+      "negative_id": "neg.re.runtime_exception",
+      "title": "运行期异常提交"
+    },
+    {
+      "case_id": "cf_tp_is_palindrome",
+      "code": "def is_palindrome(s)\n    return True\n",
+      "description": "缺少冒号的语法错误代码，必须被判为 RE 且不得进入逐用例比较。",
+      "expected_classification": "RE",
+      "failure_mode": "syntax_error",
+      "negative_id": "neg.re.syntax_error",
+      "title": "语法错误提交"
+    },
+    {
+      "case_id": "cf_dp_coin_change",
+      "code": "def coin_change(coins, amount):\n    while True:\n        pass\n",
+      "description": "while True 死循环，必须由判题侧超时终止并判为 TLE；数据完整性测试绝不执行该代码。",
+      "expected_classification": "TLE",
+      "failure_mode": "infinite_loop",
+      "negative_id": "neg.tle.infinite_loop",
+      "title": "死循环提交"
+    },
+    {
+      "case_id": "cf_dp_climb_stairs",
+      "code": "def climb_stairs(n):\n    return 0\n",
+      "description": "常量返回 0，忽略 n，必须被判为 WA。",
+      "expected_classification": "WA",
+      "failure_mode": "constant_return",
+      "negative_id": "neg.wa.constant_return",
+      "title": "常量返回错误解"
+    },
+    {
+      "case_id": "cf_bs_search_insert",
+      "code": "def search_insert(nums, target):\n    low = 0\n    high = len(nums)\n    while low < high:\n        mid = (low + high) // 2\n        if nums[mid] < target:\n            low = mid + 1\n        else:\n            high = mid\n    return low + 1\n",
+      "description": "正确的 lower_bound 后多返回 +1，命中与插入位置均差一，必须被判为 WA。",
+      "expected_classification": "WA",
+      "failure_mode": "off_by_one",
+      "negative_id": "neg.wa.off_by_one",
+      "title": "差一错误解"
+    }
+  ],
+  "schema_version": "m1b.judge.certification.negatives.v0",
+  "synthetic": true
+}

@@ -228,8 +228,29 @@ def _node_ids() -> set:
     return {node["node_id"] for node in _knowledge_graph()["nodes"]}
 
 
+#: Judge-only certification corpus (trust-boundary internal).  It is deliberately
+#: *not* teacher-visible and legitimately contains synthetic trust-boundary attack
+#: probes (network / environment / subprocess probes) and schema field names that
+#: the teacher-visible deny-list below is designed to reject.  Its integrity and
+#: synthetic guarantees are validated separately by
+#: ``test_judge_fixture_integrity.py``.
+#:
+#: Authorized minimal scan-scope narrowing for the new judge corpus (B-PR1):
+#: teacher-visible assertions remain unchanged; only the out-of-scope judge corpus
+#: is excluded from the broad teacher-visible scan.
+JUDGE_FIXTURES_DIR = FIXTURES_DIR / "judge"
+
+
 def _fixture_files() -> list:
-    return sorted(path for path in FIXTURES_DIR.rglob("*") if path.is_file())
+    """Teacher-visible fixture files only (``judge/`` is out of scope)."""
+
+    files = []
+    if README_PATH.is_file():
+        files.append(README_PATH)
+    files.extend(
+        sorted(path for path in (FIXTURES_DIR / "domains").rglob("*") if path.is_file())
+    )
+    return files
 
 
 def _all_fixture_texts() -> dict:
@@ -869,6 +890,10 @@ def test_public_fields_do_not_leak_answers_or_hidden_tests():
 def test_fixtures_contain_no_network_key_or_real_data_shapes():
     texts = _all_fixture_texts()
     assert texts, "no fixture files found to scan"
+    # The judge corpus is excluded by _fixture_files(); prove the exclusion is
+    # explicit and still covered by the dedicated integrity suite.
+    assert JUDGE_FIXTURES_DIR.is_dir(), "judge corpus expected to exist and be validated separately"
+    assert all(JUDGE_FIXTURES_DIR not in path.parents for path in texts)
 
     for path, text in texts.items():
         lowered = text.lower()

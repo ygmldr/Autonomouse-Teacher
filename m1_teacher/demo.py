@@ -42,6 +42,15 @@ Evidence classification (fixed M1-A vocabulary)
   makes no such claim ("offline synthetic only, not real teaching effect").
 """
 
+# B-PR1 judge-policy note: this module never executes learner CODE -- every
+# student outcome is replayed by MockStudentScorer (synthetic MOCK evidence).
+# Any future demo path that grades CODE through the independent scorer must
+# construct DeterministicScorer(..., trusted_fixture_only=True) explicitly and
+# label the fixtures as trusted synthetic.  There is no CLI/request switch that
+# enables untrusted CODE execution; the default policy remains
+# UNTRUSTED_CODE_EXECUTION_BLOCKED until B1 is independently reviewed and
+# human-approved.
+
 from __future__ import annotations
 
 import argparse

@@ -865,6 +865,16 @@ class SqliteRepository:
 
     @staticmethod
     def _terminal_result_ids(conn: sqlite3.Connection, session_id: str) -> set[str]:
+        """Result ids that have a *deterministic terminal* event.
+
+        This must match the engine's terminal detection exactly: an ``ASSESSED``
+        event, or an ``ERROR`` event with the deterministic evaluation-error id
+        (``evt.evalerror.<result_id>`` from the legacy flow).  Recovery audit
+        ``ERROR`` events (``stage="RECOVERY"``, id
+        ``evt.recoveryerror.*``) record that an attempt is *not* completed and
+        must **not** satisfy the orphan-PREPARED invariant (review P2-1).
+        """
+
         rows = conn.execute(
             "SELECT event_id, payload_json FROM history_events "
             "WHERE session_id = ? AND event_type IN ('ASSESSED', 'ERROR')",
@@ -872,9 +882,20 @@ class SqliteRepository:
         ).fetchall()
         result_ids: set[str] = set()
         for row in rows:
+            event_id = row["event_id"]
             payload = _decode_json_object(
-                row["payload_json"], f"terminal event {row['event_id']!r}"
+                row["payload_json"], f"terminal event {event_id!r}"
             )
+            if event_id.startswith("evt.assessed."):
+                pass
+            elif event_id.startswith("evt.evalerror."):
+                pass
+            else:
+                # RECOVERY_* audit ERROR events (and any other generic ERROR)
+                # never terminate an assessment attempt.
+                continue
+            if payload.get("stage") == "RECOVERY":
+                continue
             result_id = payload.get("result_id")
             if type(result_id) is str and result_id:
                 result_ids.add(result_id)
@@ -1192,7 +1213,7 @@ class SqliteRepository:
         with self._write_transaction() as conn:
             if self._event_exists(conn, event.event_id):
                 return False
-            self._check_seq_conflict(conn, event)
+            self._check_seq_conflict(conn, event, code="EVENT_SEQ_CONFLICT")
             self._ensure_learner_row(conn, event.learner_id, event.created_at)
             self._insert_event(conn, event)
         return True
@@ -1209,7 +1230,7 @@ class SqliteRepository:
                 if self._event_exists(conn, event.event_id):
                     flags.append(False)
                     continue
-                self._check_seq_conflict(conn, event)
+                self._check_seq_conflict(conn, event, code="EVENT_SEQ_CONFLICT")
                 self._ensure_learner_row(conn, event.learner_id, event.created_at)
                 self._insert_event(conn, event)
                 flags.append(True)
@@ -1251,7 +1272,7 @@ class SqliteRepository:
                 if self._event_exists(conn, event.event_id):
                     flags.append(False)
                     continue
-                self._check_seq_conflict(conn, event)
+                self._check_seq_conflict(conn, event, code="EVENT_SEQ_CONFLICT")
                 self._ensure_learner_row(conn, event.learner_id, event.created_at)
                 self._insert_event(conn, event)
                 flags.append(True)
