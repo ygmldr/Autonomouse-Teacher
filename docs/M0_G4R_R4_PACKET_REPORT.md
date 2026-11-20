@@ -132,3 +132,94 @@ Verifier 只读 bytes，不打开 SQLite，因此校验动作本身不会生成 
 - 独立 Reviewer 的独立机器/独立遍历器复算未发生；本报告 PASS 仅指 Owner 侧 synthetic 测试。
 - 旧 v1 Packet 与旧 Reviewer 报告/矩阵未修改；本阶段不归档任何 Reviewer 结论，不改变
   `G4-H/G5/G6/LiveGate/M0/E5_PRELIVE_FULL` 状态常量。
+
+---
+
+## 8. 阶段二（append-only）— 最终 Packet v2 真实构建与独立全树校验（冻结 impl `d33e0aa`）
+
+> 本节为阶段一之后的 append-only 记录，不改写上文阶段一文字。所有数字为本机 Owner 侧实测；
+> Independent Review 仍为 `PENDING_INDEPENDENT_REVIEW`。
+
+### 8.1 冻结输入
+
+| 项 | 值 |
+|---|---|
+| frozen impl commit（packet impl id） | `d33e0aabd1714a486325b745c436cb59855d6539` |
+| impl content sha256（canonical src tar） | `5551078a284a40da9b6049c4f7bc5d3abfacfa8f364bc4949b44999257922e45` |
+| base commit | `3e7afee077845a071cd364e93ab209cac20b2d5f` |
+| docs commit（docs-only child of impl） | `bc08bdd3f6cceb73462c33acd98bda276d0b1fbf`（parent=`d33e0aa`；仅 docs/ 变化：joint regression report / review request / final matrix 等；无 code 变化） |
+| 终稿矩阵 | `docs/Autonomous_Teacher_M0_G4R_Test_Evidence_Matrix_v1.0.csv`，sha256 `741d7d5598cb9357c9ec9126ebcc277d504af93c0bc591af0d0c395b303d1382`，65 case 行 |
+| new Stage | `stage-20261120T165407Z`，base/head_at_build=`d33e0aa`，manifest `cc7ccb61bc4df76675b14e1f73bdd9209d3a13eeda7e79193e913ea284874d03`，stage tree `933f2c07a6c79415183a4d3f1db1ba19249b95d96ee88334bd43e71dd40d3882`，trusted `f10053d4107170b0b53362dbc9d1c0120d07dd7ee35339a315749de4b3431add`，candidate `131ab68e10f25d4aa893348754100c0fb0e221059b3fa79e3f7be9547c219006`，loaded src 52/52 == git d33e0aa blobs |
+| environment（exclusive window 17:05:50–17:08:20Z，T0/T1 一致） | rootfs `25491e45aa3dc54c526db9b9d46d18b31c7840150473e2fdb4d8b882f02fe9c0`（清理后）、deps `e07729d7997944417b1c25531749b3e6e5e34aa4248f01dc8f370282082ecb98`、DSH runtime `1cc41d5a8745a5b9d47c8604e44f23eb8af2d8ca02b2afa0be101d5f71be6ea4`（0.2.2-rc.2, 182,717,632B）、adapter built JS `2cb424616b7380bff61f8ce760e229a0c1d2b32c4a5f2954cdf66c3937bf74ba` |
+
+环境漂移与清理记录（**不写“全程 NO_DRIFT”**）：`16:43:53 25491e45 → 16:52–16:53 0340fb78
+（并发 OCI/full-suite 活动）→ 16:53:34 恢复 25491e45 → 16:54:07 Stage build（canonical）→
+16:55–16:59 a6737150/e1a8fcf9（OCI 直接 `--rootfs` 造成空挂载点 + probe/ 污染）→ 17:01:49
+清理并复算恢复 25491e45`。漂移窗口内 Stage build 被 fail-closed 拒绝（`rootfs is not canonical
+before build`，行为正确）；16:55Z OCI 结果作废（污染 rootfs + 2 个 f2 collection errors）。
+L2 证据在独占窗口串行采集（T0/T1 rootfs 相等、`podman ps -a` 前后为空）。
+以上均为已记录的瞬时漂移与恢复，**不得外推为生产/持续 NO_DRIFT**。
+
+### 8.2 Packet 构建与全树校验（Owner 实测）
+
+- Packet 根：`/root/Autonomous Teacher/worktrees/g4r-packet-final/artifacts/review-packet-g4r-v2-d33e0aabd1714a486325b745c436cb59855d6539`
+  （gitignored；旧 v1 Packet 与旧 Reviewer 报告未复制进 Packet，仅以 SHA 引用）
+- frozen UTC：`2026-11-20T17:22:37Z`；构建命令：`scripts/g4r/build_packet_g4r.py --impl-sha d33e0aa… --impl-content-sha256 5551078a… --staging … --metadata … --livegate-snapshot …`（exit 0，`BUILT_AND_SELF_CHECKED`）
+- counts：`payload_count=40`、`hash_manifest_entry_count=41`、`total_regular_files=43`；`file_mode=0444`；metadata 例外固定为 `hashes.sha256,manifest.json,packet-integrity-report.txt`
+- `payload_tree_sha256`=`4300a7c67a031136cd52f46b44d325db7a5dd14df82f409d25d6a2247737c1f6`
+- `manifest_sha256`=`fe45d7602bd7a115cfdc3dd3a85e889c0f7b4fa642c03a54717c06f0bcf403a9`
+- `hashes_sha256`=`e7a67c77b8e213fac32cb4aabeae56075dcf4982c0281479fae25cca1c4bdddb`
+- manifest identity：`impl_sha=impl_git_commit=d33e0aa…`、`impl_content_sha256=5551078a…`、`code_sha=5551078a…`、`docs_sha`（canonical docs tar digest）、`git_head_at_build=d33e0aa…`；`live_gate=BLOCKED`（single snapshot，`reason_count=1`，由 verifier 重算 `reasons_sha256`，不硬编码）
+- 全树 verify：`scripts/g4r/verify_packet_g4r.py --packet-root <root> --expected-impl-sha d33e0aa…`
+  → **exit 0，`PASS`，0 issues，0 symlink，0 unlisted，0 mismatch，counts 一致**；verifier 不 import/打开 sqlite3。
+- v1 Packet 前后不变：**177 files / 0 symlink / `sha256sum -c hashes.sha256` 173/173 OK exit 0 /
+  `hashes.sha256`=`421b07ae3ad0eac2d36c032cd384d252dfda4ac521e193577aed56fc60ca9d3d`**（未写入/未重打包）。
+
+### 8.3 验证副本 mutation suite（原 Packet 未被修改）
+
+在 `/tmp` 验证副本上逐项注入，**12/12 全部按预期 FAIL**（原 Packet 保持 PASS）：
+
+| mutation | 预期/实测 reason code |
+|---|---|
+| 新增 `*.sqlite3-wal`/`-shm` | `SQLITE_SIDECAR_PRESENT`（+`UNLISTED_PATH`） |
+| 隐藏文件 | `HIDDEN_PATH` |
+| 未知文件 | `UNLISTED_PATH` |
+| 删除 payload | `MISSING_PATH` |
+| 改字节 | `HASH_MISMATCH` |
+| 改 mode | `MODE_MISMATCH` |
+| symlink 替换 | `SYMLINK_PATH` |
+| 硬链异常（st_nlink>1） | `HARDLINK_ANOMALY` |
+| 改 manifest | `HASH_MISMATCH` / `COUNT_MISMATCH` / `INTEGRITY_REPORT_MISMATCH` |
+| 改 hashes 行 | `HASH_MISMATCH` |
+| 改 LiveGate snapshot reasons | `LIVEGATE_CROSSREF_MISMATCH`（+`HASH_MISMATCH`） |
+| 改 manifest impl identity | `HASH_MISMATCH` / `MANIFEST_INVALID` |
+
+原始日志：`artifacts/g4r/r4/final-build-and-verify.log`、`artifacts/g4r/r4/final-mutation.log`、
+`artifacts/g4r/r4/{final-build-result,final-verify-result,metadata,livegate-snapshot}.json`、
+`artifacts/g4r/r4/{manifest.json,hashes.sha256,packet-integrity-report.txt}`（gitignored）。
+
+### 8.4 引用的 Integration 联合回归（独立证据根 `artifacts/g4r/`）
+
+- Host 单进程 1420 collected / 1412 passed / 5 failed / 3 skipped（0 collection error）；5 项
+  逐 nodeid 分类 0 REAL_REGRESSION（ENVIRONMENT_ONLY / FLAKY_ORDER_DEPENDENT）。
+- OCI filtered（清理后、rootfs copy、`--network none --read-only --user 65534:65534`）：
+  total 1081 / passed 1052 / failed 1 / skipped 28 / deselected 69；唯一 fail 为 runtime
+  target-profile ENV；R1 auth 26 tests 因 OCI uid Owner 语义显式 deselect（L1-HOST 26/26 PASS）。
+- Node TAP 36/36；Scanner self-test PASS + 0 findings（503 files/1070 blobs/208 commits）；
+  LiveGate BLOCKED / require_live SECURITY_BLOCKED / run_live exit3 / CLI --live exit3 /
+  Adapter 4/4 SECURITY_BLOCKED / strace 0 network lines；L2 exclusive：F2 ok、F5 3/3 true、
+  containers_after=[]、0 real model/HTTP/key。
+- 计数与失败分类原始文件：`regressions/{host,oci,node,ruff,scanner,livegate}/counts.json`、
+  `regressions/index.json`（含 `exclusive_window_oci_rootfs_copy` 与 official OCI counts 的区分）。
+
+### 8.5 未验证 / 限制（阶段二更新）
+
+- Independent Reviewer 的独立遍历器复算、真实原始包审计与 Verdict：**未发生**，状态
+  `PENDING_INDEPENDENT_REVIEW`。
+- `B03`/`E5-P04` 仍 **UNVERIFIED**；本 Packet 不宣称 E5-PreLive Full / G4-H / G5 / G6 / Live /
+  生产安全；0 真实 Key/Provider/外部 HTTP。
+- 环境身份来自一次性独占窗口与清理后复算，存在已记录的瞬时漂移历史；不得外推为生产或
+  持续 NO_DRIFT。
+- 旧 v1 Packet、旧 Reviewer 报告、旧 46 行矩阵均未修改；状态常量不变
+  （`G4-H=NOT_AUTHORIZED`、`G5=BLOCKED`、`G6=NOT_RUN`、`LiveGate=BLOCKED`、
+  `M0=DECISION_PENDING`、`E5_PRELIVE_FULL=BLOCKED_PENDING_HUMAN_DEPLOYMENT`）。
