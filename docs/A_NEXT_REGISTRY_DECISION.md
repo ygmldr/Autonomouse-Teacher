@@ -4,7 +4,10 @@
 - **实施者**：`a-g4r-registry`（Implementer-Runtime；非 Reviewer）
 - **工作树/分支**：`/root/Autonomous Teacher/worktrees/a-next-registry` @ `feat/a-next-registry`
 - **Parent / Base**：`fd1d3a6d101f17e6a86d7c43f06c630326e3e3af`（`work/g4r`）；本文件与脚本为本分支新增，未改动冻结 Packet/Review 字节
-- **日期（UTC）**：2026-11-20；攻击矩阵实测窗口 `19:44:50Z → 19:45:54Z`，伪造/重放攻击 `19:47:31Z`，host 复验 `19:56Z` 前后
+- **日期（UTC）**：2026-11-20；攻击矩阵实测窗口 `19:44:50Z → 19:45:54Z`，伪造/重放攻击 `19:47:31Z`；更正轮复跑 `20:07:52Z`/`20:07:57Z`（默认 Stage 恢复副本）
+- **修正轮次（Reviewer batch-2 PASS 条件）**：C1 复现路径 + C2 矩阵行/无可核表述 + C3 裁决映射 + C5 措辞/identity；C4 由矩阵/Packet 负责。修正提交 `4cc3a26`（脚本/测试）+ 本文件 docs 提交
+- **Stage 恢复声明**：原证据 Stage `/tmp/at-f4-clean/artifacts/g3c/stage` 在 `INCIDENT_20261121` 后消失；当前复现使用**经哈希验证的恢复副本** `/root/Autonomous Teacher/worktrees/a-next-rrev6/artifacts/g3c/stage`（bridge `2cb42461…`、skill `521bc0f1…`、dsh-tools `5d95d7f4…`、dsh-llm `45f7d934…`、cordis `70be1056…` 全部与 Reviewer 已核值一致；runner 启动时强制校验，不符即 fail-closed）
+- **Reviewer 独立复验引用**：独立 Reviewer host 复跑 = `7 passed / 17.46s`（当时 runtime 可用时）与 11/11 modes 复现；本文件的 Owner 计数见 §5
 - **性质**：**no-key / no-model / no-external-network / no-live**。0 真实 Key（未读取凭据）、0 真实 Provider 调用、0 外部 HTTP/TCP、0 下载/拉镜像、0 新依赖、无容器、未直挂冻结 rootfs、未修改冻结 Runtime/Stage/deps/config。
 - **不声明**：本文件不是 `B03/E5-P04 PASS`、不是 E5-Full/G4-H/G5/G6 授权、不是 Live 批准、不是 Registry 权威性关闭；`LiveGate=BLOCKED`、`G4-H=NOT_AUTHORIZED`、`G5=BLOCKED`、`G6=NOT_RUN` 不变；`config/g4/runtime-policy.json` 的 `registry_status` **保持 `UNVERIFIED_NO_AUTHORITATIVE_MERGED_EXPORT` 未改**（sha256 `d0851a41…`）。
 
@@ -23,6 +26,16 @@
 3. **observer 丢失已实测**：observer 只写 2 条即静默停止，Runtime 照常运行并进入 dispatch；仅看 JSONL 无法区分“clean”与“证据被删”（`20261120T194731Z-forged-replay`、`20261120T194517Z-observer-loss`）。
 4. **内部工具执行可完全不出现在 Provider request（本轮实测）**：候选内注册 `g4r_internal_marker` 并在两次 turn 之间直接 `ctx.tools.execute()` 成功执行（sentinel 落盘 at `19:45:40.224Z`），而两轮 Provider request 的 `tools` 均只有 `[skill_lookup]`、dispatch face 亦然 → Provider-request face 白名单**无法**证明/阻止 Candidate 内部工具执行（`20261120T194536Z-two-turn-internal-execute`）。
 5. **方案 A 所需的“可信测量+受控监控点+独立 Replay 证明”在本轮均不存在**：要不可被 Candidate 修改，测量必须在 Candidate 信任域之外（OS/hypervisor/独立受信进程/经审 fork 的 Runtime 可信通道）；当前无该组件、无独立 Reviewer 复算（RG-12 属 R5）、也未做 OS sandbox 证明（属 A4/R-REV6 的 L2 OCI 窗口）。因此 A 不能以“Owner 写了绑定字段/新 schema/哈希”冒充。
+
+### 0.1 与 A-NEXT 矩阵/RG 的裁决映射（C3）
+
+| 项 | 本轮状态 | 说明 |
+|---|---|---|
+| `A3-01` 权威 registry | **UNVERIFIED（保留）** | DSH SDK 不提供不可由 Candidate 修改的 complete effective registry；本轮未取得权威证据，也不以自报/哈希冒充 |
+| `A3-02` Registry 对抗/分类 | **L1 分类 PASS / L2 NOT_RUN** | L1：11 modes + forge/replay/suppress/observer-loss 已按事实分类；L2（独立 Reviewer/OS 级复算与真实 OCI 窗口）**NOT_RUN**，不得视为 L2 PASS |
+| `B03` / `E5-P04` | **UNVERIFIED（维持）** | 不因本文件或 B 补偿控制而关闭 |
+| 方案 B 补偿控制 | **条件式，依赖 A4 L2 OS sandbox 证明** | Provider-face 白名单 + 无网络/只读/非 root 容器；该容器边界证据属 A4/R-REV6（本轮 NOT_RUN），未证明前 B 只是风险缓解 |
+| Registry 是否“关闭” | **否** | 本裁决不代表 Registry 权威性关闭；不得向维护者/用户表述为 Registry verified/closed |
 
 **可继续采用候选 B 的边界**（见 §4）：`Provider-request face` 的 Controller 白名单（既有 B04/F2 机制）+ 内部工具风险被限制在无网络/只读/非 root 容器内；这能降低“未批准工具进入可计费 send”的概率，但**不等于** Registry 权威/关闭，`B03/E5-P04` 必须维持 `UNVERIFIED`。
 
@@ -50,6 +63,8 @@
 ### 2.1 测试方法与隔离（适用全部运行项）
 
 - **Runner**：`scripts/a_next/registry/run_matrix.py`（host 上运行冻结 DSH）：测试 copy 中把冻结 `config/g3d/candidate/bridge.patch.yml` 的 insert 路径改写为临时 Stage 的 `file://`（唯一改动；冻结文件/Stage 一字节不改），再追加 probe patch；`unshare -n`（空 netns）+ `env -i HOME/DSH_HOME/TERM` 起 Runtime；SDK JSON-RPC 驱动 1/2 个真实 turn。
+- **Stage 定位（C1 修正）**：`DEFAULT_STAGE_CANDIDATES` = `<repo>/artifacts/g3c/stage` 与 `/root/Autonomous Teacher/worktrees/a-next-rrev6/artifacts/g3c/stage`（INCIDENT 后 hash-verified 恢复副本）；**不再引用已消失的 `/tmp/at-f4-clean/...`**。`locate_stage()` 在运行前强制校验 `EXPECTED_STAGE_SHA256`（bridge/skill/dsh-tools/dsh-llm/cordis），任一不符 → `STAGE_SHA_MISMATCH` fail-closed；无可用候选 → `STAGE_MISSING` 并提示显式 `--stage`。run-summary 写入 `stage_verification` 与 `stage_recovery_note`。
+- **隔离声明（C5 修正）**：`key_and_provider_nonuse` 不是 runner 的实测断言，而是**由隔离设计保证**（`env -i` 显式最小环境不继承 Secret、`unshare -n` 空网络命名空间、仅可达合成 fake bridge UDS、启动时不注入任何 Key/凭据）；run-summary 以结构声明记录，不伪称“实测 0 Key”。
 - **合成 Provider**：多 turn/resume 用例使用 `scripts/a_next/registry/fake_bridge.py`（AF_UNIX 上按冻结 bridge 协议回复 ack/chunk/usage/finish；**无模型、无 Key、无 HTTP**）。冻结 adapter 固定 socket `/work/g3b/bridge.sock`；runner 临时创建 `/work/g3b`、运行后清理（实测 `ls -d /work` → 不存在；不触碰冻结 rootfs）。
 - **观测**：probe 事件 + fake bridge request 记录 + Runtime stdout/stderr 原始日志；每 run 的 `run-summary.json` 记录 command/UTC/exit/SHA/analysis。
 - **证据索引**：`artifacts/a_next/registry/ATTACK_MATRIX_INDEX.json`（12 个 run 的 mode/UTC/exit/SHA/verdict）+ `artifacts/a_next/registry/identity.txt`（Runtime/Stage/config/脚本 SHA）。原始日志均在 gitignored 目录。
@@ -64,6 +79,7 @@
 | 4 | 同名 shadow（scoped shadow 优先级） | **UNVERIFIED** | 源码语义（`dsh-tools` `view()`：own shadow inherited；同 layer 重复拒绝） | 需要 agent-scoped plugin context 才能构造真实 shadow；本轮未创建 Agent-scope 攻击，不宣称验证 |
 | 5 | schema `required` 漂移 | **MEASURED_PASS（L1）** | `--mode schema-drift`；`20261120T194500Z-schema-drift` | v1 digest `1e0239ef670e…` → v2 `478c86e76cd4…`（仅 `required` 变化） |
 | 6 | schema `description` 漂移 | **MEASURED_PASS（L1）** | 同上 | v1 `ed6f57bd679e…` → v2 `081960e6a826…`（仅 description 变化） |
+| 7a | **dispatch 前 late register `bash`（genuine attack run，供 #14-16 伪造攻击使用）** | **MEASURED_PASS（L1）** | `--mode late-bash-before-dispatch`；`20261120T194522Z-late-bash-before-dispatch`（另 `20261120T200757Z-two-turn-bash` 为默认 Stage 复跑） | epoch 2 注册 `bash` 后 dispatch face=`[bash, skill_lookup]`、`unknown=[bash]`、`face_equals_registry=true`；enforce 抛 `A_NEXT_REGISTRY_TOOL_FACE_DENIED` 且未到达 adapter（无 bridge 请求）；该 run 是 #14-16 的 genuine `attack_run` 输入 |
 | 7 | 第二 turn 间 late register → 第二次 dispatch 拒绝（RG-05） | **MEASURED_PASS（L1）** | `--mode two-turn-bash`；`20261120T194527Z-two-turn-bash`（fake bridge，2 个真实 turn） | turn1 face `[skill_lookup]` 放行；turn 间 epoch 2 注册 `bash`；turn2 face `[bash, skill_lookup]`、`unknown=[bash]`、enforce 抛 `A_NEXT_REGISTRY_TOOL_FACE_DENIED`；**fake bridge 只收到 1 次 request**（turn2 未到 adapter）；turn/end = `completed`/`error` → 证明“不只检查首轮” |
 | 8 | late tool execute 不进入 provider request（A-Q4 核心） | **MEASURED_PASS（L1）** | `--mode two-turn-internal-execute`；`20261120T194536Z-two-turn-internal-execute` | 两轮之间注册 `g4r_internal_marker` 并 `ctx.tools.execute()` 成功（sentinel `19:45:40.224Z`）；两轮 dispatch face 与 fake bridge request `tools` 均只有 `[skill_lookup]` → 内部执行可绕过 Provider-request face |
 | 9 | 单 turn 内 late execute 早于 dispatch | **MEASURED_PASS（L1）** | `--mode internal-execute`；`20261120T194511Z-internal-execute` | sentinel `19:45:12.756Z`；dispatch face 仍仅 `[skill_lookup]`（注册→执行→注销均在 dispatch 前完成） |
@@ -71,13 +87,13 @@
 | 11 | session-title / 辅助 provider stream | **MEASURED_PASS（title；L1）** | `--mode two-turn-title`；`20261120T194545Z-two-turn-title` | 2 turn = 2 dispatch（无额外 provider stream）；`session/title` 事件 `source.kind=fallback`；无 `purpose=title` 请求 |
 | 12 | compaction 的 effective registry | **UNVERIFIED** | 冻结 merged config（39 entries）中 `compaction-basic`/`image-offload` 均 `disabled:true`；本轮未启用/未触发 compression | 未取得 compaction 路径的 registry/dispatch 证据；不得外推 |
 | 13 | observer 丢失（写失败/中途停止） | **MEASURED_PASS（gap 已证，非 fail-open）** | `--mode observer-loss`（failAfterRecords=2）；`20261120T194517Z-observer-loss`；伪造攻击里的 suppress | probe 仅 2 条记录、0 条 dispatch；Runtime `exit 0` 且实际进入 adapter（turn error 属无 fake bridge 的预期）→ 观测失败不改变 Runtime 行为，但产生**不可从 JSONL 区分 clean/被删**的证据缺口 |
-| 14 | 伪造（forge）自报快照 | **MEASURED_PASS = attack succeeded（负面结论成立）** | `forged_replay_attack.py`；`20261120T194731Z-forged-replay` | 对真实攻击 run（genuine naive verdict=`UNAPPROVED bash`）forge 为 approved 集合 → naive verifier `accepted=true` |
-| 15 | 重放（replay）干净 run 记录 | **MEASURED_PASS = attack succeeded** | 同上 | 把干净 run 的事件换 `run_label` 移入攻击 run → naive verifier `accepted=true` |
-| 16 | 抑制（suppress）违规记录 | **MEASURED_PASS = attack succeeded** | 同上 | 删掉违规 dispatch、补一条干净 dispatch → naive verifier `accepted=true` |
+| 14 | 伪造（forge）自报快照 | **ATTACK_CONFIRMED（负面结论：自报可伪造）** | `forged_replay_attack.py`；`20261120T194731Z-forged-replay` | 对真实攻击 run（genuine naive verdict=`UNAPPROVED bash`）forge 为 approved 集合 → naive verifier `accepted=true` |
+| 15 | 重放（replay）干净 run 记录 | **ATTACK_CONFIRMED（负面结论：跨 run 可重放）** | 同上 | 把干净 run 的事件换 `run_label` 移入攻击 run → naive verifier `accepted=true` |
+| 16 | 抑制（suppress）违规记录 | **ATTACK_CONFIRMED（负面结论：证据可抑制）** | 同上 | 删掉违规 dispatch、补一条干净 dispatch → naive verifier `accepted=true` |
 | 17 | 独立 Reviewer 复算（RG-12 等价） | **NOT_RUN** | 需 R5 Independent Reviewer 自建 probe/攻击，不采信 Owner | 本文件不能代替独立复算 |
 | 18 | OS sandbox 证明（内部工具执行不可绕过） | **NOT_RUN / UNVERIFIED** | 属 A4/R-REV6 的 L2 OCI 窗口；本轮未用容器（也不得直挂冻结 rootfs） | B 方案的“容器限制”需要独立 L2 证明，本轮未做 |
 
-> 所有“MEASURED_PASS（L1）”仅表示**该机制观测在 L1 诊断面成立**，不是 Registry 权威/B03/E5-P04 通过；标 `UNVERIFIED/NOT_RUN` 的项没有证据，不写成 PASS。
+> 所有“MEASURED_PASS（L1）”仅表示**该机制观测在 L1 诊断面成立**，不是 Registry 权威/B03/E5-P04 通过；`ATTACK_CONFIRMED` 表示**攻击成功/负面结论成立**（自报不可信），更不是 PASS；标 `UNVERIFIED/NOT_RUN` 的项没有证据，不写成 PASS。
 
 ---
 
@@ -124,7 +140,7 @@
 
 ## 5. 证据、命令与复现
 
-**变更文件（本分支，commit `c4500f8` + docs commit）**
+**变更文件（本分支：初版 `c4500f8` feat + `e09ac7c` docs；Reviewer 条件修正 `4cc3a26` fix(C1/C5) + 本 docs 提交(C2/C3/C5)）**
 
 | 路径 | 作用 |
 |---|---|
@@ -132,7 +148,7 @@
 | `scripts/a_next/registry/run_matrix.py` | host 冻结 Runtime 攻击矩阵 runner（隔离、测试 copy patch 改写、SDK 驱动、2-turn/resume） |
 | `scripts/a_next/registry/fake_bridge.py` | 合成 trusted-bridge UDS provider（无模型/Key/HTTP，使真实 turn 可完成） |
 | `scripts/a_next/registry/forged_replay_attack.py` | forge/replay/suppress 攻击脚本（对真实 L1 证据） |
-| `tests/a_next_registry/test_registry_attack_matrix.py` | 6 单测 + 1 runtime 集成（无 runtime 时 skip/BLOCKED，不伪造） |
+| `tests/a_next_registry/test_registry_attack_matrix.py` | 8 单测（含 C1 stage SHA fail-closed 2 例）+ 1 runtime 集成（无 runtime 时 skip/BLOCKED，不伪造） |
 | `docs/A_NEXT_REGISTRY_DECISION.md` | 本裁决与攻击矩阵 |
 
 **实测命令（全部 UTC 2026-11-20，host，`unshare -n`，0 Key/0 真实 Provider/0 HTTP）**
@@ -141,27 +157,33 @@
 |---|---|
 | `python3 scripts/a_next/registry/run_matrix.py --all` | 11 个 mode 全部 exit 0；run dirs `artifacts/a_next/registry/20261120T1944*`（19:44:50–19:45:54Z） |
 | `python3 scripts/a_next/registry/forged_replay_attack.py` | 3 个攻击全部 `attack_succeeded=true`（19:47:31Z，run `20261120T194731Z-forged-replay`） |
-| `"/root/Autonomous Teacher/.venv/bin/python" -m pytest tests/a_next_registry -q` | `6 passed, 1 skipped`（skip=BLOCKED，无 runtime 不伪造） |
-| `G4R_RUN_RUNTIME=1 G4R_STAGE=/tmp/at-f4-clean/artifacts/g3c/stage …pytest…` | `7 passed in 17.49s`（真实冻结 Runtime 集成） |
+| `python3 scripts/a_next/registry/run_matrix.py --mode baseline`（**不带 --stage**，C1 修正后） | exit 0；自动定位并 SHA 校验恢复副本；run `20261120T200752Z-baseline`，`stage_verification.verified=true` |
+| `python3 scripts/a_next/registry/run_matrix.py --mode two-turn-bash`（**不带 --stage**，C1 修正后） | exit 0；2 dispatch、第二次 deny、fake bridge 1 次；run `20261120T200757Z-two-turn-bash` |
+| `"/root/Autonomous Teacher/.venv/bin/python" -m pytest tests/a_next_registry -q` | `8 passed, 1 skipped`（skip=BLOCKED，无 runtime 不伪造；新增 C1 stage SHA fail-closed 2 单测） |
+| `G4R_RUN_RUNTIME=1 G4R_STAGE="/root/Autonomous Teacher/worktrees/a-next-rrev6/artifacts/g3c/stage" …pytest…` | `9 passed in 17.44s`（真实冻结 Runtime 集成；`G4R_STAGE` 指向 hash-verified 恢复副本） |
+| 独立 Reviewer host 复跑（引用 Reviewer 结论，非本机冒充） | `7 passed / 17.46s`、11/11 modes 独立复现 |
 | `"/root/Autonomous Teacher/.venv/bin/python" -m ruff check scripts/a_next tests/a_next_registry` | `All checks passed!` |
 | `ls -d /work`（runner 后） | 不存在（临时 UDS 目录已清理） |
 
-**环境/身份 SHA（只读）**：Runtime binary `1cc41d5a8745a5b9d47c8604e44f23eb8af2d8ca02b2afa0be101d5f71be6ea4`（`--version` = `0.2.2-rc.2`，exit 0）；冻结 overlay `0cf5d340…`；runtime-policy `d0851a41…`；Stage bridge build `2cb42461…`（== policy `stage_binding.adapter_built_js_sha256`）；Stage skill build `521bc0f1…`；stage `dsh-tools/src/index.ts` `5d95d7f4…`、`dsh-llm/src/index.ts` `45f7d934…`、`cordis/package.json` `70be1056…`；merged config 39 entries；host Python 3.11.15（venv）/3.12.3（runner）、Node v22.23.2。
+**环境/身份 SHA（只读）**：Runtime binary `1cc41d5a8745a5b9d47c8604e44f23eb8af2d8ca02b2afa0be101d5f71be6ea4`（`--version` = `0.2.2-rc.2`，exit 0）；冻结 overlay `0cf5d340…`；runtime-policy `d0851a41…`；**恢复 Stage** `/root/Autonomous Teacher/worktrees/a-next-rrev6/artifacts/g3c/stage` 的 bridge build `2cb42461…`（== policy `stage_binding.adapter_built_js_sha256`）/skill build `521bc0f1…`/`dsh-tools/src/index.ts` `5d95d7f4…`/`dsh-llm/src/index.ts` `45f7d934…`/`cordis/package.json` `70be1056…`（全部由 runner `EXPECTED_STAGE_SHA256` 强制校验，且与 Reviewer 已核 SHA 一致）；merged config 39 entries；host Python 3.11.15（venv）/3.12.3（runner）、Node v22.23.2。identity.txt 已更正 base `fd1d3a6` 与 final commit 的关系，并记录恢复 Stage 声明。
 
-**证据路径（gitignored）**：`artifacts/a_next/registry/ATTACK_MATRIX_INDEX.json`、`identity.txt`、各 run 目录（`run-summary.json`、`probe-events.jsonl`、`fake-bridge-requests.jsonl`、`runtime-stdout/stderr.log`）、`20261120T194731Z-forged-replay/attack-report.json`。
+**证据路径（gitignored）**：`artifacts/a_next/registry/ATTACK_MATRIX_INDEX.json`（含初版 11 modes + 恢复 Stage 复跑 `20261120T20075*` + forgery）、`identity.txt`（已更正 head/commit 与恢复声明）、各 run 目录（`run-summary.json`、`probe-events.jsonl`、`fake-bridge-requests.jsonl`、`runtime-stdout/stderr.log`）、`20261120T194731Z-forged-replay/attack-report.json`。历史 run-summary 的 `real_key_present/real_provider_calls` 是初版字段快照，已被 `key_and_provider_nonuse`（隔离设计声明）取代；新 run 另含 `stage_verification`/`stage_recovery_note`/`exit_code`。
 
-**复现**（在 worktree `a-next-registry`，无 Key/无网络）：
+**复现**（在 worktree `a-next-registry`，无 Key/无网络；C1 修正后不带 `--stage` 亦可自动定位并 SHA 校验恢复副本，若两者都不存在则 `STAGE_MISSING` fail-closed）：
 ```bash
 python3 scripts/a_next/registry/run_matrix.py --all
 python3 scripts/a_next/registry/forged_replay_attack.py
 "/root/Autonomous Teacher/.venv/bin/python" -m pytest tests/a_next_registry -q
+# 如默认候选不可用，显式指定 hash-verified 恢复副本（runner 仍会校验 SHA）：
+python3 scripts/a_next/registry/run_matrix.py --mode baseline \
+  --stage "/root/Autonomous Teacher/worktrees/a-next-rrev6/artifacts/g3c/stage"
 ```
 
 ---
 
 ## 6. 未验证 / 需维护者决定
 
-**UNVERIFIED / NOT_RUN（本文件不写成 PASS）**：权威（不可被 Candidate 修改的）complete effective registry；同名 scoped shadow（#4）；compaction 路径（#12）；独立 Reviewer 复算/RG-12 等价（#17）；OS sandbox 对内部工具执行的证明（#18）；A 方案的实现与独立 Replay（§3）；任何“未来配置/插件/版本”的 registry 行为。
+**UNVERIFIED / NOT_RUN（本文件不写成 PASS）**：权威（不可被 Candidate 修改的）complete effective registry；同名 scoped shadow（#4）；compaction 路径（#12）；独立 Reviewer 复算/RG-12 等价（#17，L2 NOT_RUN）；OS sandbox 对内部工具执行的证明（#18）；A 方案的实现与独立 Replay（§3）；任何“未来配置/插件/版本”的 registry 行为。C3 明确：`A3-01=UNVERIFIED`、`A3-02=L1 分类 PASS / L2 NOT_RUN`、`B03/E5-P04=UNVERIFIED`、B 条件式依赖 A4 L2 OS sandbox 证明、Registry 未被关闭。
 
 **需维护者/安全 Reviewer 决定**：
 
