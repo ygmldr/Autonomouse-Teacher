@@ -42,7 +42,8 @@ ROOTFS_CANON = lib3d.ROOTFS_CANON
 STATE_CP_FILES = ("request-lifecycle.jsonl", "recovery-diagnostics.jsonl",
                   "dispatch-window.jsonl", "g4c-send-journal.jsonl",
                   "g4c-policy.json", "ready")
-INJECTIONS = {"candidate-crash", "trusted-kill", "fake-crash", "broker-kill"}
+INJECTIONS = {"candidate-crash", "trusted-kill", "fake-crash",
+              "fake-crash-after-receipt", "broker-kill"}
 
 
 def utc_now() -> str:
@@ -149,6 +150,17 @@ def start_injection(kind: str, run_id: str, run_dir: Path,
                 return name
         return None
 
+    def wait_receipt(timeout: float = 60.0) -> dict | None:
+        receipts = run_dir / "state" / "receipts"
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            if receipts.is_dir():
+                rows = sorted(receipts.glob("rcpt-*.json"))
+                if rows:
+                    return {"receipt": rows[0].name, "count": len(rows)}
+            time.sleep(0.02)
+        return None
+
     def wait_marker(timeout: float = 60.0) -> dict | None:
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
@@ -161,7 +173,15 @@ def start_injection(kind: str, run_id: str, run_dir: Path,
         return None
 
     def worker() -> None:
-        marker_doc = wait_marker()
+        if kind == "fake-crash-after-receipt":
+            observed = wait_receipt()
+            holder["observed"] = observed
+            if observed is None:
+                holder["error"] = "receipt_not_observed"
+                return
+            marker_doc = {"hook": "receipt", "receipt": observed["receipt"]}
+        else:
+            marker_doc = wait_marker()
         holder["marker"] = marker_doc
         if marker_doc is None:
             holder["error"] = "delay_marker_not_observed"
@@ -189,6 +209,23 @@ def start_injection(kind: str, run_id: str, run_dir: Path,
                 "    if b'autoteacher_m0.accounting.broker' in cmd and int(name)!=os.getpid():\n"
                 "        os.kill(int(name), signal.SIGKILL); killed.append(int(name))\n"
                 "print('A_NEXT_BROKER_KILLED '+str(killed))\n")
+            target = running_container("trusted")
+            if target is None:
+                holder["error"] = "trusted_container_not_running"
+                return
+            argv = ["podman", "exec", target, "/opt/python/bin/python3.11",
+                    "-B", "-c", code]
+        elif kind == "fake-crash-after-receipt":
+            code = (
+                "import os,signal\n"
+                "killed=[]\n"
+                "for name in os.listdir('/proc'):\n"
+                "    if not name.isdigit(): continue\n"
+                "    try: cmd=open('/proc/'+name+'/cmdline','rb').read()\n"
+                "    except OSError: continue\n"
+                "    if b'fake_provider.py' in cmd and int(name)!=os.getpid():\n"
+                "        os.kill(int(name), signal.SIGKILL); killed.append(int(name))\n"
+                "print('A_NEXT_FAKE_KILLED '+str(killed))\n")
             target = running_container("trusted")
             if target is None:
                 holder["error"] = "trusted_container_not_running"
@@ -369,6 +406,12 @@ def main(argv: list[str] | None = None) -> int:
         except Exception:  # noqa: BLE001
             runner_record["ledger"] = None
         try:
+            # request-lifecycle / recovery-diagnostic JSONL live in the run dir;
+            # copy them BEFORE cleanup deletes the run directory.
+            runner_record["state_extra"] = copy_state_extra(driver)
+        except Exception as exc:  # noqa: BLE001
+            runner_record["state_extra"] = {"error": type(exc).__name__}
+        try:
             driver.cleanup()
         except Exception as exc:  # noqa: BLE001
             runner_record["cleanup_error"] = f"{type(exc).__name__}: {exc}"
@@ -377,10 +420,6 @@ def main(argv: list[str] | None = None) -> int:
             driver.write_evidence()
         except Exception:  # noqa: BLE001
             pass
-        try:
-            runner_record["state_extra"] = copy_state_extra(driver)
-        except Exception as exc:  # noqa: BLE001
-            runner_record["state_extra"] = {"error": type(exc).__name__}
         runner_record["utc_end"] = utc_now()
         runner_record["evidence"] = str(driver.evidence)
         runner_record["run_dir"] = str(driver.run_dir)

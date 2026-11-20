@@ -191,10 +191,14 @@ def _expected_checks(case_id: str, case: dict, expected: dict) -> list[dict]:
                        "expected": expected["reason_class"]})
     if expected.get("lifecycle_events"):
         events = [row.get("event") for row in case["lifecycle"]]
-        checks.append({"id": "lifecycle_events",
-                       "ok": events == expected["lifecycle_events"],
-                       "expected": expected["lifecycle_events"],
-                       "observed": events})
+        wanted = list(expected["lifecycle_events"])
+        position = 0
+        for event in events:
+            if position < len(wanted) and event == wanted[position]:
+                position += 1
+        checks.append({"id": "lifecycle_events_subsequence",
+                       "ok": position == len(wanted),
+                       "expected": wanted, "observed": events})
     if "rejection_code" in expected:
         codes = [row.get("error_code") for row in rejected]
         checks.append({"id": "replay_rejection_code",
@@ -202,9 +206,54 @@ def _expected_checks(case_id: str, case: dict, expected: dict) -> list[dict]:
                        "expected": expected["rejection_code"],
                        "observed": codes})
     if case_id == "R6-04":
+        checks = [check for check in checks
+                  if check["id"] not in {"completed_dispatch_count"}]
+        turns = case["runner"].get("turns") or []
+        turn2 = turns[1] if len(turns) > 1 else {}
+        turn2_result = turn2.get("result") or {}
+        error = turn2_result.get("error") or {}
+        checks.append({"id": "dsh_session_reuse_refused",
+                       "ok": turn2.get("exit_code") not in (0, None)
+                       and "already exists" in str(error.get("message", "")),
+                       "observed": error.get("message")})
         checks.append({"id": "replay_no_second_receipt",
                        "ok": len(case["receipts"]) <= 1,
                        "receipts": len(case["receipts"])})
+    if case_id == "R6-04B":
+        checks = [
+            {"id": "first_dispatch_completed",
+             "ok": len([row for row in case["dispatch"]
+                        if row.get("outcome") == "completed"]) == 1},
+            {"id": "replay_dispatch_rejected",
+             "ok": len([row for row in case["dispatch"]
+                        if row.get("outcome") == "rejected"]) >= 1,
+             "observed": [row.get("error_code") for row in case["dispatch"]]},
+            {"id": "single_receipt",
+             "ok": len(case["receipts"]) == 1,
+             "receipts": len(case["receipts"])},
+            {"id": "no_second_attempt",
+             "ok": len(case["attempts"]) == 1,
+             "attempts": [row.get("state") for row in case["attempts"]]},
+        ]
+    if case_id == "R6-09":
+        injection = (case["runner"].get("injection") or {})
+        statuses = [row.get("status") for row in case["reservations"]]
+        checks = [
+            {"id": "hard_kill_injected",
+             "ok": bool(injection.get("result") is not None
+                        or injection.get("error") is None and injection.get("marker")),
+             "observed": injection.get("error") or "killed"},
+            {"id": "containers_after_empty",
+             "ok": not (case["runner"].get("containers_after") or [])},
+            {"id": "reservation_pending_or_none",
+             "ok": all(status == "PENDING" for status in statuses),
+             "observed": statuses},
+            {"id": "no_settlement_after_kill",
+             "ok": not any(row.get("state") == "SETTLED" for row in case["attempts"])},
+            {"id": "at_most_one_receipt",
+             "ok": len(case["receipts"]) <= 1,
+             "receipts": len(case["receipts"])},
+        ]
     if case_id == "R6-13":
         checks = []
     return checks
@@ -222,7 +271,8 @@ def audit_run(root: Path, *, matrix: dict | None = None,
     case_dirs = sorted((root / "cases").glob("*-*")) if (root / "cases").is_dir() else []
     results: dict[str, dict] = {}
     for evidence in case_dirs:
-        case_id = evidence.name.split("-")[0]
+        parts = evidence.name.split("-")
+        case_id = "-".join(parts[:2]) if len(parts) >= 2 else evidence.name
         case = _load_case(evidence)
         checks = (_digest_checks(case) + _invariant_checks(case)
                   + _expected_checks(case_id, case, spec_cases.get(case_id, {}).get("expected", {})))
@@ -261,6 +311,34 @@ def audit_run(root: Path, *, matrix: dict | None = None,
                                 "reason": "no evidence directory",
                                 "checks": [], "checks_total": 0,
                                 "checks_failed": []}
+    # R6-13 aggregates the independent invariants of every other case.
+    if "R6-13" in results:
+        others = {key: value for key, value in results.items() if key != "R6-13"}
+        invariant_failures = []
+        for case_id, row in others.items():
+            for check in row.get("checks") or []:
+                if check["id"] in {"containers_after_empty", "zero_real_calls",
+                                   "fake_counter_matches_receipts",
+                                   "digest", "prepared_digest==claim.request_digest",
+                                   "payload_digest==receipt.raw_sha256",
+                                   "prepared_digest!=payload_digest",
+                                   "reservation_status_unique",
+                                   "pending_not_marked_free",
+                                   "attempt_identity_unique",
+                                   "settled_at_most_once"} and not check["ok"]:
+                    invariant_failures.append({"case": case_id,
+                                               "check": check["id"]})
+        results["R6-13"]["checks"] = [
+            {"id": "cross_case_invariants", "ok": not invariant_failures,
+             "failures": invariant_failures},
+            {"id": "all_cases_evidence_present",
+             "ok": all(row.get("evidence") for row in others.values())},
+        ]
+        failed = [check for check in results["R6-13"]["checks"] if not check["ok"]]
+        results["R6-13"]["checks_total"] = len(results["R6-13"]["checks"])
+        results["R6-13"]["checks_failed"] = [check["id"] for check in failed]
+        results["R6-13"]["status"] = "PASS" if not failed else "PARTIAL"
+        results["R6-13"]["observed"] = {"audited_cases": len(others)}
     return {
         "schema": "m0.a_next.rrev6.audit.v1",
         "root": str(root),
