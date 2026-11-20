@@ -669,3 +669,114 @@ A1 impl:     pytest tests/integration/a_next_auth -q -> 39 passed in 80.54s
 A6 docs:     git -C worktrees/a-next-handoff diff --name-status fd1d3a6..13e39a4 -> 4 A docs
              grep 状态常量/UNSIGNED/BLK -> 22 D rows UNSIGNED、18 BLK、状态常量一致
 ```
+
+
+---
+
+## 9. 环境事件 `INCIDENT_20261121`（append-only；Lead 披露 + Reviewer 独立复验）— 2026-11-20T19:53Z
+
+> 本章节按 Lead 指令追加，**不改动已提交的阶段 1/§8 字节**；阶段 1 的 rootfs=25491e45… 记录早于事件，
+> 事件后经恢复仍为 25491e45…，二者不矛盾（§9.4）。本章节所有“原因/操作”归因以 Lead 披露为来源
+> （`LEAD_REPORTED`），Reviewer 只对**可复验结果**负责。
+
+### 9.1 时间线（UTC，2026-11-20）
+
+| 时间 | 事件/证据 | 来源 |
+|---|---|---|
+| ≤19:52:06 | Reviewer 真实冻结树探针：`rootfs_guard --rootfs <main artifacts frozen rootfs> --expected-sha 25491e45…` → verdict `OK`、`sha_matches_expected=true`、`violation_count=0`、`read_only=false` | **Reviewer 实测（pre-incident）** |
+| 19:53Z | Lead 清理陈旧 `/tmp` bind mount 时误删主仓库 gitignored `artifacts/`：`rm -rf /tmp/at-f4-clean` 递归进入其 bind 子挂载 `/tmp/at-f4-clean/artifacts` → 即 repo `artifacts/` | `LEAD_REPORTED` |
+| 19:53:28 | Reviewer 独立观察到主 `artifacts/` 为空、原路径 `stat: No such file or directory`；`find` 全盘未见 v1 Packet 目录 | **Reviewer 实测（事件当时）** |
+| 19:56 | 备份 tar 生成：`/root/a-next-artifacts-restored-20261121.tar`（916,480,000 bytes），**sha256 `11172f0268cdf2dc2bde08e90d9d93c0a444b134f8eaab9a712057c9d5159d42`**（Reviewer 独立复算一致） | Lead + Reviewer 实测 |
+| 19:56+ | 恢复来源：`/tmp/at-g4f-review/artifacts` + 各 worktree artifacts 副本，no-clobber 合并；Lead 复算 rootfs/deps/Packet v2 | `LEAD_REPORTED` |
+| 20:25–20:35 | Reviewer 独立复验：rootfs canonical=`25491e45…`；deps canonical=`e07729d7…`；Packet v2 独立 verifier=**PASS**（issues=[]/mutation_undetected=[]）；v1 Packet 全盘/备份 tar 均无副本 | **Reviewer 实测（post-restore）** |
+
+### 9.2 损失清单（不可恢复项）
+
+**`LOST_IN_INCIDENT_20261121`**：
+
+1. **v1 Packet 原始字节**：`artifacts/review-packet-g4f-e7d92967…` 目录及其文件（记录值 manifest `4aed2a92…1d7f2`、
+   hashes `421b07ae…9d3d`）——全盘 `find -name "*e7d92967*"` 无结果、备份 tar 列表中无该目录 ⇒ **原始字节不可再核验**；
+   记录的 manifest/hashes 值只能作为**历史登记值**引用，不得再作为可复算证据。
+2. **部分 G4-R 原始运行证据**：`artifacts/g4r/**` 仅部分恢复（当前 116M，含 final-prep/integration/r0/r1/r2/r4/registry/logs
+   等子目录），**完整性不可证明**；依赖这些原始日志逐字节复算的结论降级为历史记录。
+3. 任何“v1 Packet 未改写/可核验/环境全程 NO_DRIFT”类结论 → 一律标记 **`LOST_IN_INCIDENT_20261121`（不可再核验）**，
+   不得写入任何当前或未来 PASS 依据。
+
+### 9.3 独立复验结果（Reviewer 命令，post-restore）
+
+```text
+$ tar --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner -cf - -C artifacts/security/rootfs . | sha256sum
+  -> 25491e45aa3dc54c526db9b9d46d18b31c7840150473e2fdb4d8b882f02fe9c0   (canonical 一致)
+$ tar ... -C artifacts/foundation/deps . | sha256sum
+  -> e07729d7997944417b1c25531749b3e6e5e34aa4248f01dc8f370282082ecb98   (Lead 声明 e07729d7 一致)
+$ sha256sum /root/a-next-artifacts-restored-20261121.tar
+  -> 11172f0268cdf2dc2bde08e90d9d93c0a444b134f8eaab9a712057c9d5159d42   (与 Lead 一致)
+$ python scripts/g4r_review/r_rev5_packet_verifier.py       --packet artifacts/review-packet-g4r-v2-d33e0aab… --expected-impl-sha d33e0aab…
+  -> {"status":"PASS","issues":[],"mutation_undetected":[]}  (Reviewer 自建 verifier，复活旧 R-REV5 工具独立复验)
+$ rootfs_guard.py --rootfs artifacts/security/rootfs --expected-sha 25491e45… --emit-commands
+  -> verdict OK / sha_matches_expected=true / violation_count=0 / mount.read_only=false   (exit 0)
+$ oci_guard.py check-rootfs <restored frozen rootfs> --frozen-rootfs … --frozen-sha 25491e45…
+  -> verdict rootfs_is_the_frozen_tree   (exit 10)
+$ find / -maxdepth 8 -name "*e7d92967*"            -> 无结果
+$ tar -tf /root/a-next-artifacts-restored-20261121.tar | grep -i "review-packet-g4f" -> 无结果
+```
+
+### 9.4 对既有结论的影响（逐项）
+
+1. **阶段 1 的 rootfs 记录**（`25491e45…`，19:35Z 复算）**保留有效**，且与事件前 19:52:06 探针、事件后 20:3x
+   恢复复验三处一致；**不矛盾**。事件只破坏中间带外状态，不改变该哈希的历史事实。
+2. **G4-R 冻结 Review（`e72255d`/`0599856a…`，本报告只读引用）**：其中
+   “v1 Packet 未改写/可核验”结论（§1.3/R-REV1/R-REV5 的 v1 部分）标记 `LOST_IN_INCIDENT_20261121`；
+   该 Review 的 **R-REV5 对 Packet v2 的验证仍有效**（本次已用 Reviewer 自建 verifier 对恢复后 v2 独立复核 PASS）。
+3. **A-PR0 文档（`e1fa0b9`）**：`A_NEXT_BASELINE.md` §5 的 A0-04“v1/v2 Packet 只读哈希核对 PASS”中 **v1 部分
+   → LOST_IN_INCIDENT_20261121**（A0-04 降为 **PARTIAL/LOST**）；`A_NEXT_REVIEW_STATUS_RECONCILIATION.md` §4 的
+   v1 证据行同样标注 LOST。该文档的其余 65 行对账/append-only/F-02 结论不受影响。
+4. **A-PR0 工具（`16a4187`）**：恢复后真实树 rootfs_guard/oci_guard 已可独立复验（§9.3 结果）；工具本身行为
+   与 §8.2 一致。但 OCI/rootfs 的未来证据必须标注“**输入恢复自经哈希验证的副本**”。
+5. **A0-03（rootfs 防写/不可变）**：当前 canonical 树已恢复且哈希匹配，但 **provenance 含恢复步骤**；
+   A0-03 工具层结论维持 **PASS（条件）**，但条件扩展为：任何 OCI/L2 证据须注明
+   `rootfs/deps restored 2026-11-21 from hash-verified copies（backup tar sha 11172f02…），非原始 in-place 链`；
+   真实部署只读仍 **HUMAN_REQUIRED / NOT_RUN**；不得写“全程 NO_DRIFT”。
+6. **A5（Packet/证据卫生）**：v1 Packet 丢失 + `artifacts/g4r` 部分恢复 ⇒ A5 不能宣称“全部 Packet/证据可核验”；
+   **A5-hygiene 降为 PARTIAL**。Packet v3 必须在 manifest/report 中披露本事件与恢复来源，并附恢复证据。
+7. **A6 文档（`13e39a4`）**：原 BLK-18/D-08 只覆盖 G4-R rootfs 漂移/旧 junit 事件，**未覆盖本事件**；
+   保持 §8.4 PASS（条件），新增条件：append-only 追加本事件披露（新 BLK 项/扩展 D-08 与 D-10）、
+   Runbook 补充恢复/备份/防再发程序；不得改写状态常量。
+
+### 9.5 最终裁定必要条件（Lead 要求：事件披露 + 恢复证据 + 未来防再发）
+
+以下为后续任何 A0/A5/Packet v3/最终裁定要判 PASS 的**必要条件**（不满足即不得 PASS）：
+
+1. **事件披露（Disclosure）**：在 A-PR0 baseline/reconciliation 与 A6 handoff/runbook 的 append-only 章节记录
+   本事件（时间线、影响、损失、`LOST_IN_INCIDENT_20261121` 标记）；所有 Packet v3/报告/矩阵不得出现
+   “全程 NO_DRIFT/环境无损/证据完整”表述。
+2. **恢复证据（Restore evidence）**：保留并登记 `backup tar sha 11172f02…`、恢复来源清单、恢复后 rootfs
+   `25491e45…`/deps `e07729d7…`/Packet v2 verifier PASS 的复算记录；恢复操作与验证者分离
+   （Lead 执行、Reviewer 独立复核，本报告 §9.3 即样例）；Packet v3 manifest 附恢复说明与源 SHA。
+3. **未来防再发（Prevention）**：
+   - 清理/删除操作前检查 bind mount 与真实路径（禁止对可递归进入挂载点的目录执行 `rm -rf`；先 stop/umount 并
+     `realpath`/`findmnt` 确认目标）；
+   - gitignored artifacts（Packet/rootfs/deps/Stage/证据）必须有**仓库外备份/校验清单**（备份 tar + sha256 登记）；
+   - 环境完整性检查前置化（rootfs_guard/oci_guard T0/T1；Packet 独立 verifier）并写入 Runbook；
+   - 任何恢复后继续使用的证据标注“恢复自经哈希验证副本”，不得冒充连续原始链。
+
+### 9.6 门状态（不变）
+
+本事件及本章节**未改变**任何门：`LiveGate=BLOCKED`、`G4-H=NOT_AUTHORIZED`、`G5=BLOCKED`、`G6=NOT_RUN`、
+`M0=DECISION_PENDING`、`E5_PRELIVE_FULL=BLOCKED_PENDING_HUMAN_DEPLOYMENT`；P2-02 OPEN、B03/E5-P04 UNVERIFIED、
+R-REV6 NOT_RUN。本报告不构成部署许可/M0 GO。
+
+---
+
+## 附录 D：事件复验证据（§9）
+
+```text
+backup tar: /root/a-next-artifacts-restored-20261121.tar 916480000 bytes
+            sha256 11172f0268cdf2dc2bde08e90d9d93c0a444b134f8eaab9a712057c9d5159d42
+rootfs:     tar --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner ... | sha256sum
+            = 25491e45aa3dc54c526db9b9d46d18b31c7840150473e2fdb4d8b882f02fe9c0
+deps:       same recipe -> e07729d7997944417b1c25531749b3e6e5e34aa4248f01dc8f370282082ecb98
+packet v2:  Reviewer r_rev5_packet_verifier.py --packet <restored> --expected-impl-sha d33e0aab…
+            -> {"status":"PASS","issues":[],"mutation_undetected":[]}
+v1 packet:  find / -maxdepth 8 -name "*e7d92967*" -> none; tar -tf backup.tar | grep review-packet-g4f -> none
+```
