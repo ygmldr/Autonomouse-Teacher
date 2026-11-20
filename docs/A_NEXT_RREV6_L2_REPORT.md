@@ -7,8 +7,10 @@
 - **依据**：`/root/handoffs/AT_LeadA_G4R_Next/01_LEADA_AGENT_HANDOFF.md` A4、`AUDIT_REQUESTS.md` A-Q1/A-Q2
 - **性质**：no-key / no-model / Fake-only / `--network none` / 0 外部 HTTP(TCP) / 0 真实计费；
   LiveGate=`BLOCKED`、G4-H=`NOT_AUTHORIZED`、G5=`BLOCKED`、M0=`DECISION_PENDING`（本轮不改变）。
-- **当前状态**：`PREP_READY_AWAITING_OCI_WINDOW`。**尚未启动任何容器**；本文件先记录准备状态、
-  执行矩阵与窗口申请，窗口批准后在同一文件**追加**逐 case 实测结果（append-only）。
+- **当前状态**：`L2_W1_EXECUTED_OWNER_EVIDENCE`（Lead 批准的独占窗口 2026-11-20T20:00–20:50Z 内完成；
+  实际批次 20:20:39–20:24:06Z）。13 个 case（+ 1 个字节级 replay 子 case R6-04B）全部有真实容器证据，
+  Owner 审计 14/14 PASS；**这是 Implementer/Owner 证据，不是 Reviewer 独立复跑**，R-REV6 是否 PASS
+  仍以独立 Reviewer 自行复跑为准。
 
 ```text
 A-PR3 / R-REV6: NOT_RUN -> 准备完成，等待 Lead 批准 30 分钟独占 OCI 窗口
@@ -182,14 +184,89 @@ git commit -m "test: A-PR3 R-REV6 real DSH Fake-only L2 evidence (no-key)"
 `evidence_audit.py`（含 digest 绑定与 ledger 对账）；窗口批准后先提交这些脚本再开跑，
 保证 Stage base SHA 与 git HEAD 对齐。
 
-## 5. 窗口实测结果（待 Lead 批准后 append-only 追加）
+## 5. 窗口实测结果（Owner 证据，2026-11-20T20:20:39–20:24:06Z）
 
-```text
-STATUS = PENDING_OCI_WINDOW
-not yet run: R6-01..R6-13
+### 5.1 批次身份与冻结门
+
+| 项 | 值 |
+|---|---|
+| 窗口 | Lead 批准 2026-11-20T20:00:00–20:50:00Z；实际批次 **20:20:39Z → 20:24:06Z**（单写者，唯一 L2 批次） |
+| run HEAD（仓库） | `d083c54e023ca58124b3424d4de19caa972ba5da`（`test/a-next-rrev6`，在基线 `fd1d3a6` 之上仅 test/scripts/docs 变更；`src/` 与冻结实现 `d33e0aa` 相同） |
+| 新 Stage | `/root/Autonomous Teacher/worktrees/a-next-rrev6/artifacts/g4/c/stages/stage-20261120T202016Z` |
+| Stage base_sha | `d083c54e023ca58124b3424d4de19caa972ba5da`（= run HEAD） |
+| Stage manifest SHA-256 | `34b3db73f76743343bcb691a87f5feda1bb3bb3a08f232e41cdd953ce0c3ffc6` |
+| Stage tree SHA-256 | `2b9edab82a25f3c4108a839041dc0e0239f89b72d69c4ae386e4f820c6a57401` |
+| trusted tree / candidate tree | `dbf3ca368a7c41e487713eb4d8e4f7f79185ae05e36bf7ee698a89a6070de39c` / `b2c73100da2099ccae8d8df3e31ef472c9e40cbf9aff27c76a4f4486dbc36e4f` |
+| Stage 文件数 | trusted 60 / candidate 6549；`validate_stage_g4(base_sha=HEAD, verify_git=True)` = ok |
+| adapter build | `adapter-20261120T202017Z`，built JS `2cb424616b7380bff61f8ce760e229a0c1d2b32c4a5f2954cdf66c3937bf74ba`，DSH LLM `0.2.2-rc.2` |
+| DSH runtime | `1cc41d5a8745a5b9d47c8604e44f23eb8af2d8ca02b2afa0be101d5f71be6ea4`；SDK `0.2.2rc2`；Node `v22.23.2` |
+| rootfs 使用方式 | 每 case 从 staged canonical rootfs 复制**独立工作副本**（副本哈希先验证 == canonical，case 后删除）；`podman --rootfs` 从未指向 frozen rootfs；adapter build 容器使用 stage-build 工作副本（`rootfs-stage-20261120T202015Z`，build 前后哈希均 `25491e45…`） |
+| T0（20:20:39Z，写于 `t0.json`） | rootfs `25491e45aa3dc54c526db9b9d46d18b31c7840150473e2fdb4d8b882f02fe9c0`；deps `e07729d7997944417b1c25531749b3e6e5e34aa4248f01dc8f370282082ecb98`；containers `[]` |
+| T1（20:24:06Z，写于 `t1.json`；独立 `env_check --copy-test` 20:25:57Z 再验） | rootfs 同 T0、deps 同 T0；`rootfs_matches_t0=true`、`deps_matches_t0=true`；`podman ps -a` = **空**；copy-test 副本哈希 == canonical |
+| rootfs provenance | rootfs/deps 来自 **2026-11-20T19:53Z 主仓库 artifacts 误删事件后、经哈希验证的恢复副本**（主仓库恢复后与 staged 副本均复算 `25491e45…` / `e07729d7…`）；**不声明“全程 NO_DRIFT”**；Batch 内 T0/T1 一致，但该事件的恢复事实必须在 A4 Evidence 中保留 |
+| 0 调用声明 | 每 case `real_model_calls=0`、`real_external_http_calls=0`、`provider_keys_seen=0`；Launcher env/network-probe 证据在 case `env/`、`network-probe/`；无 pull、无外部网络 |
+| 容器残留 | 批后 `podman ps -a` 空；每 case `containers_after=[]` |
+| 旧 Stage 关系 | 旧 G4-R Stage `stage-20261120T165407Z`（base=`d33e0aa`，manifest `cc7ccb61…`，tree `933f2c07…`）仅作历史参照，**未被本次任何 case 使用**；本次全部证据绑定新 Stage `stage-20261120T202016Z` |
+| 证据根 | `artifacts/a_next/rrev6/l2/run-20261120T202039Z/`（gitignored）：`t0.json`、`t1.json`、`matrix.json`、`audit.json`、`evidence-index.json`（每 case 关键文件 sha256）、`cases/<case>-<stamp>/`、`logs/<case>.log` |
+
+### 5.2 逐 case 结果（Owner audit；全部 exit=0）
+
+| case | UTC | 关键观测（read-only DB/JSONL 复算） | 状态 |
+|---|---|---|---|
+| R6-01 Echo(1) | 20:20:44–20:20:54 | 1 completed dispatch、1 receipt、1 `SETTLED`、Broker `OK`、Fake=1；prepared/claim 与 payload/receipt 绑定通过 | PASS |
+| R6-02 Tool(2) | 20:20:56–20:21:07 | 同一 run 2 个合法 dispatch（2 receipts、2 `SETTLED`、Broker 2×OK、Fake=2），**不同合法步骤未被误拒** | PASS |
+| R6-03 Resume two-turn | 20:21:10–20:21:23 | turn1 echo + turn2 `resume_session`（resume marker=1，session 24 行）：2 dispatch/2 receipts/2 `SETTLED`/Fake=2；两次不同 business identity | PASS |
+| R6-04 DSH 同 session 重放 | 20:21:25–20:21:37 | turn2 DSH 在 start_session 阶段被 SDK 拒绝（`session ... already exists`），第二个 provider 请求未到达 bridge：1 dispatch/1 receipt/1 `SETTLED`；**限制已记录**（见 §5.3），字节级 Controller replay 由 R6-04B 覆盖 | PASS（with limitation） |
+| R6-04B 字节级重放（补充） | 20:21:40–20:21:58 | candidate hold + probe `valid` 后 `replay`（byte-identical，同 business identity）：completed 1 / **rejected 1**、仅 1 receipt、1 attempt、0 第二 reservation | PASS |
+| R6-05 pre-Reserve timeout | 20:22:00–20:22:12 | 0 dispatch/0 reservation/0 attempt/0 Fake；request-lifecycle = `[received, controller_entered, deadline_before_controller]`（`stage=before_reserve`，`reserved=false`，`dispatch_seq` 真实存在） | PASS |
+| R6-06 post-Reserve revoke | 20:22:14–20:22:32 | real DSH；revocation 在 after_reserve 窗口写入并 gate 复读：Fake=0、Broker `PENDING`、attempt `SETTLEMENT_UNCERTAIN` 且 reason 保留 `REVOKED_PRE_SEND:RUN_AUTHORIZATION_REVOKED`（恢复后仍保留，recovery diagnostic 独立记录）；无 settle/fail | PASS |
+| R6-07 post-send timeout | 20:22:34–20:22:46 | Fake=1、receipt=1、Broker `PENDING`、attempt `SETTLEMENT_UNCERTAIN`；无重发、无第二次 receipt/settle | PASS |
+| R6-08 Controller crash | 20:22:49–20:23:00 | crash hook `after_attempt_start_before_fake_send` + restart：attempt `SETTLEMENT_UNCERTAIN / NO_RECEIPT_AFTER_CRASH`、Broker `PENDING`、Fake=0；恢复后 replay no-op | PASS |
+| R6-10 Candidate crash（Controller 存活） | 20:23:03–20:23:15 | candidate SIGKILL at after_reserve marker（deadline 800ms 触发 pre-send abort）：Broker `PENDING`、intent `RESERVED`、Fake=0、0 attempt；Controller 后仍完成结案与清理；**held>0，无 FREE/无重复 dispatch** | PASS |
+| R6-09 Controller 硬停（SIGKILL） | 20:23:18–20:23:30 | host SIGKILL trusted at after_reserve marker：Broker `PENDING`、intent `HELD_UNCERTAIN`、Fake=0、0 attempt、0 dispatch 行（controller 未及写）；restart recovery 保守保留 held；**SIGKILL 落在 pre-attempt 窗口**（限制见 §5.3） | PASS（conservative） |
+| R6-11 Fake crash | 20:23:32–20:23:43 | scenario=stream，Fake 写 receipt 后被杀：Fake=1、receipt=1、attempt `WORST_CASE_HELD / USAGE_NOT_AUTHORITATIVE`、Broker **`FAILED`（已证终态，权威）**、0 第二次结算；restart 不改写终态；不 FREE、不双计费 | PASS（conservative terminal） |
+| R6-12 Broker down/restart | 20:23:45–20:24:02 | broker SIGKILL at after_reserve marker → Claim `CLAIM_DENIED`：Fake=0、Broker `PENDING`、intent `HELD_UNCERTAIN`、0 settle；restart 后 Broker 同 DB 恢复、reconcile 只读 PENDING，held 保持 | PASS |
+| R6-13 usage/hash 对账（审计） | 20:24:03 | 跨 case 聚合：prepared/claim 绑定 join 11 行、payload/receipt 绑定 9 个 receipt，0 mismatch；`prepared_digest != payload_digest` 恒成立；fake counter == receipt 数；PENDING 未标 FREE；SETTLED 每 reservation 至多一次；全部 case `containers_after=[]`、0 real calls | PASS |
+
+Owner audit 汇总（`audit.json`）：**PASS 14 / PARTIAL 0 / NOT_RUN 0 / total 14**；
+每 case checks_total 13–15，checks_failed 全 0。
+
+### 5.3 已知限制 / 无法注入项（如实记录）
+
+1. **R6-04（DSH 层同 session 重放）**：真实 DSH SDK 对重复 `start_session` 在客户端即拒绝
+   （`session "..." already exists`），第二个 provider 请求未到 bridge；因此该 case 只证明
+   “DSH 层拒绝且无第二次发送”，Controller 身份级 replay 由 **R6-04B**（真实 candidate 容器 +
+   真实 UDS，byte-identical probe replay）覆盖：第二请求 dispatch `rejected`、无第二 receipt。
+2. **R6-09（Controller 硬停）**：SIGKILL 落在 test-only `after_reserve_before_send` 延迟窗口内，
+   即 **pre-attempt** 窗口；因此观测为“0 attempt + PENDING + held”，不是“ATTEMPT_STARTED 后未知
+   发送”。ATTEMPT_STARTED 后的崩溃窗口由 R6-08（hook，确定性）覆盖；**外部 SIGKILL 的纳秒级
+   全窗口仍不穷举（F5-R6 限制保留）**。
+3. **R6-11（Fake crash）**：Fake 在写出 receipt 后被杀，控制面对 partial stream 的既有策略是
+   `Broker FAILED`（已证终态、无计费）+ `WORST_CASE_HELD` 保守归档；这是 Broker 权威终态优先，
+   不是 FREE/held。若要求“Fake 崩溃后必须保持 PENDING”，需产品策略变更，本轮不改生产语义。
+4. **未运行（NOT_RUN by design）**：真实 Provider/计费、Registry 权威快照（B03/E5-P04 仍
+   UNVERIFIED）、穷举 SIGKILL/断电窗口、Controller 重启后同 DSH session 语义、跨机隔离。
+5. **证据等级**：本文件与 `audit.json` 是 **Implementer/Owner 证据**（真实容器、真实 DSH、真实
+   本地 Broker/Fake，L2-REAL-DSH-FAKE），**不是独立 Reviewer 复跑**；R-REV6 最终裁定需 Reviewer
+   自建命令/自建反例复算，不得以本报告代替。
+6. 窗口内前两次批次（`run-20261120T200727Z`、`run-20261120T201507Z`）为脚本修正前的
+   superseded 运行，**不作为证据**；最终证据仅 `run-20261120T202039Z`。
+
+### 5.4 复现命令（窗口内实际使用）
+
+```bash
+cd "/root/Autonomous Teacher/worktrees/a-next-rrev6"
+PYTHONPATH=src "/root/Autonomous Teacher/.venv/bin/python" scripts/a_next/rrev6/env_check.py --copy-test
+PYTHONPATH=src "/root/Autonomous Teacher/.venv/bin/python" scripts/a_next/rrev6/build_stage.py
+PYTHONPATH=src "/root/Autonomous Teacher/.venv/bin/python" scripts/a_next/rrev6/run_l2_matrix.py \
+  --stage artifacts/g4/c/stages/stage-20261120T202016Z \
+  --expected-head d083c54e023ca58124b3424d4de19caa972ba5da
+PYTHONPATH=src "/root/Autonomous Teacher/.venv/bin/python" scripts/a_next/rrev6/evidence_audit.py \
+  --run artifacts/a_next/rrev6/l2/run-20261120T202039Z
 ```
 
----
+窗口内使用 UTC：T0 `20:20:39Z`（t0.json）→ batch start `20:20:42Z` → batch end `20:24:06Z`
+（t1.json）→ 独立 T1 env-check `20:25:57Z`。
 
 ## 6. 与旧证据 / 矩阵的关系
 
