@@ -10,34 +10,50 @@
   `work/g4r`，= main `3e7afee` + PR-R1..R4 + R0 基线文档 + **test/tooling-only delta**）
 - **base**：`3e7afee077845a071cd364e93ab209cac20b2d5f`（主工作树 `main`，clean）
 - **审查工作树**：`/root/Autonomous Teacher/worktrees/g4r-review`，分支 `docs/g4r-independent-review`
-  （HEAD = d33e0aa；只写 `docs/REVIEW_G4R_INDEPENDENT.md`、`docs/g4r_review_evidence/`、
+  （审查基线 d33e0aa；只写 `docs/REVIEW_G4R_INDEPENDENT.md`、`docs/g4r_review_evidence/`、
   `scripts/g4r_review/`）
 - **环境**：Python 3.11.15（`.venv`）、pytest 9.2.0、ruff 0.17.5、Node v22.23.2、Podman 4.9.3、
   Linux 宿主 nproc=12；`PYTHONPATH=src` 已确认 `import autoteacher_m0` 指向本 worktree（见
   `docs/g4r_review_evidence/environment.log`）。
-- **审查状态**：源码/证据链/delta 部分已完成；**R-REV5 最终 Packet 尚未到达（UNVERIFIED）**，
-  本报告在 Packet 路径到达并完成独立遍历+变异注入后补最终裁定。**本版本不得当作最终裁定引用**。
+- **审查状态：FINAL（已包含 R-REV5 与 P1 终态）**。
+- **最终冻结实现基线（code）**：`d33e0aabd1714a486325b745c436cb59855d6539`；**docs-only 后续**：
+  `bc08bdd3f6cceb73462c33acd98bda276d0b1fbf`（联合回归/矩阵）；集成分支 `work/g4r` HEAD =
+  `64522d981fa2ddcee528dab9d38323bac72d4e8a`（docs-only；Reviewer 实测
+  `git diff d33e0aa..64522d9 -- src/ tests/ scripts/` = **0 files**）。
+- **最终 Packet v2（Reviewer 只读复核对象）**：
+  `/root/Autonomous Teacher/worktrees/g4r-packet-final/artifacts/review-packet-g4r-v2-d33e0aabd1714a486325b745c436cb59855d6539`
+  - frozen UTC `2026-11-20T17:22:37Z`；**43 files / 0 symlinks / payload 40 / hashes 41 行 / all mode 0444**
+  - `payload_tree_sha256=4300a7c67a031136cd52f46b44d325db7a5dd14df82f409d25d6a2247737c1f6`
+  - `manifest.json=fe45d7602bd7a115cfdc3dd3a85e889c0f7b4fa642c03a54717c06f0bcf403a9`
+  - `hashes.sha256=e7a67c77b8e213fac32cb4aabeae56075dcf4982c0281479fae25cca1c4bdddb`
+  - identity：`impl_sha=impl_git_commit=d33e0aa…`、`impl_content_sha256=5551078a…`、docs `bc08bdd…`
+  - Stage=`stage-20261120T165407Z`（base d33e0aa / manifest `cc7ccb61…` / tree `933f2c07…` /
+    trusted `f10053d4…` / candidate `131ab68e…` / loaded 52/52）
+  - 环境：rootfs `25491e45…`（清理后）、deps `e07729d7…`、runtime `1cc41d5a…`、adapter `2cb42461…`；
+    exclusive window T0/T1 一致（17:05:50–17:08:20Z）；drift/cleanup 已写入 README/manifest.limitations。
 - **delta 前参考**：`5bf9b8b14212a987fc97ca515a20d99b3a12920c`（中间基线；仅用于 delta 对比与
   “delta 前”运行记录，不作为最终基线）。
 
 ---
 
-## 0. 裁定（本版本：`PARTIAL_FOR_G4R_NO_KEY_SCOPE`；最终裁定待 R-REV5）
+## 0. 最终裁定（FINAL）
 
-> 本版本裁定：**`PARTIAL_FOR_G4R_NO_KEY_SCOPE`**。原因：
-> 1) R1/R2/R3/R4 的 no-key 修复与 L1-HOST 负例经 Reviewer 自建探针/独立解析复验成立；
-> 2) **P1 环境类发现（见 §1.4）**：冻结 rootfs 工件被并发 OCI 运行（`podman --rootfs` 直接指向
->    `artifacts/security/rootfs`）写入挂载点目录，发生**两次污染窗口**（16:52–16:53 与 16:55–16:59），
->    观测到三个漂移哈希（`0340fb78…` / `a6737150…` / `e1a8fcf9…`），canonical 偏离冻结值
->    `25491e45…`；在清理并恢复 canonical 之前，最终 Stage/Packet/L2 的 rootfs 绑定不可信；
-> 3) **R-REV5 最终 Packet 未到**、**R-REV6 未跑**，L2-REAL-DSH 全链 UNVERIFIED。
+> # 最终裁定：`PASS_FOR_G4R_NO_KEY_REMEDIATION_SCOPE`
 >
-> 若最终 Packet 在**清理后 canonical 环境**中构建并经 Reviewer 独立遍历/变异注入通过，且 delta 仍
-> 为 test/tooling-only，则裁定可升为 `PASS_FOR_G4R_NO_KEY_REMEDIATION_SCOPE`（仍仅限 no-key 修复范围）；
-> `PASS_FOR_G4R_NO_KEY_SCOPE_WITH_B03_RUNTIME_SNAPSHOT_VERIFIED` 不成立（B03/E5-P04 仍 UNVERIFIED，
-> 见 §4）。唯一允许枚举：`PASS_FOR_G4R_NO_KEY_REMEDIATION_SCOPE` /
-> `PASS_FOR_G4R_NO_KEY_SCOPE_WITH_B03_RUNTIME_SNAPSHOT_VERIFIED` / `PARTIAL_FOR_G4R_NO_KEY_SCOPE` /
-> `FAIL_FOR_G4R_NO_KEY_SCOPE` / `BLOCKED_NEEDS_ENVIRONMENT_OR_HUMAN`。
+> 依据：
+> 1) R1/R2/R3/R4 的 no-key 修复与 L1-HOST 负例经 Reviewer 自建探针/独立解析复验成立（R-REV2 PASS）；
+> 2) delta（5bf9b8b→d33e0aa）为 **test/tooling-only**（4 文件、`src/` 零 diff、collection 1420/exit0、
+>    自建/定向回归通过）；
+> 3) **R-REV5 最终 Packet 通过 Reviewer 自建独立遍历器**：全树/计数/哈希/tree/identity 独立复算一致，
+>    **11 类 mutation 注入全部被检出**，原 Packet 未被读取改变，旧 v1 Packet 未改写（§7）；
+> 4) **P1 rootfs 环境项已缓解并记录 limitations**：清理后 rootfs 恢复 `25491e45…`（Reviewer 17:26:37Z
+>    独立复算），最终 Stage/Packet 绑定来自独占窗口且 T0/T1 一致；Packet 明确“非全程 NO_DRIFT、
+>    不外推生产/L2 需独占窗口”（§1.4）。
+>
+> **限制**：仅限 no-key 修复/工程范围。**不成立** `PASS_FOR_G4R_NO_KEY_SCOPE_WITH_B03_RUNTIME_SNAPSHOT_VERIFIED`
+> ——B03/E5-P04 仍 `UNVERIFIED`（§4）；`API_AVAILABLE` 仅为 L1 机制可行，不构成权威 registry。
+> 开放 P2：P2-01（use record body id 交叉校验）、P2-02（consume 端到端接线）；R-REV6（真实 DSH
+> two-turn/replay）仍 **NOT_RUN**。
 >
 > **不表示**：E5-PreLive Full PASS、E5-P04 PASS、B03 关闭、G4-H/G5/G6 授权、Live 批准、M0 GO。
 > `LiveGate=BLOCKED`、`G4-H=NOT_AUTHORIZED`、`G5=BLOCKED`、`G6=NOT_RUN`、`M0=DECISION_PENDING`、
@@ -114,8 +130,20 @@ Reviewer **不修改冻结工件**；处置要求（Lead 已发 Integration）�
 冻结工件；最终 Packet 必须含 drift/cleanup/独占窗口记录，不得写“全程 NO_DRIFT”。
 
 **加载身份**：6/6 关键模块（`authorization`/`controller`/`request_lifecycle`/`recovery_diagnostics`/
-`dispatch_audit`/`gates`）的 `sha256(实际加载文件)` == `git cat-file blob d33e0aa:<path>`（全部一致）。
-原始记录：`r_rev1_canonical_env*.log`、`r_rev1_loaded_modules_final.log`、`r_rev1_protected_frozen_final.log`。
+`dispatch_audit`/`gates`）的 `sha256(实际加载文件)` == `git cat-file blob d33e0aa:<path>`（全部一致）；
+最终 Stage trusted `src/*.py` = **52/52 == git d33e0aa blobs**（Reviewer 独立逐文件复算）。
+
+**P1 终态（Reviewer 17:25–17:27Z 独立复算）**：rootfs 已恢复冻结 canonical
+`25491e45…2fe9c0`（清理后），deps `e07729d7…`、runtime `1cc41d5a…`、adapter `2cb42461…` 均与冻结值一致；
+最终 Stage `stage-20261120T165407Z` 的 manifest `cc7ccb61…`、tree `933f2c07…`、trusted `f10053d4…`、
+candidate `131ab68e…`、base/head=`d33e0aa` 全部经 Reviewer 复算一致；Packet 环境身份来自
+**exclusive window 17:05:50–17:08:20Z**（`identity/environment.json`：T0/T1 rootfs 均 `25491e45…`、
+`T0_T1_equal=true`、OCI 使用 rootfs **可写副本**且 `frozen_rootfs_unchanged=true`）。
+⇒ **P1 = RESOLVED_WITH_LIMITATIONS（记录保留，不写“全程 NO_DRIFT”）**：清理链
+`25491e45→0340fb78→25491e45→a6737150/e1a8fcf9→(clean 17:01:49)25491e45` 已写入
+README/manifest.limitations；L2/OCI 必须在独占窗口串行，不得外推生产/持续 NO_DRIFT。
+原始记录：`r_rev1_canonical_env*.log`、`r_rev1_canonical_env_clean_final.log`、
+`r_rev1_stage_identity_final.log`、`r_rev1_loaded_modules_stage_52.log`、`r_rev1_protected_frozen_final.log`。
 
 ---
 
@@ -223,44 +251,62 @@ Reviewer **不修改冻结工件**；处置要求（Lead 已发 Integration）�
 
 ---
 
-## 7. R-REV5 最终 Packet（UNVERIFIED，待 Lead 路径）
+## 7. R-REV5 最终 Packet v2（Reviewer 自建独立遍历器）—— **PASS**
 
-最终 Packet 将由 F-C 从 `d33e0aa` 构建（含新 Stage/Runtime SHA），文件名 `review-packet-g4r-v2-d33e0aa…`；
-Lead 要求其 rootfs=`25491e45…`（清理后）、Stage=`stage-20261120T165407Z`（base d33e0aa /
-manifest `cc7ccb61…` / tree `933f2c07…` / trusted `f10053d4…`）、含 drift/cleanup 记录、L2 独占窗口串行。
-**Reviewer 自建独立遍历器已就绪并通过自测**：`scripts/g4r_review/r_rev5_packet_verifier.py`
-（自建逻辑，不 import Owner builder/verifier；在 `/tmp` 用 test support 构建的合成包上
-clean=0 issues、8 类 mutation 全部检出；自测日志 `r_rev5_verifier_selftest.log`）。本版本未收到最终
-Packet 路径 ⇒：
+**对象**：`/root/Autonomous Teacher/worktrees/g4r-packet-final/artifacts/review-packet-g4r-v2-d33e0aabd1714a486325b745c436cb59855d6539`
+（只读；Reviewer 未使用 Owner `verify_packet_g4r.py`，使用自建 `scripts/g4r_review/r_rev5_packet_verifier.py`）。
 
-- 全树独立遍历（文件/目录/symlink/隐藏/未知/manifest-hashes-payload 一致性）、
-  `-wal/-shm`/隐藏/未知文件/ symlink/篡改注入必须 FAIL、旧 v1 Packet 未改写、SQLite 快照只读可读
-  → **UNVERIFIED（待补）**；
-- **构建前置条件**：必须先按 §1.4/§9-P1 清理并恢复 rootfs canonical（`25491e45…`），最终 Packet 的
-  环境绑定应在清理后快照产生；否则 Packet 的 rootfs 绑定不可信；
-- Reviewer 将使用**自建独立遍历器**（不复用 Owner verifier）。R-REV5 未通过前不得给出
-  `PASS_FOR_G4R_*` 裁定。
+**独立复算结果**（原始日志 `docs/g4r_review_evidence/r_rev5_*`）：
 
----
+| 项 | Reviewer 实测 | 与 Owner 声明一致 |
+|---|---|---|
+| files / symlinks / payload / hashes 行 | **43 / 0 / 40 / 41** | ✓ |
+| 文件 mode | 全部 `0o444`；固定 metadata 例外 3 个 | ✓ |
+| `payload_tree_sha256` | `4300a7c67a031136cd52f46b44d325db7a5dd14df82f409d25d6a2247737c1f6` | ✓ |
+| `manifest.json` sha256 | `fe45d7602bd7a115cfdc3dd3a85e889c0f7b4fa642c03a54717c06f0bcf403a9` | ✓ |
+| `hashes.sha256` sha256 | `e7a67c77b8e213fac32cb4aabeae56075dcf4982c0281479fae25cca1c4bdddb` | ✓ |
+| hashes 覆盖/逐文件复算 | 覆盖 = payload+manifest，0 mismatch | ✓ |
+| identity | `impl_sha=impl_git_commit=d33e0aa…`；`impl_content_sha256=5551078a…`；docs commit `bc08bdd…` | ✓ |
+| Stage/环境绑定 | stage `stage-20261120T165407Z` manifest `cc7ccb61…`/tree `933f2c07…`/trusted `f10053d4…`/candidate `131ab68e…`/base d33e0aa；rootfs `25491e45…`（清理后） | ✓ |
+| live gate snapshot | `identity/livegate.json` status BLOCKED、reasons count/digest 与 manifest 一致 | ✓ |
+| safety counters | external_network_calls=0 / real_model_calls=0 / provider_keys_seen=0 | ✓ |
+| SQLite snapshots | 只读 `mode=ro&immutable=1` 打开、`PRAGMA quick_check` OK、读取后 Packet 文件集/大小/mtime 不变（无 -wal/-shm 生成） | ✓ |
+| 隐藏/未知/非普通文件 | 0 命中（无 hidden、无未知、无 symlink/hardlink/特殊文件） | ✓ |
+| 矩阵 | `matrix/G4R_Test_Evidence_Matrix.csv` sha256 = `741d7d55…`（= integration docs 矩阵；65 行 + header） | ✓ |
+| 旧 v1 Packet | 177 files / 0 symlink / 173-173 `sha256sum -c` OK / manifest `4aed2a92…` / hashes `421b07ae…`（未改写） | ✓ |
+| 原 Packet 读取稳定性 | 复核前后 manifest/hashes 字节不变（`fe45d760…`/`e7a67c77…`） | ✓ |
+
+**Mutation 注入（自建 suite，全部在 `/tmp` 副本上，原 Packet 不动）——11/11 全部 FAIL 检出**：
+新增 `-wal`、新增 `-shm`、隐藏文件、未知文件、删除 payload、改字节、改 mode(0644)、
+payload→symlink、hardlink 异常（nlink>1）、manifest identity 篡改（impl sha/git/40-hex）、
+livegate snapshot reasons 篡改。`mutation_undetected=[]`，原 Packet 复测 `status=PASS`。
+（原始：`r_rev5_packet_verify.log/json`、`r_rev5_verifier_selftest.log`）
+
+**判定：R-REV5 = PASS。** Packet 在清理后 canonical 环境构建、含 drift/cleanup 与“非全程 NO_DRIFT”
+限制声明，Reviewer 独立遍历 + mutation 注入通过。
 
 ## 8. R-REV6 真实双 Principal/DSH Tool 两轮+Replay（Fake-only）
 
 - Owner R3 自报 RG-05 two-turn **NOT_RUN**；Reviewer 仅独立执行了 `observe`/`attack-late-extra-bash`
   两个 probe 模式（§4），**未跑** two-turn/replay + usage/hash 逐字段对账。
+- Packet 内含 Integration **独占窗口 (17:05:50–17:08:20Z)** 的 L2 相关计数（f2: tool_dispatch=2/ok；
+  f5: timeout-pre-send/revocation-post-reserve/timeout-post-send ok；OCI 在 rootfs 可写副本上
+  1053 passed/26 环境类失败/28 skipped，`frozen_rootfs_unchanged=true`）——这是 **Integration 产出**，
+  Reviewer 未独立重跑，仅作为 Packet 内容独立读取核对，不据此判 PASS。
 - **NOT_RUN / UNVERIFIED（BLOCKED_NEEDS_ENVIRONMENT）**，不计入 PASS。
 
 ---
 
 ## 9. Findings
 
-**P0 = 0。P1 = 1（环境/证据完整性，非源码）。P2 = 2 开放 + 1 已由 delta 修复。**
+**P0 = 0。P1 = 1（环境/证据完整性，非源码）—— 已 RESOLVED_WITH_LIMITATIONS（记录保留）。P2 = 2 开放 + 1 已由 delta 修复（R-REV5 验证）。**
 
 | ID | 级别 | 描述 | 影响/建议 |
 |---|---|---|---|
-| P1-01 | **P1** | 冻结 rootfs 工件被并发 OCI 运行污染（`podman --rootfs artifacts/security/rootfs` 直指冻结工件）：**两次污染窗口 16:52–16:53 与 16:55–16:59**；三个漂移哈希 `0340fb78…`/`a6737150…`/`e1a8fcf9…`（冻结值 `25491e45…`）；16:54:07 Stage 构建时仍 canonical；Integration Stage 重建 16:52 fail-closed 检出；Lead 已复核并升级删除清单 | 环境/证据完整性：清理前构建的 Stage/Packet/L2 的 rootfs 绑定不可信。**处置**：停止容器；按 Lead 精确清单删除两轮污染目录并复算恢复 `25491e45…`（不等则 STOP）；最终 Stage/Packet 前后 canonical 快照 + 独占窗口；OCI 改用 rootfs 可写副本/COW，禁止 `--rootfs` 直指冻结工件；Packet 记录 drift/cleanup，不得写“全程 NO_DRIFT”|
+| P1-01 | **P1 → RESOLVED_WITH_LIMITATIONS** | 冻结 rootfs 工件被并发 OCI 运行污染（`podman --rootfs artifacts/security/rootfs` 直指冻结工件）：**两次污染窗口 16:52–16:53 与 16:55–16:59**；三个漂移哈希 `0340fb78…`/`a6737150…`/`e1a8fcf9…`（冻结值 `25491e45…`）；16:54:07 Stage 构建时仍 canonical；Integration Stage 重建 16:52 fail-closed 检出 | 已缓解：17:01:49 清理恢复 `25491e45…`（Reviewer 17:26:37Z 独立复算一致）；最终 Stage/Packet 绑定来自独占窗口 17:05:50–17:08:20Z（T0/T1 一致、OCI 用 rootfs 可写副本、frozen_rootfs_unchanged=true）；Packet README/limitations 记录 drift/cleanup 并声明“非全程 NO_DRIFT、不外推生产/L2 需独占窗口”。**流程要求保留**：禁止再对冻结 rootfs 直接 `--rootfs` |
 | P2-01 | P2（evidence integrity，低）| `_read_use_record` 校验 schema/epoch 但不校验 body `authorization_id` == 路径 `sha256(id)`；Reviewer 探针实测“schema 合法但属其它授权 id 的记录”判 `AUTHORIZATION_REPLAYED`（保守拒绝，无第二成功）| 无授权放宽；审计上错配记录与真实 replay 不可区分。建议读取时交叉校验 body id，不符→INVALID |
 | P2-02 | P2（scope gap）| production `src/` 内 `consume_execution_authorization()` **无 Controller/launcher 调用方**（仅测试/`scripts/g4` 探针），R1 修复为模块级；dispatch 前链路端到端单次授权强制未接线 | 不得把模块级 PASS 外推 Live 链 PASS；G4-H1 前需接线并 L2 复验 |
-| P2-03 | P2（已修复，待最终确认）| delta 前 `tests/g4r_packet/support.py` 裸 import 与 `g4_f2/support.py` 名称遮蔽（2 collection error）；builder 拒绝 40-hex git commit | delta `d33e0aa` 已修：collection 1420 exit0、builder/verifier identity 三字段、delta ruff 通过；**Reviewer 独立复验通过**（§1.2）→ 可 CLOSED |
+| P2-03 | P2（**CLOSED**）| delta 前 `tests/g4r_packet/support.py` 裸 import 与 `g4_f2/support.py` 名称遮蔽（2 collection error）；builder 拒绝 40-hex git commit | delta `d33e0aa` 已修且 Reviewer 独立复验：collection 1420 exit0、builder/verifier identity 三字段、delta ruff 通过；最终 Packet 构建/校验使用 40-hex impl id 成功 → **CLOSED** |
 | 观察-1 | 文档 nit | `deadline_before_controller` 在 `controller_entered=true` 时携带真实 `dispatch_seq=1`（文档已解释，命名略易误读）| 无安全语义问题；可选改名/加注 |
 | 观察-2 | 设计边界 | `nlink>2` 拒绝、`nlink==2` 容忍（final+crash temp）；`AUTHORIZATION_USE_LOG_DURABILITY_UNKNOWN` 新 fail-closed 码当前无 Controller 消费方 | 接线时须映射为“不确定/不发送” |
 
@@ -270,12 +316,12 @@ Packet 路径 ⇒：
 
 | Case | 对象 | 状态 | 说明 |
 |---|---|---|---|
-| R-REV1 | 证据链/SHA/delta/冻结保护/加载身份 | **PARTIAL** | delta test/tooling-only 成立、受保护零 diff、v1 Packet 未改、加载 6/6 VERIFIED；**rootfs canonical 被并发 OCI 污染 = P1**（其它 canonical 项 NO_DRIFT）|
+| R-REV1 | 证据链/SHA/delta/冻结保护/加载身份 | **PASS（with env limitation）** | delta test/tooling-only 成立；受保护零 diff；v1 Packet 未改；加载 6/6 + Stage trusted 52/52 == git d33e0aa；canonical 清理后 rootfs/deps/runtime/stage 全部一致（P1 已 RESOLVED_WITH_LIMITATIONS，不写“全程 NO_DRIFT”）|
 | R-REV2 | 单次授权并发/crash/腐败/fail-closed | **PASS（L1-HOST）** | Reviewer 自建探针 exit 0；P2-01 nit |
 | R-REV3 | 两层观测/recovery first_cause | **PARTIAL** | L1 代码+原始 JSONL 独立解析 PASS；L2/端到端接线 UNVERIFIED；P2-02 |
 | R-REV4 | Registry API/信任边界/config | **PARTIAL** | API_AVAILABLE 机制独立复现（observe/attack）；权威性/B03/E5-P04 UNVERIFIED；config 未改 |
-| R-REV5 | 最终 Packet v2 独立遍历+变异注入 | **UNVERIFIED** | 待 Lead 最终 Packet 路径（且需 clean rootfs）|
-| R-REV6 | 真实双 Principal/DSH 两轮+Replay | **NOT_RUN** | 环境/时间不允许；Owner RG-05 亦 NOT_RUN |
+| R-REV5 | 最终 Packet v2 独立遍历+变异注入 | **PASS** | 自建遍历器：43/0/40/41、tree `4300a7c6…`、manifest `fe45d760…`、hashes `e7a67c77…` 全部独立复算一致；11/11 mutation FAIL 检出；原 Packet 不变；v1 未改写 |
+| R-REV6 | 真实双 Principal/DSH 两轮+Replay | **NOT_RUN** | 环境/时间不允许；Owner RG-05 亦 NOT_RUN；Packet 内 L2 计数为 Integration 产出（Reviewer 未独立重跑）|
 | R-REV7 | 无 Key/恒 BLOCKED | **PASS（本机无 Key 范围）** | §5 |
 | R-REV8 | Host/OCI/Node/Ruff/Scanner | **PARTIAL** | 定向 69 passed+1 skip / packet+f2 41+1 / unit 396 / ruff/scanner PASS；OCI/Node/Host full NOT_RUN |
 
@@ -312,13 +358,16 @@ Packet 路径 ⇒：
 
 ---
 
-## 13. 待补（收到最终 Packet 路径后）
+## 13. 最终裁定与 STOP
 
-1. R-REV5：用**自建独立遍历器**全树校验最终 v2 Packet（manifest/hashes/payload/tree、隐藏/未知/
-   symlink、`-wal/-shm` 注入、篡改注入必须 FAIL、v1 未改写、SQLite 只读可读），要求 Packet 的
-   rootfs 绑定来自 §1.4 清理后的 canonical 快照。
-2. 复核 delta 后的最终 SHA 未再变化；若 Packet 构建随附新 SHA，在最终报告中以该 SHA 为最终基线。
-3. 给出**最终裁定**（唯一枚举）并 `send_message` Lead；完成后 `task-15` complete 并 **STOP**。
-
-> **STOP（本版本）**：R-REV5 与 rootfs canonical 恢复完成前，不得给出 `PASS_FOR_G4R_*`；不得宣称
-> 任何部署/G5/E5-Full/M0 GO。
+- **最终复核基线**：impl `d33e0aa`；docs-only `bc08bdd`；集成 `work/g4r` HEAD `64522d9`
+  （`git diff d33e0aa..64522d9 -- src/ tests/ scripts/` = 0 files）。
+- **最终 Packet**：`review-packet-g4r-v2-d33e0aabd1714a486325b745c436cb59855d6539`
+  （43 files / 0 symlink / payload 40 / tree `4300a7c6…` / manifest `fe45d760…` / hashes `e7a67c77…`）。
+- **裁定**：**`PASS_FOR_G4R_NO_KEY_REMEDIATION_SCOPE`**（no-key 修复/工程范围；见 §0）。
+- **明确不宣称**：E5-PreLive Full PASS、E5-P04 PASS、B03 关闭、G4-H1/H2 已部署、G5 已获批、
+  G6 GO、M0 GO、Live/生产安全。`LiveGate=BLOCKED`、`G4-H=NOT_AUTHORIZED`、`G5=BLOCKED`、
+  `G6=NOT_RUN`、`M0=DECISION_PENDING`、`E5_PRELIVE_FULL=BLOCKED_PENDING_HUMAN_DEPLOYMENT` 不变。
+- **仍需维护者/Lead 决策**：P2-01/P2-02 处置；B03/E5-P04 残余接受或要求权威 registry；
+  正式受信部署（G4-H1）与单次 G5 授权；rootfs/OCI 流程修复（禁止 `--rootfs` 冻结工件、L2 独占窗口）。
+- **STOP**：本报告完成后 Independent Reviewer 停止，等待维护者决策；不得据此进入部署/真实调用。

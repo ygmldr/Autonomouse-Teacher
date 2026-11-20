@@ -341,7 +341,8 @@ def _run_mutations(packet: Path, expected_impl_sha: str | None) -> list[str]:
         finally:
             shutil.rmtree(copy, ignore_errors=True)
 
-    expect_failure("add-wal", lambda copy: (copy / "cases" / "x.sqlite3-wal").write_bytes(b"x"))
+    expect_failure("add-wal", lambda copy: _write_extra(copy, "cases/x.sqlite3-wal"))
+    expect_failure("add-shm", lambda copy: _write_extra(copy, "cases/x.sqlite3-shm"))
     expect_failure("add-hidden", lambda copy: (copy / ".hidden").write_bytes(b"x"))
     expect_failure("add-unknown", lambda copy: (copy / "unknown-extra.txt").write_bytes(b"x"))
     expect_failure("symlink-swap", lambda copy: _swap_with_symlink(copy, target))
@@ -350,8 +351,31 @@ def _run_mutations(packet: Path, expected_impl_sha: str | None) -> list[str]:
                    lambda copy: _tamper_manifest(copy / MANIFEST))
     expect_failure("file-removal", lambda copy: (copy / manifest_target).unlink())
     expect_failure("mode-change", lambda copy: (copy / target).chmod(0o644))
+    expect_failure("hardlink-anomaly", lambda copy: _add_hardlink(copy, target))
+    expect_failure("livegate-tamper", lambda copy: _tamper_livegate(copy))
     shutil.rmtree(temp_dir, ignore_errors=True)
     return undetected
+
+
+def _write_extra(copy: Path, relative: str) -> None:
+    path = copy / relative
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(b"x")
+
+
+def _add_hardlink(copy: Path, relative: str) -> None:
+    source = copy / relative
+    os.link(source, copy / "hardlink-anomaly.copy")
+
+
+def _tamper_livegate(copy: Path) -> None:
+    for path in copy.rglob("*.json"):
+        document = json.loads(path.read_bytes())
+        if isinstance(document, dict) and "reasons" in document:
+            document["reasons"] = ["FORGED_REASON"]
+            path.write_bytes(canonical_json(document) + b"\n")
+            return
+    raise AssertionError("no livegate snapshot found")
 
 
 def _swap_with_symlink(copy: Path, relative: str) -> None:

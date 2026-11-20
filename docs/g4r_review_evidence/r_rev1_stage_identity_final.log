@@ -1,0 +1,10 @@
+== final Stage identity (Reviewer recompute) ==
+cc7ccb61bc4df76675b14e1f73bdd9209d3a13eeda7e79193e913ea284874d03  /root/Autonomous Teacher/worktrees/g4r-phase2/artifacts/g4/c/stages/stage-20261120T165407Z/manifest.json
+stage_tree:
+933f2c07a6c79415183a4d3f1db1ba19249b95d96ee88334bd43e71dd40d3882  -
+trusted_tree:
+f10053d4107170b0b53362dbc9d1c0120d07dd7ee35339a315749de4b3431add  -
+candidate_tree:
+131ab68e10f25d4aa893348754100c0fb0e221059b3fa79e3f7be9547c219006  -
+stage_base_sha=d33e0aabd1714a486325b745c436cb59855d6539
+stage_head_at_build=d33e0aabd1714a486325b745c436cb59855d6539

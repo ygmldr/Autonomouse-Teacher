@@ -1,0 +1,8 @@
+== R-REV5 independent digests (Reviewer commands) ==
+Fri Nov 20 17:26:37 UTC 2026
+fe45d7602bd7a115cfdc3dd3a85e889c0f7b4fa642c03a54717c06f0bcf403a9  /root/Autonomous Teacher/worktrees/g4r-packet-final/artifacts/review-packet-g4r-v2-d33e0aabd1714a486325b745c436cb59855d6539/manifest.json
+e7a67c77b8e213fac32cb4aabeae56075dcf4982c0281479fae25cca1c4bdddb  /root/Autonomous Teacher/worktrees/g4r-packet-final/artifacts/review-packet-g4r-v2-d33e0aabd1714a486325b745c436cb59855d6539/hashes.sha256
+4be466ad2cae68739f6d03067e29acb6848cdaf6f3091f13236bf1a7523c76a2  /root/Autonomous Teacher/worktrees/g4r-packet-final/artifacts/review-packet-g4r-v2-d33e0aabd1714a486325b745c436cb59855d6539/packet-integrity-report.txt
+741d7d5598cb9357c9ec9126ebcc277d504af93c0bc591af0d0c395b303d1382  /root/Autonomous Teacher/worktrees/g4r-packet-final/artifacts/review-packet-g4r-v2-d33e0aabd1714a486325b745c436cb59855d6539/matrix/G4R_Test_Evidence_Matrix.csv
+packet_root=/root/Autonomous Teacher/worktrees/g4r-packet-final/artifacts/review-packet-g4r-v2-d33e0aabd1714a486325b745c436cb59855d6539
+files=43 symlinks=0
