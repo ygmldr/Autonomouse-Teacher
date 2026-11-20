@@ -60,6 +60,9 @@ from autoteacher_m0.bridge.attempts import AttemptJournal, AttemptJournalUnavail
 from autoteacher_m0.bridge.broker_client import BrokerClient, BrokerClientError
 from autoteacher_m0.bridge.fake_backend import FakeBackend
 from autoteacher_m0.bridge.ipc_server import BridgeServer
+from autoteacher_m0.bridge.run_admission import (
+    RunAdmissionContext, RunAdmissionError,
+)
 from autoteacher_m0.security.egress import (
     ClaimResult, EgressBoundary, EgressPolicy, EgressRequest, EgressViolation,
     PreparedProviderRequest, TrustedEgressTransport, canonical_json,
@@ -98,9 +101,13 @@ _STREAM_TERMINAL_GRACE_SECONDS = 1.0
 ERROR_CONTROLLER_SINGLETON_LOCKED = "CONTROLLER_SINGLETON_LOCKED"
 ERROR_ATTEMPT_JOURNAL_UNAVAILABLE = "ATTEMPT_JOURNAL_UNAVAILABLE"
 ERROR_ADMISSION_REPLAYED_AFTER_RECOVERY = "ADMISSION_REPLAYED_AFTER_RECOVERY"
+ERROR_RUN_ADMISSION_REQUIRED = "RUN_ADMISSION_REQUIRED"
+ERROR_RUN_ADMISSION_INACTIVE = "RUN_ADMISSION_INACTIVE"
 EXIT_ADMISSION_REPLAYED = 3
 EXIT_ATTEMPT_JOURNAL_UNAVAILABLE = 4
 EXIT_CONTROLLER_SINGLETON_LOCKED = 5
+EXIT_RUN_ADMISSION_REQUIRED = 6
+EXIT_RUN_ADMISSION_INACTIVE = 7
 
 # Broker v1 raw code -> (preferred additive G3-C protocol code, existing-code
 # fallback used until Agent A's additive protocol enum is merged). The preferred
@@ -244,7 +251,8 @@ class TrustedController:
                  dispatch_journal: str | os.PathLike[str] | None = None,
                  require_origin: bool = False,
                  request_lifecycle: str | os.PathLike[str] | None = None,
-                 recovery_diagnostics: str | os.PathLike[str] | None = None):
+                 recovery_diagnostics: str | os.PathLike[str] | None = None,
+                 run_admission: RunAdmissionContext | None = None):
         self.admission = admission
         self.broker = broker
         self.fake = fake
@@ -287,6 +295,12 @@ class TrustedController:
         # behaviour byte-for-byte; when set, every provider invocation must
         # first mint and consume a TrustedSendAuthorization (see egress.py).
         self.dispatch_gate = dispatch_gate
+        # A-NEXT P2-02: optional Run-level authorization admission. ``None``
+        # keeps the frozen G3-C/G3-D/G4-F behaviour byte-for-byte; when set, the
+        # Controller refuses to start unless the context is active and every
+        # payload must consume exactly one per-dispatch admission token before
+        # any Broker Reserve. See ``bridge/run_admission.py``.
+        self.run_admission = run_admission
         self.send_authorizations: list[dict] = []
         if register_admission:
             self.attempts.register_admission(admission.admission_id, admission.sha256,
@@ -1017,6 +1031,44 @@ class TrustedController:
                 audit["outcome"] = "prepared"
                 audit["step"] = step
                 audit["call_id"] = prepared.call_id
+                # A-NEXT P2-02 run-level admission: exactly one in-process
+                # dispatch token per payload is minted and consumed here, before
+                # the revocation check, the business identity claim and any
+                # Broker Reserve. A copied/foreign/replayed token or an inactive
+                # Run denies before any ledger row; the precise denial is kept
+                # in the dispatch journal while the wire code stays the frozen
+                # ADMISSION_SELF_AUTH_DENIED.
+                if self.run_admission is not None:
+                    run_audit: dict[str, object] = {
+                        "run_id": self.run_admission.run_id,
+                        "run_epoch": self.run_admission.run_epoch,
+                        "authorization_id": self.run_admission.authorization_id,
+                        "dispatch_ordinal": 0,
+                        "token_consumed": False,
+                        "denial": None,
+                    }
+                    audit["run_admission"] = run_audit
+                    try:
+                        token = self.run_admission.begin_dispatch(
+                            call_id=prepared.call_id,
+                            prepared_digest=prepared.request_digest,
+                            payload_digest=prepared.request_digest,
+                            scope_id=self.admission.scope_id,
+                            route_id=ROUTE, model_id=MODEL)
+                        denial = self.run_admission.consume_dispatch(
+                            token, call_id=prepared.call_id,
+                            prepared_digest=prepared.request_digest,
+                            payload_digest=prepared.request_digest)
+                    except RunAdmissionError as error:
+                        run_audit["denial"] = error.code
+                        audit["error_code"] = "ADMISSION_SELF_AUTH_DENIED"
+                        raise BridgeError("ADMISSION_SELF_AUTH_DENIED") from None
+                    if denial is not None:
+                        run_audit["denial"] = denial
+                        audit["error_code"] = "ADMISSION_SELF_AUTH_DENIED"
+                        raise BridgeError("ADMISSION_SELF_AUTH_DENIED")
+                    run_audit["dispatch_ordinal"] = token.dispatch_ordinal
+                    run_audit["token_consumed"] = True
                 # G4-F5 pre-reserve checkpoint: a revoked synthetic run
                 # authorization must not create a Reservation, an Attempt or a
                 # business identity row. This runs before the replay identity
@@ -2234,14 +2286,16 @@ def _bridge_options(config: Mapping) -> dict[str, int | None]:
 
 def main(argv: list[str] | None = None, *,
          on_ready: Callable[[], None] | None = None,
-         dispatch_gate: object | None = None) -> int:
+         dispatch_gate: object | None = None,
+         run_admission: RunAdmissionContext | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", required=True)
     args = parser.parse_args(argv)
     config = json.loads(Path(args.config).read_text())
     required = {"admission_path", "broker_config_path", "fake_script", "receipt_dir",
                 "attempt_db", "socket_path", "python", "expected_uid"}
-    optional = {"fake_python", "socket_mode", "socket_gid", "expected_peer_uid"}
+    optional = {"fake_python", "socket_mode", "socket_gid", "expected_peer_uid",
+                "run_admission_required"}
     if not isinstance(config, dict) or set(config) - (required | optional):
         raise SystemExit("CONFIG_INVALID")
     if required - set(config):
@@ -2254,6 +2308,25 @@ def main(argv: list[str] | None = None, *,
         value = config[key]
         if not isinstance(value, str) or not value.startswith("/") or ".." in Path(value).parts:
             raise SystemExit("CONFIG_INVALID")
+    # A-NEXT P2-02: the required mode is fail-closed before any Broker/Fake/
+    # socket work. Required-but-missing and inactive/foreign contexts are
+    # refused here; no process is spawned and no Reservation can exist.
+    run_admission_required = config.get("run_admission_required", False)
+    if type(run_admission_required) is not bool:
+        raise SystemExit("CONFIG_INVALID")
+    if run_admission is None:
+        if run_admission_required:
+            sys.stderr.write(ERROR_RUN_ADMISSION_REQUIRED + "\n")
+            return EXIT_RUN_ADMISSION_REQUIRED
+    else:
+        if not isinstance(run_admission, RunAdmissionContext):
+            sys.stderr.write(ERROR_RUN_ADMISSION_INACTIVE + "\n")
+            return EXIT_RUN_ADMISSION_INACTIVE
+        try:
+            run_admission.ensure_startable()
+        except RunAdmissionError:
+            sys.stderr.write(ERROR_RUN_ADMISSION_INACTIVE + "\n")
+            return EXIT_RUN_ADMISSION_INACTIVE
     socket_path = Path(config["socket_path"])
     socket_path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     lock_fd = _acquire_controller_singleton(socket_path)
@@ -2294,7 +2367,8 @@ def main(argv: list[str] | None = None, *,
                                        recovery_diagnostics=default_recovery_path(
                                            config["attempt_db"]),
                                        require_origin=config.get(
-                                           "expected_peer_uid") is not None)
+                                           "expected_peer_uid") is not None,
+                                       run_admission=run_admission)
         # G3-C2-04 frozen order: recover old attempts BEFORE consuming a new
         # admission. An ADMISSION_REPLAYED therefore cannot strand durable state.
         controller.reconcile_on_startup(config.get("receipt_dir"))
