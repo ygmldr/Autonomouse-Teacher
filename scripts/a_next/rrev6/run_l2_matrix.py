@@ -15,6 +15,14 @@ Gates before the first case (all must pass):
 
 The runner never modifies the stage, the frozen inputs or the source tree.
 Results land in the gitignored ``artifacts/a_next/rrev6/l2/<run-id>/`` tree.
+
+Fail-closed semantics (A-PR3 P2-A4-2/P2-A4-3):
+  * before anything heavy, a fail-fast prerequisite check names every missing
+    staged input (rootfs/deps/artifacts/g4/c incl. runs/plugin node_modules/
+    stage/runner/audit/matrix) and exits non-zero with ``RUNNER_PREREQ_MISSING``;
+  * after the audit, any non-PASS case status (INTERNAL/PARTIAL/FAIL/NOT_RUN/...)
+    or an audit/summary mismatch makes the process exit non-zero.  ``ok=true``
+    in the final JSON is never printed when a case failed.
 """
 from __future__ import annotations
 
@@ -129,6 +137,140 @@ def containers() -> list[str]:
     proc = subprocess.run(["podman", "ps", "-a", "--format", "{{.Names}}"],
                           capture_output=True, text=True, timeout=60)
     return [line.strip() for line in proc.stdout.splitlines() if line.strip()]
+
+
+def prerequisite_problems(
+        *, stage: Path,
+        rootfs: Path = STAGED_ROOTFS,
+        deps: Path = STAGED_DEPS,
+        g4c_root: Path = REPO / "artifacts" / "g4" / "c",
+        plugin_modules: Path = REPO / "plugins" / "offline-fixture" / "node_modules",
+        launch_case: Path = RUNNER,
+        evidence_audit: Path | None = None,
+        matrix_spec: Path | None = None,
+        canonical_check: bool = True) -> dict:
+    """Fail-fast prerequisites for an independent R-REV6 L2 rerun.
+
+    Returns an explicit problem list (id/path/message/remediation); a missing
+    prerequisite must stop the runner with a non-zero exit instead of failing
+    every case as INTERNAL.  ``canonical_check=False`` exists only for host
+    unit tests that use synthetic directories.
+    """
+    if evidence_audit is None:
+        evidence_audit = REPO / "scripts" / "a_next" / "rrev6" / "evidence_audit.py"
+    if matrix_spec is None:
+        matrix_spec = REPO / "scripts" / "a_next" / "rrev6" / "case_matrix.json"
+    problems: list[dict] = []
+
+    def add(problem_id: str, path: Path, message: str, remediation: str) -> None:
+        problems.append({"id": problem_id, "path": str(path),
+                         "message": message, "remediation": remediation})
+
+    if not rootfs.is_dir():
+        add("staged_rootfs_missing", rootfs,
+            "staged canonical rootfs is absent (fresh worktree not prepared)",
+            "copy the hash-verified frozen rootfs to artifacts/security/rootfs")
+    elif canonical_check:
+        digest = sha256_tree(rootfs)
+        if digest != lib3d.ROOTFS_CANON:
+            add("staged_rootfs_not_canonical", rootfs,
+                f"staged rootfs sha256 {digest} != {lib3d.ROOTFS_CANON}",
+                "restore the canonical rootfs copy; never run containers on a drifted copy")
+    if not deps.is_dir():
+        add("staged_deps_missing", deps,
+            "staged canonical deps are absent (fresh worktree not prepared)",
+            "copy the hash-verified frozen deps to artifacts/foundation/deps")
+    elif canonical_check:
+        digest = sha256_tree(deps)
+        if digest != lib3d.DEPS_CANON:
+            add("staged_deps_not_canonical", deps,
+                f"staged deps sha256 {digest} != {lib3d.DEPS_CANON}",
+                "restore the canonical deps copy")
+    if not g4c_root.is_dir():
+        add("artifacts_g4c_missing", g4c_root,
+            "artifacts/g4/c is absent; stage build/run dirs cannot be created",
+            "stage the G4-C build root (artifacts/g4/c) before rerunning")
+    elif not (g4c_root / "runs").is_dir():
+        add("artifacts_g4c_runs_missing", g4c_root / "runs",
+            "artifacts/g4/c/runs is absent; every case run dir would fail as INTERNAL",
+            f"mkdir -p {g4c_root / 'runs'} (and keep it writable)")
+    if not plugin_modules.is_dir():
+        add("plugin_node_modules_missing", plugin_modules,
+            "plugins/offline-fixture/node_modules is absent",
+            "copy the plugin node_modules needed by the adapter build")
+    if not stage.is_dir() or not (stage / "manifest.json").is_file():
+        add("stage_manifest_missing", stage,
+            "stage directory or manifest.json is missing",
+            "build a fresh Stage at the run HEAD with scripts/a_next/rrev6/build_stage.py")
+    if not launch_case.is_file():
+        add("launch_case_missing", launch_case,
+            "launch_case.py is missing", "check out scripts/a_next/rrev6")
+    if not Path(evidence_audit).is_file():
+        add("evidence_audit_missing", Path(evidence_audit),
+            "evidence_audit.py is missing", "check out scripts/a_next/rrev6")
+    if not Path(matrix_spec).is_file():
+        add("case_matrix_missing", Path(matrix_spec),
+            "case_matrix.json is missing", "check out scripts/a_next/rrev6")
+    return {
+        "schema": "m0.a_next.rrev6.prerequisites.v1",
+        "utc": utc_now(), "ok": not problems, "problems": problems,
+    }
+
+
+def evaluate_audit(audit: object, *, expected_case_ids: list[str] | None = None) -> dict:
+    """Fail-closed decision over the evidence audit.
+
+    Any non-PASS status (INTERNAL/PARTIAL/FAIL/NOT_RUN/...) or a missing/partial
+    audit makes the runner exit non-zero.  This is the P2-A4-2 fix: a failed
+    matrix must never report ``ok=true`` / exit 0.
+    """
+    problems: list[dict] = []
+    if not isinstance(audit, dict) or not audit.get("cases"):
+        return {"ok": False, "problems": [
+            {"id": "audit_missing", "message": "audit.json missing or empty"}]}
+    cases = audit.get("cases") or {}
+    counts = audit.get("counts") or {}
+    statuses = {case_id: (row or {}).get("status")
+                for case_id, row in cases.items()}
+    failed = {case_id: status for case_id, status in statuses.items()
+              if status != "PASS"}
+    if failed:
+        problems.append({"id": "audit_non_pass_cases", "cases": failed,
+                         "message": "audit contains non-PASS case statuses"})
+    if counts.get("total") != len(cases):
+        problems.append({"id": "audit_counts_inconsistent",
+                         "counts": counts, "cases": len(cases)})
+    if counts.get("pass") != len(cases):
+        problems.append({"id": "audit_pass_count_mismatch",
+                         "counts": counts, "cases": len(cases)})
+    for case_id in expected_case_ids or []:
+        if case_id not in cases:
+            problems.append({"id": "audit_case_missing", "case_id": case_id})
+    return {"ok": not problems, "problems": problems,
+            "statuses": statuses, "counts": counts}
+
+
+def decide_run(*, containers_after: list[str], frozen_rootfs_unchanged: bool,
+               frozen_deps_unchanged: bool, audit: object,
+               expected_case_ids: list[str] | None = None) -> dict:
+    """Pure fail-closed decision used by ``main`` and by the host unit tests.
+
+    P2-A4-2: a matrix where any case audit is non-PASS (or audit is missing)
+    must return ``ok=False`` with explicit ``failure_reasons``; callers map that
+    to a non-zero process exit.
+    """
+    audit_decision = evaluate_audit(audit, expected_case_ids=expected_case_ids)
+    reasons: list[str] = []
+    if containers_after:
+        reasons.append("containers_after_not_empty")
+    if not frozen_rootfs_unchanged:
+        reasons.append("frozen_rootfs_drift")
+    if not frozen_deps_unchanged:
+        reasons.append("frozen_deps_drift")
+    for problem in audit_decision["problems"]:
+        reasons.append(problem.get("id", "audit_problem"))
+    return {"ok": not reasons, "failure_reasons": reasons,
+            "audit_decision": audit_decision}
 
 
 def write_json(path: Path, document: object) -> None:
@@ -250,6 +392,14 @@ def main(argv: list[str] | None = None) -> int:
     if git("status", "--porcelain", "-uall") != "":
         sys.stderr.write("RUNNER_WORKTREE_DIRTY\n")
         return lib3d.EXIT_PREFLIGHT_IDENTITY
+    prerequisites = prerequisite_problems(stage=stage)
+    if not prerequisites["ok"]:
+        abort_path = out.parent / f"prereq-abort-{stamp}.json"
+        write_json(abort_path, prerequisites)
+        sys.stderr.write("RUNNER_PREREQ_MISSING "
+                         + json.dumps(prerequisites["problems"], sort_keys=True)
+                         + "\n")
+        return lib3d.EXIT_BLOCKED_ENVIRONMENT
     out.mkdir(parents=True, exist_ok=False)
     t0 = t0_record(stage)
     write_json(out / "t0.json", t0)
@@ -321,6 +471,13 @@ def main(argv: list[str] | None = None) -> int:
     except BaseException as exc:  # noqa: BLE001
         write_json(out / "audit-error.json",
                    {"error": f"{type(exc).__name__}: {exc}"})
+    selected_case_ids = [case["id"] for case in selected]
+    decision = decide_run(
+        containers_after=t1["containers"],
+        frozen_rootfs_unchanged=t1["rootfs_matches_t0"],
+        frozen_deps_unchanged=t1["deps_matches_t0"],
+        audit=audit, expected_case_ids=selected_case_ids)
+    audit_decision = decision["audit_decision"]
     summary = {
         "run_root": str(out), "head": head, "utc_start": matrix["utc_start"],
         "utc_end": matrix["utc_end"],
@@ -337,13 +494,26 @@ def main(argv: list[str] | None = None) -> int:
         if audit else {case_id: record.get("status")
                        for case_id, record in matrix["cases"].items()},
         "abort_conditions_triggered": [],
+        "audit_ok": audit_decision["ok"],
+        "audit_problems": audit_decision["problems"],
+        "prerequisites_ok": prerequisites["ok"],
+        "fail_closed": True,
     }
+    failure_reasons: list[str] = decision["failure_reasons"]
+    ok = decision["ok"]
+    summary["ok"] = ok
+    summary["failure_reasons"] = failure_reasons
     write_json(out / "summary.json", summary)
-    ok = (not summary["containers_after"]
-          and summary["frozen_rootfs_unchanged"]
-          and summary["frozen_deps_unchanged"])
-    print(json.dumps({"ok": ok, "run_root": str(out), "summary": summary},
-                     sort_keys=True))
+    write_json(out / "run_status.json", {
+        "schema": "m0.a_next.rrev6.run-status.v1", "utc": utc_now(),
+        "ok": ok, "failure_reasons": failure_reasons,
+        "audit_ok": audit_decision["ok"],
+        "audit_problems": audit_decision["problems"],
+        "prerequisites_ok": prerequisites["ok"],
+    })
+    print(json.dumps({"ok": ok, "run_root": str(out),
+                      "failure_reasons": failure_reasons,
+                      "summary": summary}, sort_keys=True))
     return 0 if ok else lib3d.EXIT_CASE_FAILED
 
 
