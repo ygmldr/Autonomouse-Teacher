@@ -331,7 +331,7 @@ also writes/advances the index row.
 cd /root/m1b/pr3
 # Final tree = PR1 + PR2 final + PR3 + independent review doc + review actions.
 "/root/Autonomous Teacher/.venv/bin/python" -m pytest tests/m1_teacher -q
-# 783 passed in 71.07s   (clean host: no concurrent unrelated suites)
+# 818 passed in 78.92s   (final merged tree, clean host)
 
 "/root/Autonomous Teacher/.venv/bin/python" -m pytest   tests/m1_teacher/test_scoped_idempotency.py -q
 # 31 passed in 2.06s
@@ -350,8 +350,8 @@ cd /root/m1b/pr3
 
 # Require the real OS sandbox for judge tests; on this host nothing is skipped.
 M1B_REQUIRE_OS_SANDBOX=1 "/root/Autonomous Teacher/.venv/bin/python" \
-  -m pytest tests/m1_teacher -q
-# 783 passed in 70.14s   (0 skipped)
+  -m pytest tests/m1_teacher -q -rs
+# 818 passed in 82.46s   (0 skipped, final merged tree)
 ```
 
 **Count history (not to be confused with the final tree):**
@@ -360,7 +360,8 @@ M1B_REQUIRE_OS_SANDBOX=1 "/root/Autonomous Teacher/.venv/bin/python" \
 | --- | --- |
 | Pre-PR1/PR2 merge (PR3 implementation branch `3103a06`) | 632 passed (of which PR2 base `998e6d2` = 595, PR3 = +37) |
 | PR2 final merged (`25185b1`, PR1 judge + PR2 fixes) | 774 passed |
-| Independent review merged (`db636ea`) + review actions (this tree) | **783 passed** |
+| Independent review merged (`db636ea`) + review actions (`3ad85c2`/`a5373f1`) | **783 passed** |
+| Lead merged updated PR2 + PR1 review-fix tree (`8f76e46`, includes `scripts/m1b/run_safety_ci.sh` CI wiring) | **818 passed** (783 + 35 PR1 review tests) |
 
 No crash/concurrency regression: 35 crash + 9 concurrency PR2/PR1 tests pass; the
 review-action changes (P2-2) only strengthened the post-completion retry
@@ -442,6 +443,14 @@ two new files; the test cases themselves are all present (mapping in §5.4).
 
 ---
 
+> **Final merged tree.** After the independent review actions were committed,
+> the Lead stacked the updated PR2/PR1 review-fix tree on this branch
+> (`8f76e46`). The PR3 action files are untouched by that merge and the final
+> full suite is **818 passed** (`M1B_REQUIRE_OS_SANDBOX=1`: 818 passed / 0
+> skipped); PR3-dedicated counts remain 31 scoped + 15 migration. The protected
+> path scan contains only `scripts/m1b/run_safety_ci.sh`, which comes from that
+> Lead merge (PR1 P1-3 CI wiring), not from the PR3 changes.
+
 ## 5.5 Independent review action closure (`db636ea`, P1=2 / P2=5)
 
 | # | Action | Code change | Test evidence | Status |
@@ -517,8 +526,9 @@ two new files; the test cases themselves are all present (mapping in §5.4).
 2. `git diff --name-only 4706250..HEAD` must contain only B-line paths; the
    protected-path scan (M0/security/bridge/config/g*/scripts/LiveGate) must be
    empty.
-3. Run §5.1 commands; expect **783 passed** (`M1B_REQUIRE_OS_SANDBOX=1` also
-   783 passed / 0 skipped on this host), touched-tree ruff clean.
+3. Run §5.1 commands; expect **818 passed** on the final merged tree
+   (`M1B_REQUIRE_OS_SANDBOX=1`: 818 passed / 0 skipped), touched-tree ruff
+   clean (the PR3 action-closure tree immediately before the Lead merge was 783).
 4. Confirm no historical event rewrite: `history_events` rows are byte-identical
    across the v1→v2 migration
    (`test_v1_database_migrates_additively_and_preserves_history`), and the
