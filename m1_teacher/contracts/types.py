@@ -85,6 +85,12 @@ TEACHING_ACTION_KIND_VALUES: tuple[str, ...] = (
     "GOAL_COMPLETE",
     "SESSION_PAUSE",
     "SESSION_RESUME",
+    # B-NEXT (B-PR4) additive values: vertical interview turns.  The main
+    # question and the five Socratic probes are SOCRATIC_QUESTION; missing
+    # learner-owned project facts produce ASK_CLARIFICATION.  Appended only;
+    # no existing value is renamed/removed (see ADR D12 change log).
+    "SOCRATIC_QUESTION",
+    "ASK_CLARIFICATION",
 )
 
 SESSION_PHASE_VALUES: tuple[str, ...] = (

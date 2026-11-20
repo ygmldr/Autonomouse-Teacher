@@ -146,6 +146,46 @@ def _require_instance(value: Any, expected: type, where: str) -> Any:
     return value
 
 
+_RESERVED_EXTRA_KEYS = frozenset(
+    {
+        "result_id",
+        "item_id",
+        "status",
+        "result",
+        "item",
+        "applied",
+        "snapshot",
+        "policy_version",
+        "scope",
+    }
+)
+
+
+def _merge_payload_extra(
+    payload: Mapping[str, Any],
+    extra: Mapping[str, Any] | None,
+    where: str,
+) -> dict[str, Any]:
+    """Merge an additive caller-supplied payload extension (B-PR4 vertical audit).
+
+    The extension may never shadow a canonical payload key: doing so would change
+    the frozen event schema semantics, so collisions fail closed.
+    """
+
+    merged = dict(payload)
+    if extra is None:
+        return merged
+    if not isinstance(extra, Mapping):
+        raise ValidationError(f"{where}: payload_extra must be a mapping")
+    collisions = sorted(set(extra) & (_RESERVED_EXTRA_KEYS | set(merged)))
+    if collisions:
+        raise ValidationError(
+            f"{where}: payload_extra may not override canonical key(s): {collisions}"
+        )
+    merged.update(dict(extra))
+    return merged
+
+
 def assessed_event_id(result_id: str) -> str:
     """Deterministic idempotency key of the ``ASSESSED`` event for a result."""
 
@@ -256,6 +296,7 @@ class LearningHistory:
         snapshot: LearnerSnapshot,
         *,
         scope: ResultScope | None = None,
+        payload_extra: Mapping[str, Any] | None = None,
     ) -> tuple[list[EventDraft], LearnerSnapshot, bool]:
         """Build the canonical ``ASSESSED``/``MASTERY_UPDATED`` drafts (pure).
 
@@ -320,33 +361,42 @@ class LearningHistory:
                     "does not match the assessment"
                 )
         scope_payload = None if scope is None else scope.to_dict()
+        extra = None if payload_extra is None else dict(payload_extra)
         updated = self._model.apply_result(snapshot, item, result)
         mutated = updated is not snapshot
         drafts = [
             EventDraft(
                 event_id=assessed_event_id(result.result_id),
                 event_type="ASSESSED",
-                payload={
-                    "result_id": result.result_id,
-                    "item_id": item.item_id,
-                    "status": result.status,
-                    "result": result.to_dict(),
-                    "item": item.to_dict(),
-                    **({} if scope_payload is None else {"scope": scope_payload}),
-                },
+                payload=_merge_payload_extra(
+                    {
+                        "result_id": result.result_id,
+                        "item_id": item.item_id,
+                        "status": result.status,
+                        "result": result.to_dict(),
+                        "item": item.to_dict(),
+                        **({} if scope_payload is None else {"scope": scope_payload}),
+                    },
+                    extra,
+                    "ASSESSED payload",
+                ),
                 created_at=result.created_at,
             ),
             EventDraft(
                 event_id=mastery_updated_event_id(result.result_id),
                 event_type="MASTERY_UPDATED",
-                payload={
-                    "result_id": result.result_id,
-                    "status": result.status,
-                    "applied": mutated,
-                    "snapshot": updated.to_dict(),
-                    "policy_version": self._model.policy.policy_version,
-                    **({} if scope_payload is None else {"scope": scope_payload}),
-                },
+                payload=_merge_payload_extra(
+                    {
+                        "result_id": result.result_id,
+                        "status": result.status,
+                        "applied": mutated,
+                        "snapshot": updated.to_dict(),
+                        "policy_version": self._model.policy.policy_version,
+                        **({} if scope_payload is None else {"scope": scope_payload}),
+                    },
+                    extra,
+                    "MASTERY_UPDATED payload",
+                ),
                 created_at=result.created_at,
             ),
         ]
@@ -359,6 +409,8 @@ class LearningHistory:
         item: AssessmentItem,
         result: AssessmentResult,
         snapshot: LearnerSnapshot | None = None,
+        *,
+        payload_extra: Mapping[str, Any] | None = None,
     ) -> LearnerSnapshot:
         """Record one assessment and return the updated learner snapshot.
 
@@ -422,7 +474,12 @@ class LearningHistory:
             return rebuilt
 
         drafts, updated, mutated = self.assessment_event_drafts(
-            learner_id, session_id, item, result, base
+            learner_id,
+            session_id,
+            item,
+            result,
+            base,
+            payload_extra=payload_extra,
         )
         seq = self._next_seq(learner_id)
         events = [

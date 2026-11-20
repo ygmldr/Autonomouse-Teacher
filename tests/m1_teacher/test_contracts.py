@@ -300,6 +300,9 @@ def _expected_enums() -> dict[str, tuple[str, ...]]:
             "GOAL_COMPLETE",
             "SESSION_PAUSE",
             "SESSION_RESUME",
+            # B-NEXT B-PR4 additive values (vertical interview turns).
+            "SOCRATIC_QUESTION",
+            "ASK_CLARIFICATION",
         ),
         "SESSION_PHASE": (
             "DIAGNOSE",

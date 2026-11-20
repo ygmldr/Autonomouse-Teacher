@@ -258,6 +258,22 @@ Recorded for the reviewer:
 
 ---
 
+## 6b. D12 additive change log
+
+Append-only log of additive contract changes allowed by **D12**; existing valid
+payloads remain valid and no frozen member is renamed/removed.
+
+| Date (UTC) | PR | Change | Compatibility |
+|---|---|---|---|
+| 2026-11-20 | B-PR2 | `HISTORY_EVENT_TYPE` += `ASSESSMENT_PREPARED` | Additive enum value; older payloads unaffected |
+| 2026-11-20 | B-PR4 | `TEACHING_ACTION_KIND` += `SOCRATIC_QUESTION`, `ASK_CLARIFICATION` | Additive enum values used only by the vertical interview policy; CF/A paths never emit them |
+
+B-PR4 note: the two new action kinds are teacher-visible but answer-free
+(no `answer`/`expected`/`correct`/`solution` fields) and remain subject to the
+same freeze checks (`FORBIDDEN_TEACHER_FIELD_TOKENS`, strict `from_dict`).
+
+---
+
 ## 7. Open questions / unresolved
 
 1. **`AssessmentItem.public`**: fixture metadata today. If PR4/PR5 needs item visibility tiers,

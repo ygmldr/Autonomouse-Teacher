@@ -107,6 +107,12 @@ from ..learner.history import (
 )
 from ..planner.planner import CurriculumPlanner
 
+from .vertical import (
+    VerticalActionContext,
+    VerticalPolicy,
+    VerticalTransitionContext,
+)
+
 __all__ = [
     "RecoveryReport",
     "SessionPolicy",
@@ -343,6 +349,7 @@ class TeachingSessionEngine:
         planner: CurriculumPlanner | None = None,
         scorer: AssessmentScorer | None = None,
         policy: SessionPolicy | None = None,
+        vertical_policy: VerticalPolicy | None = None,
     ) -> None:
         if not isinstance(domain, DomainAdapter):
             raise ValidationError(
@@ -382,6 +389,18 @@ class TeachingSessionEngine:
             )
         if policy is not None and not isinstance(policy, SessionPolicy):
             raise ValidationError("TeachingSessionEngine(policy=...): expected SessionPolicy")
+        if vertical_policy is not None:
+            if not isinstance(vertical_policy, VerticalPolicy):
+                raise ValidationError(
+                    "TeachingSessionEngine(vertical_policy=...): expected a VerticalPolicy"
+                )
+            if vertical_policy.domain_id != domain.domain_id:
+                raise ValidationError(
+                    "TeachingSessionEngine(vertical_policy=...): policy domain_id "
+                    f"{vertical_policy.domain_id!r} does not match engine domain "
+                    f"{domain.domain_id!r}",
+                    code="VERTICAL_DOMAIN_MISMATCH",
+                )
         self._domain = domain
         self._graph = graph
         self._repository = repository
@@ -390,6 +409,7 @@ class TeachingSessionEngine:
         self._planner = planner if planner is not None else CurriculumPlanner(domain, graph)
         self._scorer: AssessmentScorer = scorer if scorer is not None else DeterministicScorer()
         self._policy = policy if policy is not None else SessionPolicy()
+        self._vertical: VerticalPolicy | None = vertical_policy
         self._supports_txn = callable(
             getattr(repository, "commit_teaching_turn", None)
         ) and callable(getattr(repository, "session_version", None))
@@ -419,6 +439,17 @@ class TeachingSessionEngine:
                 )
             self._practice_items_by_node[node_id] = list(parsed)
 
+    # -- additive vertical metadata helpers ---------------------------------
+    def _vertical_session_event_payload(self) -> dict[str, Any]:
+        if self._vertical is None:
+            return {}
+        return dict(self._vertical.session_event_payload())
+
+    def _vertical_plan_event_payload(self) -> dict[str, Any]:
+        if self._vertical is None:
+            return {}
+        return dict(self._vertical.plan_event_payload())
+
     # -- properties --------------------------------------------------------
     @property
     def domain(self) -> DomainAdapter:
@@ -439,6 +470,12 @@ class TeachingSessionEngine:
     @property
     def policy(self) -> SessionPolicy:
         return self._policy
+
+    @property
+    def vertical_policy(self) -> VerticalPolicy | None:
+        """The optional additive vertical policy (``None`` = classic CF behaviour)."""
+
+        return self._vertical
 
     @property
     def repository(self) -> LearnerRepository | SessionRepository:
@@ -497,6 +534,17 @@ class TeachingSessionEngine:
                 )
             return existing
 
+        if self._vertical is not None:
+            # Fail closed *before* any session/event write: vertical JD/freshness
+            # gates and domain/objective compatibility.
+            self._vertical.validate_session_start(
+                learner_id=learner_id,
+                goal=goal,
+                objective=objective,
+                snapshot=self._current_snapshot(learner_id),
+                session_id=session_id,
+            )
+
         self._repository.upsert_goal(goal)
         snapshot = self._current_snapshot(learner_id)
         complete, completion_reason = self._planner.check_goal_completion(objective, snapshot)
@@ -521,6 +569,7 @@ class TeachingSessionEngine:
                 "phase": phase,
                 "snapshot_revision": snapshot.revision,
                 "session_policy_version": self._policy.policy_version,
+                **self._vertical_session_event_payload(),
             },
         )
         plan = self._planner.plan(goal, objective, snapshot, history=self._events(learner_id))
@@ -532,6 +581,7 @@ class TeachingSessionEngine:
                 "objective_id": plan.objective_id,
                 "step_count": len(plan.steps),
                 "policy_version": plan.policy_version,
+                **self._vertical_plan_event_payload(),
             },
         )
         if complete:
@@ -1090,9 +1140,41 @@ class TeachingSessionEngine:
                 drafts=(draft,),
                 goal=None,
             )
-        drafts, updated, mutated = self._history.assessment_event_drafts(
-            state.learner_id, state.session_id, item, result, snapshot, scope=scope
+        vertical_payload_extra = (
+            self._vertical.assessment_payload_extra(result)
+            if self._vertical is not None
+            else None
         )
+        drafts, updated, mutated = self._history.assessment_event_drafts(
+            state.learner_id,
+            state.session_id,
+            item,
+            result,
+            snapshot,
+            scope=scope,
+            payload_extra=vertical_payload_extra,
+        )
+        if self._vertical is not None:
+            override = self._vertical.plan_transition(
+                VerticalTransitionContext(
+                    state=state,
+                    snapshot=snapshot,
+                    events=tuple(self._session_events(state)),
+                    item=item,
+                    result=result,
+                    goal=self._goal(state),
+                    objective=self._objective(state),
+                )
+            )
+            if override is not None:
+                return _TurnTransition(
+                    phase=override.phase,
+                    turn_index=next_turn,
+                    pending_item_id=override.pending_item_id,
+                    snapshot=updated if mutated else None,
+                    drafts=tuple(drafts),
+                    goal=None,
+                )
         phase = PHASE_REVIEW
         goal_update: LearnerGoal | None = None
         if mutated and result.status in _MUTATING_STATUSES:
@@ -2303,34 +2385,59 @@ class TeachingSessionEngine:
         result: AssessmentResult,
         snapshot: LearnerSnapshot,
     ) -> SessionState:
+        payload_extra = (
+            self._vertical.assessment_payload_extra(result)
+            if self._vertical is not None
+            else None
+        )
+        assessed_payload = {
+            "result_id": result.result_id,
+            "item_id": item.item_id,
+            "status": result.status,
+            "result": result.to_dict(),
+            "item": item.to_dict(),
+        }
+        mastery_payload = {
+            "result_id": result.result_id,
+            "status": result.status,
+            "applied": False,
+            "snapshot": snapshot.to_dict(),
+            "policy_version": self._history.model.policy.policy_version,
+            "reason": "NEEDS_REVIEW is not observed mastery evidence",
+        }
+        if payload_extra is not None:
+            assessed_payload.update(payload_extra)
+            mastery_payload.update(payload_extra)
         self._record_deterministic_events(
             state,
             [
-                (
-                    assessed_event_id(result.result_id),
-                    "ASSESSED",
-                    {
-                        "result_id": result.result_id,
-                        "item_id": item.item_id,
-                        "status": result.status,
-                        "result": result.to_dict(),
-                        "item": item.to_dict(),
-                    },
-                ),
+                (assessed_event_id(result.result_id), "ASSESSED", assessed_payload),
                 (
                     mastery_updated_event_id(result.result_id),
                     "MASTERY_UPDATED",
-                    {
-                        "result_id": result.result_id,
-                        "status": result.status,
-                        "applied": False,
-                        "snapshot": snapshot.to_dict(),
-                        "policy_version": self._history.model.policy.policy_version,
-                        "reason": "NEEDS_REVIEW is not observed mastery evidence",
-                    },
+                    mastery_payload,
                 ),
             ],
         )
+        if self._vertical is not None:
+            override = self._vertical.plan_transition(
+                VerticalTransitionContext(
+                    state=state,
+                    snapshot=snapshot,
+                    events=tuple(self._session_events(state)),
+                    item=item,
+                    result=result,
+                    goal=self._goal(state),
+                    objective=self._objective(state),
+                )
+            )
+            if override is not None:
+                return self._save_state(
+                    state,
+                    phase=override.phase,
+                    turn_index=state.turn_index + 1,
+                    pending_item_id=override.pending_item_id,
+                )
         return self._save_state(
             state,
             phase=PHASE_REVIEW,
@@ -2345,9 +2452,38 @@ class TeachingSessionEngine:
         result: AssessmentResult,
         snapshot: LearnerSnapshot,
     ) -> SessionState:
-        updated = self._history.apply_assessment(
-            state.learner_id, state.session_id, item, result, snapshot=snapshot
+        vertical_payload_extra = (
+            self._vertical.assessment_payload_extra(result)
+            if self._vertical is not None
+            else None
         )
+        updated = self._history.apply_assessment(
+            state.learner_id,
+            state.session_id,
+            item,
+            result,
+            snapshot=snapshot,
+            payload_extra=vertical_payload_extra,
+        )
+        if self._vertical is not None:
+            override = self._vertical.plan_transition(
+                VerticalTransitionContext(
+                    state=state,
+                    snapshot=snapshot,
+                    events=tuple(self._session_events(state)),
+                    item=item,
+                    result=result,
+                    goal=self._goal(state),
+                    objective=self._objective(state),
+                )
+            )
+            if override is not None:
+                return self._save_state(
+                    state,
+                    phase=override.phase,
+                    turn_index=state.turn_index + 1,
+                    pending_item_id=override.pending_item_id,
+                )
         objective = self._objective(state)
         complete, completion_reason = self._planner.check_goal_completion(objective, updated)
         if complete:
@@ -2407,20 +2543,19 @@ class TeachingSessionEngine:
         events = self._events(state.learner_id)
         selection = self._select_action(state, snapshot, events)
         action, phase, pending_item_id, extra_events = selection
-        self._append_event(
-            state,
-            "ACTION_TAKEN",
-            {
-                "action": action.to_dict(),
-                "action_kind": action.kind,
-                "node_ids": list(action.node_ids),
-                "item_id": action.item_id,
-                "phase": phase,
-                "turn_index": state.turn_index,
-                "snapshot_revision": snapshot.revision,
-                "session_policy_version": self._policy.policy_version,
-            },
-        )
+        action_payload = {
+            "action": action.to_dict(),
+            "action_kind": action.kind,
+            "node_ids": list(action.node_ids),
+            "item_id": action.item_id,
+            "phase": phase,
+            "turn_index": state.turn_index,
+            "snapshot_revision": snapshot.revision,
+            "session_policy_version": self._policy.policy_version,
+        }
+        if self._vertical is not None:
+            action_payload.update(self._vertical.action_event_payload(action, state))
+        self._append_event(state, "ACTION_TAKEN", action_payload)
         for event_type, payload in extra_events:
             self._append_event(state, event_type, payload)
         if phase == PHASE_COMPLETE:
@@ -2446,6 +2581,31 @@ class TeachingSessionEngine:
         goal = self._goal(state)
         objective = self._objective(state)
         extra_events: list[tuple[str, dict[str, Any]]] = []
+
+        # 0) Additive vertical seam (B-PR4).  With no vertical policy this is a
+        #    no-op and the classic CF selection below is byte-for-byte unchanged.
+        if self._vertical is not None:
+            selection = self._vertical.select_action(
+                VerticalActionContext(
+                    state=state,
+                    snapshot=snapshot,
+                    events=tuple(events),
+                    item=(
+                        self._items_by_id.get(state.pending_item_id)
+                        if state.pending_item_id is not None
+                        else None
+                    ),
+                    goal=goal,
+                    objective=objective,
+                )
+            )
+            if selection is not None:
+                return (
+                    selection.action,
+                    selection.phase,
+                    selection.pending_item_id,
+                    list(selection.extra_events),
+                )
 
         # 1) Resume/retry of an item that is still pending (pause or EVAL_ERROR).
         if state.pending_item_id is not None:
