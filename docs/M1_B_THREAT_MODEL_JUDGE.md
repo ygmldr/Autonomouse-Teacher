@@ -714,5 +714,6 @@ worker 只读目录 `/tmp/m1b_probe/sandbox_worker`，`worker_runner.py` 实现 
 | --- | --- | --- |
 | v0.1 | 2026-11-20 | 初版 DESIGN_ONLY：资产/信任域、A/B 根因证据、冻结 worker 协议 v1、bwrap OS 规格与 LOCAL_PROBE、默认 BLOCKED 策略、负例矩阵、正确性/泄漏规格、B1-01..06 验收映射、非目标与 Reviewer 清单 |
 | v0.2 | 2026-11-20 | PR1 实现回填：P1-08 CLOSED（`--size` 必须在 `--tmpfs` 前，给出实测 exit 1/exit 0 与 sandbox.py 同步证据）；P1-01 CLOSED（opt-in 仅构造/部署配置，不可由数据路径/请求/env 绕过）；P2-05 修正 request_id 正则示例；P2-06 统一协议通道为专用 fd（dup(1)）+ fd1/2 重定向 + `os._exit(0)` 表述 |
-| v0.3 | 2026-11-20 | 独立评审 PASS_WITH_ACTIONS 回填：P1-4 CLOSED（删除“环境变量可开启 trusted fixture”，统一仅可信构造/部署参数）；P2-1（§4.3 上限 128 KiB、拒绝多行）；P2-2（状态改为 DESIGN + IMPLEMENTED_LOCAL_VERIFIED）；P1-1/P1-2 说明同步（CPU/wall TLE 与 host 非 root principal LOCAL_ONLY） |
+| v0.3 | 2026-11-20 | 独立评审 PASS_WITH_ACTIONS 回填：P1-4 CLOSED（trusted fixture 仅可信构造/部署参数可开启；历史开启方式说明已移除，实现不读取任何环境变量开关）；P2-1（§4.3 上限 128 KiB、拒绝多行）；P2-2（状态改为 DESIGN + IMPLEMENTED_LOCAL_VERIFIED）；P1-1/P1-2 说明同步（CPU/wall TLE 与 host 非 root principal LOCAL_ONLY） |
 | v0.4 | 2026-11-20 | 复核附录回填：P1-2 启动校验实现（`M1B_REQUIRE_NONROOT_SANDBOX=1` canary fail-closed，默认 LOCAL_ONLY）；P1-3 CI 接线脚本 `scripts/m1b/run_safety_ci.sh`（.github 仍 NOT_CONFIGURED/NOT_RUN）；§3.1 首行规则与实现一致；版本号/changelog 对齐 |
+| v0.5 | 2026-11-21 | 文档精度（final review P2-3）：清理历史 changelog 中不准确的开启方式引用；语义不变——trusted fixture 仅可信构造/部署参数可开启，实现不读取环境变量开关；P1-4 关闭状态不变 |
