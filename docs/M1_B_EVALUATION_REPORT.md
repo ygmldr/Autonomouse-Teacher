@@ -2,14 +2,14 @@
 
 | 字段 | 值 |
 |---|---|
-| 报告状态 | **FINAL_TREE_MEASURED + FINAL_REVIEW_P1_CLOSURE（Owner 执行侧）；首轮独立评审 `PASS_WITH_ACTIONS`（P0=0/P1=3/P2=6）；delta addendum `a09e56e`：P1-1/P1-2 `CLOSED`、P1-3 本 errata 关闭中；B5-01 `PARTIAL`，mini delta 复核后升级** |
-| 报告版本 | `m1b.eval-report.v1`（2026-11-21 UTC，final-review P1 closure + delta addendum errata） |
-| 工作区 / 分支 | `/root/m1b/pr5` / `b-next/pr5-e2e-eval` |
+| 报告状态 | **FINAL_TREE_MEASURED + FINAL_REVIEW_P1_CLOSURE（Owner 执行侧）；评审链：首轮 `5d5ebf8` `PASS_WITH_ACTIONS`（P0=0/P1=3/P2=6）→ delta `a09e56e` P1-1/P1-2 `CLOSED`、P1-3 errata → addendum2 `d43b02c` **`P1_ACTIONS_CLOSED`（P1-3 5/5 CLOSED，仅余 P2 文档项）**；B5-01 建议记为 `PASS_WITH_ACTIONS`（最终标签由 Lead/维护者记录）；**总体裁定建议 `PASS_FOR_M1B_OFFLINE_INTEGRATION_SCOPE`（仅限离线合成集成范围）** |
+| 报告版本 | `m1b.eval-report.v1.2`（2026-11-21 UTC；final-review P1 closure + delta addendum + addendum2 后状态刷新） |
+| 工作区 / 分支 | `/root/m1b/pr5` / `b-next/pr5-e2e-eval`（addendum2 后的最终一致性补丁位于 `/root/m1b/pr5wrap` / `b-next/pr5-wrap`；代码/测试树与证据未变） |
 | 最终集成树 | PR4 final `1de6ae6d3714ab815c47022e4c2cceee107db979` 合入 PR5 后的 merge commit **`861d147d…`**；最终行为代码 SHA **`12f6290c43523d5c3930915fe18810adca8609a4`**（P1-1 collector 修复）；P1-2 证据生成 SHA **`9c383e5870ba628c17cd695944878d2b631fd59d`**（tree `333828d…`，clean worktree）；**PR5 最终 commit SHA 在本文档所在 commit 完成后由 Lead/报告回填** |
 | 主基线 | `3e7afee077845a071cd364e93ab209cac20b2d5f` |
 | 环境 | 干净 `TMPDIR=$(mktemp -d)`（串行、无并发测试）；Linux 6.17.13-2-pve；Python 3.11.15（`/root/Autonomous Teacher/.venv/bin/python`）；pytest 9.2.0；bubblewrap 0.9.0；TZ=UTC；PYTHONHASHSEED 由 collector 记录 |
 | 证据包 | `docs/m1b_evidence/audit-index.jsonl`（append-only，含历史 16 条过渡快照记录 + 最终树条目；旧 EXECUTED_FAIL/NOT_RUN 记录保留） + `raw/**` + `e2e_b5_*.jsonl` + `e2e_b5_summary.json` |
-| 证据标签 | 本报告为 `OWNER_REPORTED` + `DETERMINISTIC`（Owner 本地真实命令/哈希）；各 PR Reviewer 结论标 `REVIEWER_REPORTED`；**B5-01 首轮独立评审 `PASS_WITH_ACTIONS`（P0=0/P1=3/P2=6）；delta addendum `a09e56e`：P1-1/P1-2 CLOSED、P1-3 本 errata 关闭中；B5-01 PARTIAL**；`B4-01/02/03` 已由 PR4 独立评审 `VERIFIED` |
+| 证据标签 | 本报告为 `OWNER_REPORTED` + `DETERMINISTIC`（Owner 本地真实命令/哈希）；各 PR Reviewer 结论标 `REVIEWER_REPORTED`；**B5-01 最终评审链：`5d5ebf8` `PASS_WITH_ACTIONS` → `a09e56e` P1-1/P1-2 `CLOSED`、P1-3 errata → `d43b02c` addendum2 `P1_ACTIONS_CLOSED`（仅余 P2 文档项）；B5-01 建议 `PASS_WITH_ACTIONS`（Lead/维护者最终标签）；总体建议 `PASS_FOR_M1B_OFFLINE_INTEGRATION_SCOPE`（仅离线合成范围，不含真实效果/Live）**；`B4-01/02/03` 已由 PR4 独立评审 `VERIFIED` |
 | 边界 | **Offline synthetic only, not real teaching effect.** 不构成真人学习收益、真实 Provider/网络/Live/生产授权；不改变 M0 G4-H/G5/LiveGate/M0 决策 |
 
 ---
@@ -25,11 +25,11 @@
 | B-PR2 事务评审 | `PASS_WITH_ACTIONS`；B2-01/02/03 + B-Q2 `VERIFIED`；review-fix tree 已合入（goal failpoint/D12 记录等） | `REVIEWER_REPORTED`：`docs/M1_B_PR2_REVIEW.md`；final tree = PR4 final 合入树 |
 | B-PR3 幂等评审 | `PASS_WITH_ACTIONS`；B3-01/02 + B-Q3 `VERIFIED`；review-fix tree 已合入（legacy digest/公共 API scoped 查找等） | `REVIEWER_REPORTED`：`docs/M1_B_PR3_REVIEW.md`；final tree 含修复 |
 | B-PR4 独立评审 | `PASS_WITH_ACTIONS`（P0=0 / P1=3 / P2=7）；**P1 修复已合入 final tree**（`49cf45b`/`1de6ae6`）：P1-1 会话计划持久化、P1-2 hidden reader 守卫、P1-3 版本拒绝/事件schema 部分（PARTIAL 明示）；B4-01/02/03 均 `VERIFIED`（E2E-MOCK；B4-02 以重启计划持久化修复为前提） | `REVIEWER_REPORTED`：`docs/M1_B_PR4_REVIEW.md` + `M1_B_PR4_REVIEW_RESPONSE.md`；final tree 含修复 |
-| B-PR5 统一 E2E/评测 | Owner 最终树实测完成（本报告）；首轮最终独立评审 **`PASS_WITH_ACTIONS`**（P0=0/P1=3/P2=6，`5d5ebf8` 已合入 HEAD）；delta addendum `a09e56e`：P1-1/P1-2 `CLOSED`、P1-3（本 errata）关闭中；**`B5-01` 维持 `PARTIAL`，mini delta 复核后升级** | `REVIEWER_REPORTED`：`docs/M1_B_FINAL_INDEPENDENT_REVIEW.md`、`docs/M1_B_FINAL_INDEPENDENT_REVIEW_ADDENDUM.md`；Owner 证据包 |
-| X-01 无范围漂移 | Owner 侧 `DETERMINISTIC` 检查通过：**最终树 vs main = 302 files（302 A/0 M/0 D）**，vs M1-A = **243 files**；Reviewer 在 `c3eb736` 实测为 268 files（之后 P1 证据/文档/P1 修复新增 34 文件），保护路径 **0 命中** | collector entry `X-01-scope-diff`（final 条目）；Reviewer 需重跑 |
+| B-PR5 统一 E2E/评测 | Owner 最终树实测完成（本报告）；**评审链**：首轮 `5d5ebf8` `PASS_WITH_ACTIONS`（P0=0/P1=3/P2=6）→ delta `a09e56e` P1-1/P1-2 `CLOSED`、P1-3 errata → **addendum2 `d43b02c` `P1_ACTIONS_CLOSED`（P1-3 5/5 CLOSED，仅余 P2 文档项）**；**`B5-01` 建议记为 `PASS_WITH_ACTIONS`**（最终标签由 Lead/维护者记录）；总体建议 `PASS_FOR_M1B_OFFLINE_INTEGRATION_SCOPE`（仅离线合成范围） | `REVIEWER_REPORTED`：`docs/M1_B_FINAL_INDEPENDENT_REVIEW.md`、`docs/M1_B_FINAL_INDEPENDENT_REVIEW_ADDENDUM.md`、`docs/M1_B_FINAL_INDEPENDENT_REVIEW_ADDENDUM_2.md`；Owner 证据包 |
+| X-01 无范围漂移 | Owner 侧 `DETERMINISTIC` 检查通过：**最终代码/测试树 vs main = 302 files（302 A/0 M/0 D）**，vs M1-A = **243 files**；Reviewer 在 `c3eb736` 实测为 268 files（之后 P1 证据/文档/P1 修复新增 34 文件），保护路径 **0 命中**。**口径（P2-7）**：302/243 = **不含评审 addendum 的最终代码/测试树**（`d9201e9`/`db5ce03`）；addendum2 复核 HEAD `1eb40a9` = **303/244**；本 wrap 分支提交 addendum2 文件后 `main...HEAD` = **304/245**（+1 为 addendum2 自身），最终 push 以 Lead 记录为准 | collector entry `X-01-scope-diff`（final 条目）；Reviewer 需重跑 |
 | X-02 无 Key/网络/付费 | Owner 侧 `DETERMINISTIC` 检查通过（网络 import **0**；`autoteacher_m0` 仅隔离断言/注释；无 Key/Provider；LiveGate 仍 BLOCKED） | collector entry `X-02-network-scan`（final 条目）；Reviewer 需重跑 |
-| **最终独立评审（B5-01）** | **`PASS_WITH_ACTIONS`**（P0=0 / P1=3 / P2=6）；首轮报告 `5d5ebf8` 已合入 HEAD（merge `ff6daa6`）；delta addendum `a09e56e`：**P1-1/P1-2 `CLOSED`、P1-3 本 errata 关闭中**；B5-01 维持 `PARTIAL` | `REVIEWER_REPORTED`：`docs/M1_B_FINAL_INDEPENDENT_REVIEW.md`、`docs/M1_B_FINAL_INDEPENDENT_REVIEW_ADDENDUM.md`；P1 修复证据 §3.4/§8.1/§13/§14 |
-| **Owner 侧结论（errata 后）** | **`PASS_WITH_ACTIONS`；P1-1/P1-2 CLOSED、P1-3 本 errata 关闭中；B5-01 PARTIAL**（不预填无条件 PASS；mini delta 复核确认 P1-3 后才可升级） | 本报告 §10/§11/§13/§14；delta addendum `a09e56e` |
+| **最终独立评审（B5-01）** | **评审链已闭合**：首轮 `5d5ebf8` `PASS_WITH_ACTIONS`（P0=0/P1=3/P2=6）→ delta `a09e56e` P1-1/P1-2 `CLOSED`、P1-3 errata → **addendum2 `d43b02c` `P1_ACTIONS_CLOSED`（P1-3 5/5 CLOSED，仅余 P2 文档项）**；**B5-01 建议记为 `PASS_WITH_ACTIONS`**（最终标签由 Lead/维护者记录） | `REVIEWER_REPORTED`：`docs/M1_B_FINAL_INDEPENDENT_REVIEW.md`、`_ADDENDUM.md`、`_ADDENDUM_2.md`；P1 修复证据 §3.4/§8.1/§13/§14 |
+| **Owner 侧结论（addendum2 后）** | **`PASS_WITH_ACTIONS → P1_ACTIONS_CLOSED`（addendum2 `d43b02c`）；总体建议 `PASS_FOR_M1B_OFFLINE_INTEGRATION_SCOPE`（仅限离线合成集成范围）**；不预填真实效果/Live/生产；最终标签与签收由 Lead/维护者记录 | 本报告 §10/§11/§13/§14；addendum2 `d43b02c` |
 
 ---
 
@@ -129,7 +129,7 @@ B5 统一 E2E：`pytest test_b5_e2e.py -q` → **11 passed in 13.04s**。
 | B4-01 | 双 CF learner 同 canonical mastery/session journal | **`VERIFIED`**（PR4 独立评审；Owner 最终树复跑一致） | `docs/M1_B_PR4_REVIEW.md` §1；final tree CF E2E 9 passed + `e2e_b5_cf.jsonl` |
 | B4-02 | 双 interview learner + JD v1→v2 不同证据化计划 | **`VERIFIED`（会话内；重启计划持久化 P1-1 已修复并复评）** | `docs/M1_B_PR4_REVIEW.md`；`test_b4_durability_replay.py` 9 passed；`e2e_b5_interview.jsonl` |
 | B4-03 | freshness 拒绝 expired/conflict/unauthoritative | **`VERIFIED`（E2E-MOCK；持久 review queue P2-2 明示未实现）** | `docs/M1_B_PR4_REVIEW.md`；final tree `gate_enforced=True`、`silent_imports=0` |
-| B5-01 | Reviewer 独立重跑旧两套 + 新集成套件并标 mock provenance | Owner 最终树证据完成；首轮独立评审 **`PASS_WITH_ACTIONS`**（P0=0/P1=3/P2=6，`5d5ebf8`）；delta addendum `a09e56e`：P1-1/P1-2 `CLOSED`、P1-3 本 errata 关闭中；**B5-01 维持 `PARTIAL`** | 本报告 + `docs/M1_B_FINAL_INDEPENDENT_REVIEW.md` / `_ADDENDUM.md` + `docs/m1b_evidence/audit-index.jsonl` |
+| B5-01 | Reviewer 独立重跑旧两套 + 新集成套件并标 mock provenance | Owner 最终树证据完成；评审链：`5d5ebf8` `PASS_WITH_ACTIONS` → `a09e56e` P1-1/P1-2 `CLOSED`、P1-3 errata → **`d43b02c` addendum2 `P1_ACTIONS_CLOSED`（仅余 P2）**；**B5-01 建议 `PASS_WITH_ACTIONS`**（Lead/维护者最终标签） | 本报告 + `docs/M1_B_FINAL_INDEPENDENT_REVIEW.md` / `_ADDENDUM.md` / `_ADDENDUM_2.md` + `docs/m1b_evidence/audit-index.jsonl` |
 
 > 所有 CF/interview 结果均为 MOCK 合成数据；状态机/回放/rubric 算术为 `DETERMINISTIC`；真实教学效果 `NOT_VERIFIED`。不得把本地绿色当作独立验收。
 
@@ -150,7 +150,7 @@ B5 统一 E2E：`pytest test_b5_e2e.py -q` → **11 passed in 13.04s**。
 
 | case_id | 检查 | 命令 | 实测（Owner） | 标签 |
 |---|---|---|---|---|
-| X-01 | M1 提交不修改 `src/autoteacher_m0/`、`security/`、`bridge/`、`config/g*`、`scripts/g4*`、LiveGate；A 线不改 M1 | `git diff --name-only 3e7afee..HEAD` + 保护前缀 grep；`git diff --name-only main...HEAD` | **final tree：302 files（302 A/0 M/0 D）vs main；243 files vs M1-A**（reviewer 在 `c3eb736` 实测 268；P1 修复/证据新增 34）；保护路径 **0 命中** | `DETERMINISTIC` + `OWNER_REPORTED`；Reviewer 重跑 |
+| X-01 | M1 提交不修改 `src/autoteacher_m0/`、`security/`、`bridge/`、`config/g*`、`scripts/g4*`、LiveGate；A 线不改 M1 | `git diff --name-only 3e7afee..HEAD` + 保护前缀 grep；`git diff --name-only main...HEAD` | **最终代码/测试树：302 files（302 A/0 M/0 D）vs main；243 files vs M1-A**（reviewer 在 `c3eb736` 实测 268；P1 修复/证据新增 34）；保护路径 **0 命中**。**口径（P2-7）**：302/243 不含评审 addendum（`d9201e9`/`db5ce03`）；addendum2 复核 HEAD `1eb40a9` = 303/244；当前 wrap HEAD = 304/245（+1 addendum2 文件），最终 push 以 Lead 记录为准 | `DETERMINISTIC` + `OWNER_REPORTED`；Reviewer 重跑 |
 | X-02 | 无真实 Key/外部网络/付费请求；LiveGate 仍 BLOCKED | AST 扫描 `m1_teacher/ tests/m1_teacher/ scripts/m1b/`；socket 阻断 demo/cli 测试 | 网络 import **0**；`autoteacher_m0` 仅隔离断言/注释（0 import）；无 Key/Provider；LiveGate 未变 | `DETERMINISTIC` + `OWNER_REPORTED`；Reviewer 重跑 |
 
 ## 8. 证据包（最终树）
@@ -183,7 +183,7 @@ B5 统一 E2E：`pytest test_b5_e2e.py -q` → **11 passed in 13.04s**。
 
 ## 10. NOT_RUN / UNVERIFIED / BLOCKED（最终树残余）
 
-1. **B-PR5/B5-01 首轮独立评审：`PASS_WITH_ACTIONS`（P0=0/P1=3/P2=6）；delta addendum `a09e56e`：P1-1/P1-2 `CLOSED`、P1-3 本 errata 关闭中；B5-01 维持 `PARTIAL`**；mini delta 复核后升级，本报告不预填无条件 PASS。
+1. **B-PR5/B5-01 评审链：首轮 `5d5ebf8` `PASS_WITH_ACTIONS`（P0=0/P1=3/P2=6）→ delta `a09e56e` P1-1/P1-2 `CLOSED`、P1-3 errata → addendum2 `d43b02c` `P1_ACTIONS_CLOSED`（P1-3 5/5，仅余 P2）**；B5-01 建议 `PASS_WITH_ACTIONS`，总体建议 `PASS_FOR_M1B_OFFLINE_INTEGRATION_SCOPE`（仅离线合成范围）；**不构成真实效果/Provider/Live/生产 PASS**。
 2. B-PR1 P1-2：**实现 fail-closed 已存在**；**非 root 目标部署验收 `NOT_RUN`**；B1-04 `PARTIAL`；真实用户 CODE **`BLOCKED`**。
 3. B1-05 目标部署 latency/resource/非 root 验收 `NOT_RUN`；B1-02/03/06 target-deploy 复核 `NOT_RUN`。
 4. B2/B3 的残余 P2（恢复 ERROR 事件语义、legacy digest 边界等）以各自 review 文档为准，最终树未重判。
@@ -193,8 +193,8 @@ B5 统一 E2E：`pytest test_b5_e2e.py -q` → **11 passed in 13.04s**。
 
 ## 11. 默认 / 最终结论边界
 
-- Owner 最终树所有本地门通过；首轮独立评审结论为 **`PASS_WITH_ACTIONS`**（P0=0，P1=3）；delta addendum `a09e56e`：**P1-1/P1-2 `CLOSED`、P1-3 本 errata 关闭中**；B5-01 维持 `PARTIAL`。
-- mini delta Reviewer 确认 P1-3 关闭后，默认只允许：**`PASS_FOR_M1B_OFFLINE_INTEGRATION_SCOPE`**；在此之前不得声称无条件 PASS。
+- Owner 最终树所有本地门通过；评审链：首轮 `5d5ebf8` `PASS_WITH_ACTIONS`（P0=0/P1=3/P2=6）→ delta `a09e56e` P1-1/P1-2 `CLOSED`、P1-3 errata → **addendum2 `d43b02c` `P1_ACTIONS_CLOSED`（P1-3 5/5 CLOSED，仅余 P2 文档项）**；**B5-01 建议 `PASS_WITH_ACTIONS`**（最终标签由 Lead/维护者记录）。
+- **总体裁定建议：`PASS_FOR_M1B_OFFLINE_INTEGRATION_SCOPE`（仅限离线、合成 fixtures、确定性/mock E2E 的 M1-B 集成范围）**；仍不构成真实效果/Provider/Live/生产 PASS，人类 Gate 不解除。
 - 该结论仅覆盖：离线、合成 fixtures、确定性/mock E2E、独立复跑证据齐全的 M1-B 集成范围。
 - **明确不包含**（不得暗示）：真人学习收益/教学效果；联网研究/招聘网站/真实 JD/简历；真实 Provider/LLM 能力；真实 OS 判题安全承诺；Live/LiveGate/授权/生产可用；M0 G4-H/G5/LiveGate/M0 决策变更。
 - 人类 Gate 不在本报告范围：H-01/H-02/H-03、G5、LiveGate、M0 决策保持各自状态；B 线无权解除。
@@ -235,7 +235,7 @@ sha256sum docs/m1b_evidence/e2e_b5_*.jsonl docs/m1b_evidence/e2e_b5_summary.json
 | B5 demo/evidence 双跑 | stdout sha256 `4d0e0c85…`（27 行）；5 文件 byte-identical（hashes §9） |
 | `audit-index.jsonl`（append-only，38 条：旧 27 + 新 11） | `a11ce42948d5dd43563a1bf6befa8bb7c8600ba3b73f9df32e345b07bc66ea80` |
 | `audit-index.json`（38 entries mirror） | `8db875301cc10f5af3af4f038b42d50a43a9291ac50c96719f7fd9ce37fc34e5` |
-| 最终独立评审裁定 | `PASS_WITH_ACTIONS`（P0=0/P1=3/P2=6）；delta addendum `a09e56e`：P1-1/P1-2 `CLOSED`、P1-3 本 errata 关闭中；**B5-01 `PARTIAL`；mini delta 复核 `PENDING`** |
+| 最终独立评审裁定 | **`P1_ACTIONS_CLOSED`（addendum2 `d43b02c`；P1-3 5/5 CLOSED，仅余 P2 文档项）**；评审链 `5d5ebf8` `PASS_WITH_ACTIONS` → `a09e56e` delta → `d43b02c` addendum2；**B5-01 建议 `PASS_WITH_ACTIONS`；总体建议 `PASS_FOR_M1B_OFFLINE_INTEGRATION_SCOPE`（仅离线合成范围）** |
 
 
 ## 14. 最终评审 P1 关闭证据（Owner 侧；待 delta Reviewer 复核）
@@ -246,4 +246,6 @@ sha256sum docs/m1b_evidence/e2e_b5_*.jsonl docs/m1b_evidence/e2e_b5_summary.json
 | **P1-2** 证据绑定最终树 | 生成前 clean worktree（`git status --porcelain` 空）；生成 SHA/tree 记入 README+§13；append-only 新增 11 条（38 条总），旧 27 条字节保留；manifest `implementation_commit=12f6290…` | generation proof `sha256(/tmp/p12_generation_proof.txt)=d1a2070a53a85f5070f0f3dda629e0f4f597bdf84cbb5137a41a68de5ff05125`；`audit-index.jsonl` `a11ce429…`（38 条；old-27 prefix `4b9a0d0e…` 不变）；`audit-index.json` `8db87530…`；B5 summary `a07cfe7e…`；新条目 28–38 全部 `EXECUTED_PASS`、`git_sha=9c383e5…`、`tree_sha=333828d…`、generation-start clean=true；evidence commit `580be70…` |
 | **P1-3** 报告数字/哈希/状态勘误 | X-01：reviewer 树 `c3eb736` 实测 268 files（268 A/0M/0D vs main；209 vs M1-A）；**final tree（P1 证据/修复后）实测 302 files / 243 vs M1-A，保护 0**；B4 demo 改 `b3231658…`/513 行/15,340B；分项计数改 939=913+26（B5 11 + collector 15）且合计一致；PR4 P1 标记“已合入”；PR1 P1-2 分栏、P1-3 脚本已接线/`.github` job `NOT_CONFIGURED`；clean archive 实测更新；PR5 最终评审状态更新 | 本报告 §3/§3.4/§5/§6/§7/§9/§13；collector `X-01-scope-diff` raw 实测 268/0 protected；`demo_b4` double-run hash `b3231658…`；`--collect-only` 939 |
 
-> 残余：首轮最终评审 `PASS_WITH_ACTIONS`；delta addendum `a09e56e` 已确认 **P1-1/P1-2 `CLOSED`**、P1-3 由本 docs-only errata 关闭中；**B5-01 维持 `PARTIAL`，mini delta 复核 `PENDING`**；实现报告数字由 m1a-contracts 后续更新（Lead 指派）。不得据此声称无条件 `PASS_FOR_M1B_OFFLINE_INTEGRATION_SCOPE`。
+> **Addendum 2（2026-11-21，`d43b02c`，121 行）**：原 final Reviewer 的 mini-delta（复核对象 HEAD `1eb40a9`/tree `0fd453b…`），结论 **`P1_ACTIONS_CLOSED`**：P1-1/P1-2 承 `a09e56e` `CLOSED`；P1-3 5/5 `CLOSED`。本轮独立实测（`INDEPENDENTLY_REEXECUTED_THIS_TURN`）：`pytest tests/m1_teacher --collect-only -q` = **939**；`pytest tests/m1_teacher -q`（私有 TMPDIR）= **939 passed in 102.44s，0 skipped**；`demo_b4 --json` 双跑 **`b3231658…`/513 行/15,340B**；`e2e_b5` 双跑 **`4d0e0c85…`/27 行/4,168B**；`audit-index.jsonl` **`a11ce429…`**（38 条）、`audit-index.json` **`8db87530…`**、`e2e_b5_summary.json` **`a07cfe7e…`**；clean archive/strict 未重跑（代码/测试树未变，承 `a09e56e` 的 939/0，`REVIEWER_REPORTED`）。新增 P2-7（X-01 口径）/P2-8（评审后状态刷新）/P2-9（占位一致性）；均不阻断。**建议总体裁定 `PASS_FOR_M1B_OFFLINE_INTEGRATION_SCOPE`（仅离线合成范围），B5-01 建议 `PASS_WITH_ACTIONS`；最终标签由 Lead/维护者记录。**
+
+> 残余（addendum2 后，均为 P2 文档项，不阻断）：P2-7 X-01 口径已在本报告加注；P2-8 状态行已在本提交刷新；P2-9 `PENDING_LEAD_MERGE` 占位口径由 Lead 最终合并记录。**不得声称无条件 PASS、真实教学效果、Provider/Live/生产可用或人类 Gate 解除。**
