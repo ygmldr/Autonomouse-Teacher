@@ -3,7 +3,7 @@
 | 字段 | 值 |
 |---|---|
 | 报告状态 | **FINAL_TREE_MEASURED + FINAL_REVIEW_P1_CLOSURE（Owner 执行侧）；最终独立评审 `PASS_WITH_ACTIONS`（P0=0/P1=3/P2=6），P1 修复待 Reviewer delta 复核** |
-| 报告版本 | `m1b.eval-report.v1`（2026-11-20 UTC） |
+| 报告版本 | `m1b.eval-report.v1`（2026-11-21 UTC，final-review P1 closure） |
 | 工作区 / 分支 | `/root/m1b/pr5` / `b-next/pr5-e2e-eval` |
 | 最终集成树 | PR4 final `1de6ae6d3714ab815c47022e4c2cceee107db979` 合入 PR5 后的 merge commit **`861d147d…`**；最终行为代码 SHA **`12f6290c43523d5c3930915fe18810adca8609a4`**（P1-1 collector 修复）；P1-2 证据生成 SHA **`9c383e5870ba628c17cd695944878d2b631fd59d`**（tree `333828d…`，clean worktree）；**PR5 最终 commit SHA 在本文档所在 commit 完成后由 Lead/报告回填** |
 | 主基线 | `3e7afee077845a071cd364e93ab209cac20b2d5f` |
@@ -102,7 +102,7 @@ export TMPDIR=$(mktemp -d)
 M1B_REQUIRE_OS_SANDBOX=1 "$PY" -m pytest tests/m1_teacher -q -rs   # 939 passed, 0 skipped
 ```
 
-实测（P1-1 修复后，`git archive 9c383e5…` 生成的无 `.git` archive）：全量 **939 passed in 105.06s**；strict **939 passed in 102.82s / 0 skipped**（修复前为 `937 passed, 1 failed`，失败项为 collector 测试要求 `git_sha` 40-hex；现在无 `.git` 时明确 `git_sha=null`/`git_available=false`，见 `docs/M1_B_EVIDENCE_PACKET.md` §3.1）。
+实测（P1-1 修复后，`git archive 9c383e5…` 生成的无 `.git` archive）：全量 **939 passed in 104.85s**；strict **939 passed in 102.93s / 0 skipped**（修复前为 `937 passed, 1 failed`，失败项为 collector 测试要求 `git_sha` 40-hex；现在无 `.git` 时明确 `git_sha=null`/`git_available=false`，见 `docs/M1_B_EVIDENCE_PACKET.md` §3.1）。
 
 ## 4. B-PR5 统一 E2E 实测结果（最终树）
 
@@ -226,11 +226,11 @@ sha256sum docs/m1b_evidence/e2e_b5_*.jsonl docs/m1b_evidence/e2e_b5_summary.json
 | 最终集成树 merge commit（PR4 final 合入 PR5） | `861d147d…`（`1de6ae6d…` PR4 final + PR5 分支） |
 | 最终行为代码 SHA（collector P1-1 修复） | `12f6290c43523d5c3930915fe18810adca8609a4` |
 | **P1-2 证据生成 SHA / tree** | **`9c383e5870ba628c17cd695944878d2b631fd59d` / `333828d38fe8988df6d4a9ef98715b5d0e9f06e3`**；生成开始时 `git status --porcelain` 空 |
-| P1-2 evidence 提交 / 本报告最终提交 | `580be70fd0f969706bce0f9c274c6f68ed08455c`（P1-2 evidence commit）/ **本文档所在最终 PR5 commit（SHA 由 Lead/交付记录回填；`git rev-parse b-next/pr5-e2e-eval`）** |
+| P1-2 evidence 提交 / 本报告最终提交 | `580be70fd0f969706bce0f9c274c6f68ed08455c`（P1-2 evidence commit）/ **最终 PR5 commit = 本文档所在 commit（SHA 由 Lead/交付记录回填；`git rev-parse b-next/pr5-e2e-eval`）**；最终代码/测试 SHA = `8f8d00ed…`（review-doc 引号守卫修复） |
 | artifact manifest `implementation_commit` | `12f6290…`（最后行为代码 SHA；生成 commit `9c383e5` 仅更新该常量与文档） |
-| 最终树 `pytest tests/m1_teacher -q` | **939 passed in 102.72s**（Owner worktree）；P1-2 生成时 **939 passed in 102.96s** |
-| 最终树 strict `M1B_REQUIRE_OS_SANDBOX=1 … -q -rs` | **939 passed；0 skipped**（生成时 **939 passed in 103.03s，0 skipped**） |
-| clean archive（无 `.git`）全量 / strict | **939 passed in 105.06s / 939 passed in 102.82s（0 skipped）**（P1-1 修复后） |
+| 最终树 `pytest tests/m1_teacher -q` | **939 passed in 103.11s**（Owner worktree，final SHA）；P1-2 生成时 **939 passed in 102.96s** |
+| 最终树 strict `M1B_REQUIRE_OS_SANDBOX=1 … -q -rs` | **939 passed in 103.21s；0 skipped**（final SHA）；生成时 **939 passed in 103.03s，0 skipped** |
+| clean archive（无 `.git`）全量 / strict | **939 passed in 104.85s / 939 passed in 102.93s（0 skipped）**（P1-1 修复后） |
 | 定向 | B5 11 / B4 9 + durability 9 / certification 33（112/112） / crash 35 / collector 15 |
 | B5 demo/evidence 双跑 | stdout sha256 `4d0e0c85…`（27 行）；5 文件 byte-identical（hashes §9） |
 | `audit-index.jsonl`（append-only，38 条：旧 27 + 新 11） | `a11ce42948d5dd43563a1bf6befa8bb7c8600ba3b73f9df32e345b07bc66ea80` |
@@ -242,7 +242,7 @@ sha256sum docs/m1b_evidence/e2e_b5_*.jsonl docs/m1b_evidence/e2e_b5_summary.json
 
 | P1 | 关闭动作 | 本轮真实证据 |
 |---|---|---|
-| **P1-1** clean archive 可移植性 | collector 无 `.git` 时记录 `git_sha=null`/`git_available=false`/`git_sha_source="unavailable"`；支持显式 `--git-sha/--tree-sha`；新增 no-git 回归测试；文档 §3.1 | `git archive 9c383e5… \| tar -x`（无 `.git`）全量 **939 passed in 105.06s**（`sha256(/tmp/final_archive_full.txt)=217c04055d85ce127dd0827946aa28c4911d8c4690689c21b3a49a101575b823`）；strict **939 passed in 102.82s，0 skipped**（`sha256(/tmp/final_archive_strict.txt)=6b905e37de20d6c7379ab8d7ce8787f0ab057d43c4aebd5f12fb0240e8cc3804`）；回归测试 `test_collector_is_portable_in_a_no_git_archive_copy` 通过；旧失败 `test_collects_executed_pass_with_full_index_entry` 现接受 `git_available=false` |
+| **P1-1** clean archive 可移植性 | collector 无 `.git` 时记录 `git_sha=null`/`git_available=false`/`git_sha_source="unavailable"`；支持显式 `--git-sha/--tree-sha`；新增 no-git 回归测试；文档 §3.1；review doc 中引用旧短语触发 PR1 docs lint，守卫已改为忽略引号内历史引用（final SHA `8f8d00e…`） | `git archive 8f8d00e… \| tar -x`（无 `.git`）全量 **939 passed in 104.85s**（`sha256(/tmp/final_archive2_full.txt)=6681834dea5c3bfd28e077da48c9eeb757e252d522614ed628b2e952a3be8228`）；strict **939 passed in 102.93s，0 skipped**（`sha256(/tmp/final_archive2_strict.txt)=b34c2ab979df3e8db3a0b9080e3f9da107323a429bd6a53cc5bf417132203f07`）；回归测试 `test_collector_is_portable_in_a_no_git_archive_copy` 通过；旧失败 `test_collects_executed_pass_with_full_index_entry` 现接受 `git_available=false` |
 | **P1-2** 证据绑定最终树 | 生成前 clean worktree（`git status --porcelain` 空）；生成 SHA/tree 记入 README+§13；append-only 新增 11 条（38 条总），旧 27 条字节保留；manifest `implementation_commit=12f6290…` | generation proof `sha256(/tmp/p12_generation_proof.txt)=d1a2070a53a85f5070f0f3dda629e0f4f597bdf84cbb5137a41a68de5ff05125`；`audit-index.jsonl` `a11ce429…`（38 条；old-27 prefix `4b9a0d0e…` 不变）；`audit-index.json` `8db87530…`；B5 summary `a07cfe7e…`；新条目 28–38 全部 `EXECUTED_PASS`、`git_sha=9c383e5…`、`tree_sha=333828d…`、generation-start clean=true；evidence commit `580be70…` |
 | **P1-3** 报告数字/哈希/状态勘误 | X-01 改实测 268 files（268 A/0M/0D vs main；209 vs M1-A）；B4 demo 改 `b3231658…`/513 行/15,340B；分项计数改 939=913+26（B5 11 + collector 15）且合计一致；PR4 P1 标记“已合入”；PR1 P1-2 分栏、P1-3 脚本已接线/`.github` job `NOT_CONFIGURED`；clean archive 实测更新；PR5 最终评审状态更新 | 本报告 §3/§3.4/§5/§6/§7/§9/§13；collector `X-01-scope-diff` raw 实测 268/0 protected；`demo_b4` double-run hash `b3231658…`；`--collect-only` 939 |
 
