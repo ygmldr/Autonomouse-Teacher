@@ -549,6 +549,7 @@ REVIEW/GOAL_COMPLETED(final_reason)
 ```
 
 - 所有事件：`event_id` 幂等、`seq` 单调、`created_at` 固定时钟、payload 含 `schema_version/domain/domain_version/policy_version`；隐藏内容绝不入 payload。
+- **实现一致性（PARTIAL，B4-05）**：上述 payload 版本字段为设计目标；当前实现只对 session/vertical/plan policy 三类版本做 MAP-E12/E13 fail-closed，**event-level `schema_version` 的消费/拒绝为 `NOT_IMPLEMENTED`**（见 `docs/M1_B_FINAL_INDEPENDENT_REVIEW.md` §8 B4-05 / `docs/M1_B_EVALUATION_REPORT.md` §7）。不得把本行写成已实现 PASS。
 - 事件表和字段规范见 §6。
 
 ### 5.6 教学理由（Reason codes）

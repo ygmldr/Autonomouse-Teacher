@@ -391,14 +391,19 @@ with defaults, new protocols/helpers), must be recorded in
 | Tests | `tests/m1_teacher/` | 536 tests (268+100+50+75+43) |
 | Evidence | `docs/m1a_evidence/*.jsonl`, `e2e_summary.json` | reproducible E2E traces (no wall clock, no hidden material) |
 
-## 14. Persistence schema (SQLite, `schema_meta.version == 1`)
+## 14. Persistence schema (SQLite; `schema_meta.version` = 2 since B-PR3)
 
 Implemented in `m1_teacher/learner/repository.py`; the event log is the source of truth and the
 materialised snapshot is a rebuildable cache validated by `LearningHistory.verify_rebuild`.
 
+B-PR3 adds an **additive** v2 schema (`SCHEMA_VERSION = 2`): a `result_scopes` table + two indexes
+and a v1→v2 migration that backfills scope metadata from legacy events. Existing v1 tables/
+columns are unchanged; v2 databases are forward-only (older builds fail closed).
+
 | Table | Key columns | Purpose |
 |---|---|---|
 | `schema_meta` | `version` | fail-closed schema version check |
+| `result_scopes` | `result_id` PK, `scope_version`, `learner_id`, `session_id`, `item_id`, `turn_index`, `request_digest`, `status`, `result_event_id`, `created_at`, `updated_at` | scoped idempotency index (B-PR3, additive v2) |
 | `learners` | `learner_id` PK, `created_at`, `updated_at` | learner registry |
 | `snapshots` | `learner_id` PK→learners, `revision`, `updated_at`, `snapshot_json` | materialised mastery/error state |
 | `history_events` | `event_id` PK, `learner_id`, `session_id`, `seq`, `event_type`, `payload_json`, `created_at`, `UNIQUE(learner_id, seq)` | append-only learning history (idempotent on `event_id`) |
