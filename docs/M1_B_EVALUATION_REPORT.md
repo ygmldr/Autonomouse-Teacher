@@ -26,7 +26,7 @@
 | B-PR3 幂等评审 | `PASS_WITH_ACTIONS`；B3-01/02 + B-Q3 `VERIFIED`；review-fix tree 已合入（legacy digest/公共 API scoped 查找等） | `REVIEWER_REPORTED`：`docs/M1_B_PR3_REVIEW.md`；final tree 含修复 |
 | B-PR4 独立评审 | `PASS_WITH_ACTIONS`（P0=0 / P1=3 / P2=7）；**P1 修复已合入 final tree**（`49cf45b`/`1de6ae6`）：P1-1 会话计划持久化、P1-2 hidden reader 守卫、P1-3 版本拒绝/事件schema 部分（PARTIAL 明示）；B4-01/02/03 均 `VERIFIED`（E2E-MOCK；B4-02 以重启计划持久化修复为前提） | `REVIEWER_REPORTED`：`docs/M1_B_PR4_REVIEW.md` + `M1_B_PR4_REVIEW_RESPONSE.md`；final tree 含修复 |
 | B-PR5 统一 E2E/评测 | Owner 最终树实测完成（本报告）；`B5-01` 最终独立评审 **`PENDING`（Lead 指派）** | Owner 最终树证据包；独立评审未出 |
-| X-01 无范围漂移 | Owner 侧 `DETERMINISTIC` 检查通过（final diff vs main = **268 files（268 A/0 M/0 D）**；相对 M1-A = **209 files**；保护路径 **0 命中**） | collector entry `X-01-scope-diff`（final 条目）；Reviewer 需重跑 |
+| X-01 无范围漂移 | Owner 侧 `DETERMINISTIC` 检查通过：**最终树 vs main = 302 files（302 A/0 M/0 D）**，vs M1-A = **243 files**；Reviewer 在 `c3eb736` 实测为 268 files（之后 P1 证据/文档/P1 修复新增 34 文件），保护路径 **0 命中** | collector entry `X-01-scope-diff`（final 条目）；Reviewer 需重跑 |
 | X-02 无 Key/网络/付费 | Owner 侧 `DETERMINISTIC` 检查通过（网络 import **0**；`autoteacher_m0` 仅隔离断言/注释；无 Key/Provider；LiveGate 仍 BLOCKED） | collector entry `X-02-network-scan`（final 条目）；Reviewer 需重跑 |
 | **最终独立评审（B5-01）** | **`PASS_WITH_ACTIONS`**（P0=0 / P1=3 / P2=6；报告 `docs/M1_B_FINAL_INDEPENDENT_REVIEW.md`，待 Reviewer commit 合入）；P1-1/P1-2/P1-3 修复见 §3.4/§8.1/§13 | `REVIEWER_REPORTED` + 本报告修复证据 |
 | **Owner 侧结论（修复后）** | **`PASS_WITH_ACTIONS → P1_CLOSED_PENDING_DELTA_REVIEW`**（不预填无条件 PASS；delta Reviewer 关闭 P1 后才允许 `PASS_FOR_M1B_OFFLINE_INTEGRATION_SCOPE`） | 本报告 §10/§11/§13 |
@@ -150,7 +150,7 @@ B5 统一 E2E：`pytest test_b5_e2e.py -q` → **11 passed in 13.04s**。
 
 | case_id | 检查 | 命令 | 实测（Owner） | 标签 |
 |---|---|---|---|---|
-| X-01 | M1 提交不修改 `src/autoteacher_m0/`、`security/`、`bridge/`、`config/g*`、`scripts/g4*`、LiveGate；A 线不改 M1 | `git diff --name-only 3e7afee..HEAD` + 保护前缀 grep；`git diff --name-only main...HEAD` | **268 files（268 A/0 M/0 D）vs main；209 files vs M1-A**；保护路径 **0 命中** | `DETERMINISTIC` + `OWNER_REPORTED`；Reviewer 重跑 |
+| X-01 | M1 提交不修改 `src/autoteacher_m0/`、`security/`、`bridge/`、`config/g*`、`scripts/g4*`、LiveGate；A 线不改 M1 | `git diff --name-only 3e7afee..HEAD` + 保护前缀 grep；`git diff --name-only main...HEAD` | **final tree：302 files（302 A/0 M/0 D）vs main；243 files vs M1-A**（reviewer 在 `c3eb736` 实测 268；P1 修复/证据新增 34）；保护路径 **0 命中** | `DETERMINISTIC` + `OWNER_REPORTED`；Reviewer 重跑 |
 | X-02 | 无真实 Key/外部网络/付费请求；LiveGate 仍 BLOCKED | AST 扫描 `m1_teacher/ tests/m1_teacher/ scripts/m1b/`；socket 阻断 demo/cli 测试 | 网络 import **0**；`autoteacher_m0` 仅隔离断言/注释（0 import）；无 Key/Provider；LiveGate 未变 | `DETERMINISTIC` + `OWNER_REPORTED`；Reviewer 重跑 |
 
 ## 8. 证据包（最终树）
@@ -244,6 +244,6 @@ sha256sum docs/m1b_evidence/e2e_b5_*.jsonl docs/m1b_evidence/e2e_b5_summary.json
 |---|---|---|
 | **P1-1** clean archive 可移植性 | collector 无 `.git` 时记录 `git_sha=null`/`git_available=false`/`git_sha_source="unavailable"`；支持显式 `--git-sha/--tree-sha`；新增 no-git 回归测试；文档 §3.1；review doc 中引用旧短语触发 PR1 docs lint，守卫已改为忽略引号内历史引用（final SHA `8f8d00e…`） | `git archive 8f8d00e… \| tar -x`（无 `.git`）全量 **939 passed in 104.85s**（`sha256(/tmp/final_archive2_full.txt)=6681834dea5c3bfd28e077da48c9eeb757e252d522614ed628b2e952a3be8228`）；strict **939 passed in 102.93s，0 skipped**（`sha256(/tmp/final_archive2_strict.txt)=b34c2ab979df3e8db3a0b9080e3f9da107323a429bd6a53cc5bf417132203f07`）；回归测试 `test_collector_is_portable_in_a_no_git_archive_copy` 通过；旧失败 `test_collects_executed_pass_with_full_index_entry` 现接受 `git_available=false` |
 | **P1-2** 证据绑定最终树 | 生成前 clean worktree（`git status --porcelain` 空）；生成 SHA/tree 记入 README+§13；append-only 新增 11 条（38 条总），旧 27 条字节保留；manifest `implementation_commit=12f6290…` | generation proof `sha256(/tmp/p12_generation_proof.txt)=d1a2070a53a85f5070f0f3dda629e0f4f597bdf84cbb5137a41a68de5ff05125`；`audit-index.jsonl` `a11ce429…`（38 条；old-27 prefix `4b9a0d0e…` 不变）；`audit-index.json` `8db87530…`；B5 summary `a07cfe7e…`；新条目 28–38 全部 `EXECUTED_PASS`、`git_sha=9c383e5…`、`tree_sha=333828d…`、generation-start clean=true；evidence commit `580be70…` |
-| **P1-3** 报告数字/哈希/状态勘误 | X-01 改实测 268 files（268 A/0M/0D vs main；209 vs M1-A）；B4 demo 改 `b3231658…`/513 行/15,340B；分项计数改 939=913+26（B5 11 + collector 15）且合计一致；PR4 P1 标记“已合入”；PR1 P1-2 分栏、P1-3 脚本已接线/`.github` job `NOT_CONFIGURED`；clean archive 实测更新；PR5 最终评审状态更新 | 本报告 §3/§3.4/§5/§6/§7/§9/§13；collector `X-01-scope-diff` raw 实测 268/0 protected；`demo_b4` double-run hash `b3231658…`；`--collect-only` 939 |
+| **P1-3** 报告数字/哈希/状态勘误 | X-01：reviewer 树 `c3eb736` 实测 268 files（268 A/0M/0D vs main；209 vs M1-A）；**final tree（P1 证据/修复后）实测 302 files / 243 vs M1-A，保护 0**；B4 demo 改 `b3231658…`/513 行/15,340B；分项计数改 939=913+26（B5 11 + collector 15）且合计一致；PR4 P1 标记“已合入”；PR1 P1-2 分栏、P1-3 脚本已接线/`.github` job `NOT_CONFIGURED`；clean archive 实测更新；PR5 最终评审状态更新 | 本报告 §3/§3.4/§5/§6/§7/§9/§13；collector `X-01-scope-diff` raw 实测 268/0 protected；`demo_b4` double-run hash `b3231658…`；`--collect-only` 939 |
 
 > 残余：最终独立评审为 `PASS_WITH_ACTIONS`；本次仅 Owner 侧关闭 P1 证据，**delta Reviewer 复核结论 `PENDING`**；实现报告数字由 m1a-contracts 后续更新（Lead 指派）。不得据此声称无条件 `PASS_FOR_M1B_OFFLINE_INTEGRATION_SCOPE`。
